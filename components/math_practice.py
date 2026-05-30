@@ -3,8 +3,14 @@
 import streamlit as st
 
 
-def render_math_practice(practice_id: str) -> None:
+def _k(key_prefix: str, suffix: str) -> str:
+    """Build a unique Streamlit widget key."""
+    return f"{key_prefix}_{suffix}" if key_prefix else suffix
+
+
+def render_math_practice(practice_id: str, key_prefix: str = "") -> None:
     """Render a hands-on math widget by practice type."""
+    prefix = key_prefix or practice_id or "practice"
     renderers = {
         "ev_bet": _practice_ev_bet,
         "ev_pot_odds": _practice_ev_pot_odds,
@@ -18,20 +24,20 @@ def render_math_practice(practice_id: str) -> None:
     }
     fn = renderers.get(practice_id)
     if fn:
-        fn()
+        fn(key_prefix=prefix)
     else:
         st.caption("Practice widget coming soon.")
 
 
-def _practice_ev_bet() -> None:
+def _practice_ev_bet(key_prefix: str = "ev_bet") -> None:
     st.markdown("**Is this bet worth it?** Enter your numbers and calculate expected value.")
     c1, c2, c3 = st.columns(3)
     with c1:
-        win_pct = st.number_input("Your win probability (%)", 10, 90, 55, key="pr_ev_wp")
+        win_pct = st.number_input("Your win probability (%)", 10, 90, 55, key=_k(key_prefix, "pr_ev_wp"))
     with c2:
-        odds = st.number_input("Decimal odds", 1.1, 5.0, 1.90, step=0.05, key="pr_ev_odds")
+        odds = st.number_input("Decimal odds", 1.1, 5.0, 1.90, step=0.05, key=_k(key_prefix, "pr_ev_odds"))
     with c3:
-        stake = st.number_input("Stake ($)", 10, 500, 100, key="pr_ev_stake")
+        stake = st.number_input("Stake ($)", 10, 500, 100, key=_k(key_prefix, "pr_ev_stake"))
 
     win_p = win_pct / 100
     profit = stake * (odds - 1)
@@ -50,15 +56,15 @@ def _practice_ev_bet() -> None:
         st.warning("Negative EV — unfavorable long-term.")
 
 
-def _practice_ev_pot_odds() -> None:
+def _practice_ev_pot_odds(key_prefix: str = "ev_pot_odds") -> None:
     st.markdown("**Pot odds vs your equity** — the core poker math check.")
     c1, c2, c3 = st.columns(3)
     with c1:
-        pot = st.number_input("Pot before call ($)", 20, 500, 150, key="pr_po_pot")
+        pot = st.number_input("Pot before call ($)", 20, 500, 150, key=_k(key_prefix, "pr_po_pot"))
     with c2:
-        call = st.number_input("Call cost ($)", 5, 200, 60, key="pr_po_call")
+        call = st.number_input("Call cost ($)", 5, 200, 60, key=_k(key_prefix, "pr_po_call"))
     with c3:
-        equity = st.number_input("Your win probability (%)", 5, 95, 38, key="pr_po_eq")
+        equity = st.number_input("Your win probability (%)", 5, 95, 38, key=_k(key_prefix, "pr_po_eq"))
 
     pot_odds = call / (pot + call)
     eq = equity / 100
@@ -73,15 +79,15 @@ def _practice_ev_pot_odds() -> None:
         st.warning("Equity below pot odds — fold unless implied odds help.")
 
 
-def _practice_shrinkage() -> None:
+def _practice_shrinkage(key_prefix: str = "shrinkage") -> None:
     st.markdown("**Regression to the mean** — adjust a small-sample win rate.")
     c1, c2 = st.columns(2)
     with c1:
-        wins = st.number_input("Wins", 0, 50, 8, key="pr_sh_w")
-        games = st.number_input("Games played", 1, 100, 10, key="pr_sh_g")
+        wins = st.number_input("Wins", 0, 50, 8, key=_k(key_prefix, "pr_sh_w"))
+        games = st.number_input("Games played", 1, 100, 10, key=_k(key_prefix, "pr_sh_g"))
     with c2:
-        league_avg = st.slider("League average win rate (%)", 30, 70, 50, key="pr_sh_avg")
-        prior = st.slider("Prior strength (games)", 5, 40, 15, key="pr_sh_prior")
+        league_avg = st.slider("League average win rate (%)", 30, 70, 50, key=_k(key_prefix, "pr_sh_avg"))
+        prior = st.slider("Prior strength (games)", 5, 40, 15, key=_k(key_prefix, "pr_sh_prior"))
 
     raw = wins / games
     adjusted = (wins + prior * league_avg / 100) / (games + prior)
@@ -91,13 +97,15 @@ def _practice_shrinkage() -> None:
     st.caption(f"Pulled {abs(raw - adjusted):.1%} toward the league average because the sample is small.")
 
 
-def _practice_forecast_slope() -> None:
+def _practice_forecast_slope(key_prefix: str = "forecast_slope") -> None:
     st.markdown("**Fit a trend by hand** — enter two points and see the slope.")
     c1, c2 = st.columns(2)
     with c1:
-        t1, y1 = st.number_input("Time 1", 0, 100, 0, key="pr_fs_t1"), st.number_input("Value 1", 0, 200, 50, key="pr_fs_y1")
+        t1 = st.number_input("Time 1", 0, 100, 0, key=_k(key_prefix, "pr_fs_t1"))
+        y1 = st.number_input("Value 1", 0, 200, 50, key=_k(key_prefix, "pr_fs_y1"))
     with c2:
-        t2, y2 = st.number_input("Time 2", 1, 100, 10, key="pr_fs_t2"), st.number_input("Value 2", 0, 200, 80, key="pr_fs_y2")
+        t2 = st.number_input("Time 2", 1, 100, 10, key=_k(key_prefix, "pr_fs_t2"))
+        y2 = st.number_input("Value 2", 0, 200, 80, key=_k(key_prefix, "pr_fs_y2"))
 
     if t2 != t1:
         slope = (y2 - y1) / (t2 - t1)
@@ -111,13 +119,13 @@ def _practice_forecast_slope() -> None:
         st.warning("Pick two different time points.")
 
 
-def _practice_sir_rates() -> None:
+def _practice_sir_rates(key_prefix: str = "sir_rates") -> None:
     st.markdown("**Estimate outbreak speed** — what do β and γ mean?")
     c1, c2 = st.columns(2)
     with c1:
-        beta = st.slider("Transmission rate β", 0.1, 1.0, 0.45, key="pr_sir_b")
+        beta = st.slider("Transmission rate β", 0.1, 1.0, 0.45, key=_k(key_prefix, "pr_sir_b"))
     with c2:
-        gamma = st.slider("Recovery rate γ", 0.05, 0.5, 0.12, key="pr_sir_g")
+        gamma = st.slider("Recovery rate γ", 0.05, 0.5, 0.12, key=_k(key_prefix, "pr_sir_g"))
 
     r0 = beta / gamma if gamma > 0 else 0
     st.markdown(f"**Basic reproduction number R₀ ≈ {r0:.2f}**")
@@ -128,15 +136,15 @@ def _practice_sir_rates() -> None:
         st.success(f"R₀ < 1 ({r0:.2f}) — outbreak should die out.")
 
 
-def _practice_tumor_growth() -> None:
+def _practice_tumor_growth(key_prefix: str = "tumor_growth") -> None:
     st.markdown("**Will treatment win?** Compare growth vs treatment rates.")
     c1, c2, c3 = st.columns(3)
     with c1:
-        size0 = st.number_input("Initial size", 1.0, 20.0, 5.0, key="pr_tg_s")
+        size0 = st.number_input("Initial size", 1.0, 20.0, 5.0, key=_k(key_prefix, "pr_tg_s"))
     with c2:
-        growth = st.slider("Growth rate", 0.01, 0.25, 0.08, key="pr_tg_r")
+        growth = st.slider("Growth rate", 0.01, 0.25, 0.08, key=_k(key_prefix, "pr_tg_r"))
     with c3:
-        treat = st.slider("Treatment effect", 0.0, 0.25, 0.06, key="pr_tg_d")
+        treat = st.slider("Treatment effect", 0.0, 0.25, 0.06, key=_k(key_prefix, "pr_tg_d"))
 
     net = growth - treat
     size_10 = size0 * (2.71828 ** (net * 10))
@@ -152,15 +160,15 @@ def _practice_tumor_growth() -> None:
         st.success("Treatment dominates — tumor shrinks over time.")
 
 
-def _practice_accumulation() -> None:
+def _practice_accumulation(key_prefix: str = "accumulation") -> None:
     st.markdown("**Small changes add up** — compound a rate over time.")
     c1, c2, c3 = st.columns(3)
     with c1:
-        start = st.number_input("Starting value", 1.0, 1000.0, 100.0, key="pr_ac_s")
+        start = st.number_input("Starting value", 1.0, 1000.0, 100.0, key=_k(key_prefix, "pr_ac_s"))
     with c2:
-        rate = st.slider("Per-period change (%)", -20, 20, 5, key="pr_ac_r") / 100
+        rate = st.slider("Per-period change (%)", -20, 20, 5, key=_k(key_prefix, "pr_ac_r")) / 100
     with c3:
-        periods = st.number_input("Periods", 1, 100, 20, key="pr_ac_n")
+        periods = st.number_input("Periods", 1, 100, 20, key=_k(key_prefix, "pr_ac_n"))
 
     final = start * ((1 + rate) ** periods)
     st.markdown(f"**After {periods} periods:** {final:.2f}")
@@ -168,10 +176,10 @@ def _practice_accumulation() -> None:
     st.caption("This is discrete compounding — the same idea behind drug decay, tumor growth, and interest.")
 
 
-def _practice_gradient_step() -> None:
+def _practice_gradient_step(key_prefix: str = "gradient_step") -> None:
     st.markdown("**One gradient descent step** on f(x) = x².")
-    x = st.slider("Current x", -5.0, 5.0, 3.0, key="pr_gd_x")
-    lr = st.slider("Learning rate α", 0.01, 1.0, 0.1, key="pr_gd_lr")
+    x = st.slider("Current x", -5.0, 5.0, 3.0, key=_k(key_prefix, "pr_gd_x"))
+    lr = st.slider("Learning rate α", 0.01, 1.0, 0.1, key=_k(key_prefix, "pr_gd_lr"))
 
     fx = x ** 2
     grad = 2 * x
@@ -185,13 +193,13 @@ def _practice_gradient_step() -> None:
     st.latex(r"x_{new} = x - \alpha \cdot \frac{df}{dx}")
 
 
-def _practice_probability_compare() -> None:
+def _practice_probability_compare(key_prefix: str = "probability_compare") -> None:
     st.markdown("**Compare two probabilities** — which outcome is more likely?")
     c1, c2 = st.columns(2)
     with c1:
-        p_a = st.slider("Outcome A probability (%)", 0, 100, 30, key="pr_pc_a")
+        p_a = st.slider("Outcome A probability (%)", 0, 100, 30, key=_k(key_prefix, "pr_pc_a"))
     with c2:
-        p_b = st.slider("Outcome B probability (%)", 0, 100, 45, key="pr_pc_b")
+        p_b = st.slider("Outcome B probability (%)", 0, 100, 45, key=_k(key_prefix, "pr_pc_b"))
 
     st.markdown(f"**A:** {p_a}% · **B:** {p_b}% · **Neither:** {100 - p_a - p_b}%")
     if p_a + p_b > 100:

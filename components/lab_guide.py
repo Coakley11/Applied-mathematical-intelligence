@@ -53,7 +53,11 @@ def render_guided_tool(runner_id: str) -> None:
         st.markdown(guide["math_behind"])
 
     with st.expander("Try the math yourself", expanded=False):
-        render_math_practice(guide.get("practice_id", ""))
+        practice_id = guide.get("practice_id", "")
+        render_math_practice(
+            practice_id,
+            key_prefix=f"{runner_id}_{practice_id}",
+        )
 
     with st.expander("Portfolio / advanced project idea", expanded=False):
         st.markdown(guide.get("portfolio_idea", "Build a Python notebook extending this simulation with real data."))
