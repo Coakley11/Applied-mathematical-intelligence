@@ -22,14 +22,18 @@ def main() -> int:
         errors.append("py_compile: streamlit_app.py")
 
     try:
+        from components.home import render_home  # noqa: F401
+        from components.labs import render_lab_page, render_labs_hub  # noqa: F401
         from components.layout import render_domain_page, render_portfolio_lab, render_theme_page  # noqa: F401
         from components.thinking import render_mathematical_thinking  # noqa: F401
         from content.case_studies import CASE_STUDIES
         from content.domains import DOMAINS, DOMAIN_NAMES
+        from content.interactive_labs import INTERACTIVE_LABS, LAB_NAMES
         from content.mathematical_thinking import MATHEMATICAL_THINKING
         from content.portfolio import PORTFOLIO_PROBLEMS
         from content.themes import THEMES, THEME_NAMES
         from data.registry import DATA_SOURCES, list_sources
+        from simulations.labs import LAB_RUNNERS
         from simulations.registry import SIMULATION_RUNNERS, run_simulation  # noqa: F401
     except Exception as exc:
         errors.append(f"import: {exc}")
@@ -37,6 +41,18 @@ def main() -> int:
         for e in errors:
             print(f"  - {e}")
         return 1
+
+    # Interactive labs
+    if len(LAB_NAMES) != 6:
+        errors.append(f"Expected 6 labs, got {len(LAB_NAMES)}")
+    for name in LAB_NAMES:
+        lab = INTERACTIVE_LABS[name]
+        for key in ("goal", "math_idea", "skill", "practice_challenge", "portfolio_project", "runner_id"):
+            if not lab.get(key):
+                errors.append(f"Lab '{name}' missing key: {key}")
+        rid = lab.get("runner_id")
+        if rid not in LAB_RUNNERS or not callable(LAB_RUNNERS[rid]):
+            errors.append(f"Lab '{name}' bad runner_id: {rid}")
 
     # Sidebar sections content
     if len(THEME_NAMES) != len(THEMES):
@@ -87,6 +103,7 @@ def main() -> int:
 
     print("SMOKE PASSED")
     print(f"  commit check: imports OK")
+    print(f"  interactive labs: {len(LAB_NAMES)}")
     print(f"  domains: {len(DOMAIN_NAMES)}")
     print(f"  simulations: {len(SIMULATION_RUNNERS)}")
     print(f"  case study library: {len(CASE_STUDIES)}")

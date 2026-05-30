@@ -4,6 +4,7 @@ import importlib
 
 import streamlit as st
 
+from components.labs import render_page_summary
 from data.registry import describe_source
 
 
@@ -58,6 +59,13 @@ def render_theme_page(theme: dict, depth: str) -> None:
 
     render_depth_notice(depth)
 
+    render_page_summary(
+        what=theme["tagline"].replace("**", ""),
+        why=theme["why_matters"].replace("**", "")[:240],
+        do_here="Read professional use cases, explore examples, and study how AI inherits this system.",
+        skill="Quantitative reasoning — connecting abstract math to real predictions and decisions.",
+    )
+
     st.subheader("Why This Mathematical Idea Matters")
     st.markdown(theme["why_matters"])
 
@@ -104,6 +112,13 @@ def render_domain_page(
     st.markdown(domain["tagline"])
     render_depth_notice(depth)
     render_lens_highlight(domain.get("primary_lenses", []), active_lens)
+
+    render_page_summary(
+        what=domain["tagline"].replace("**", ""),
+        why=domain["why_matters"].replace("**", "")[:240],
+        do_here="Run the simulation below, review case studies, and explore portfolio project ideas.",
+        skill=f"Applied {', '.join(domain.get('primary_lenses', ['quantitative'])[:2]).lower()} modeling for professional decisions.",
+    )
 
     st.subheader("Why This Matters")
     st.markdown(domain["why_matters"])

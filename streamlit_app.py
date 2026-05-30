@@ -3,10 +3,12 @@
 import streamlit as st
 
 from components.home import render_home
+from components.labs import render_lab_page, render_labs_hub
 from components.layout import render_domain_page, render_portfolio_lab, render_theme_page
 from components.styles import inject_platform_styles
 from components.thinking import render_mathematical_thinking
 from content.domains import DOMAINS, DOMAIN_NAMES
+from content.interactive_labs import LAB_NAMES
 from content.mathematical_thinking import MATHEMATICAL_THINKING
 from content.platform_meta import VERSION
 from content.portfolio import PORTFOLIO_PROBLEMS
@@ -33,6 +35,7 @@ LENS_FILTER = {
 
 NAV_OPTIONS = [
     "Home",
+    "Interactive Labs",
     "Mathematical Thinking",
     "Mathematical Themes",
     "Applied Domains",
@@ -40,6 +43,7 @@ NAV_OPTIONS = [
 ]
 NAV_LABELS = {
     "Home": "Home — platform overview",
+    "Interactive Labs": "Interactive Labs — hands-on math reasoning",
     "Mathematical Thinking": "Mathematical Thinking — how quantitative intelligence works",
     "Mathematical Themes": "Mathematical Themes — deep math systems",
     "Applied Domains": "Applied Domains — real-world professional fields",
@@ -47,6 +51,7 @@ NAV_LABELS = {
 }
 NAV_HELP = {
     "Home": "Landing page, featured domains, and orientation.",
+    "Interactive Labs": "Poker, sports EV, finance, forecasting, optimization, and AI training — with live controls.",
     "Mathematical Thinking": "Cross-domain philosophy: modeling, uncertainty, optimization, and AI.",
     "Mathematical Themes": "Calculus, probability, statistics, optimization, simulation, and AI as systems.",
     "Applied Domains": "Finance, medicine, robotics, climate, elections, cryptography, and more.",
@@ -64,7 +69,7 @@ view_mode = st.sidebar.radio(
     "Section",
     NAV_OPTIONS,
     format_func=lambda x: NAV_LABELS[x],
-    help="Themes = theory; Domains = practice; Thinking = unified framework; Portfolio = projects.",
+    help="Labs = hands-on; Themes = theory; Domains = practice; Portfolio = projects.",
 )
 
 st.sidebar.markdown(
@@ -85,8 +90,12 @@ depth = st.sidebar.radio(
 )
 
 selection = None
+lab_selection = None
 
-if view_mode == "Mathematical Themes":
+if view_mode == "Interactive Labs":
+    st.sidebar.markdown("**Select a lab**")
+    lab_selection = st.sidebar.selectbox("Lab", LAB_NAMES, label_visibility="collapsed")
+elif view_mode == "Mathematical Themes":
     st.sidebar.markdown("**Select a mathematical system**")
     selection = st.sidebar.selectbox("Theme", THEME_NAMES, label_visibility="collapsed")
 elif view_mode == "Applied Domains":
@@ -114,6 +123,12 @@ st.sidebar.caption("Develop on `dev` · release on `main`")
 
 if view_mode == "Home":
     render_home()
+
+elif view_mode == "Interactive Labs":
+    if lab_selection:
+        render_lab_page(lab_selection)
+    else:
+        render_labs_hub()
 
 elif view_mode == "Mathematical Thinking":
     render_mathematical_thinking(MATHEMATICAL_THINKING)

@@ -5,6 +5,7 @@ import html
 import streamlit as st
 
 from content.domains import DOMAINS, DOMAIN_NAMES
+from content.interactive_labs import INTERACTIVE_LABS, LAB_NAMES, NUM_LABS
 from content.platform_meta import (
     FEATURED_DOMAINS,
     NUM_CASE_STUDY_LIBRARY,
@@ -29,55 +30,98 @@ def _card(title: str, badge: str, body: str, accent: str = "ami-card-accent") ->
     """
 
 
-def render_home() -> None:
-    purpose = (
-        "Applied Mathematical Intelligence shows how calculus, probability, statistics, "
-        "optimization, simulation, and AI are used to model, predict, and improve real-world systems."
-    )
+def _lab_card(name: str) -> str:
+    lab = INTERACTIVE_LABS[name]
+    return f"""
+    <div class="ami-card ami-card-lab">
+        <span class="ami-lab-icon">{html.escape(lab["icon"])}</span>
+        <span class="ami-badge">{html.escape(lab["badge"])}</span>
+        <h4>{html.escape(name)}</h4>
+        <p>{html.escape(lab["tagline"])}</p>
+    </div>
+    """
 
+
+def render_home() -> None:
     st.markdown(
-        f"""
+        """
         <div class="ami-hero">
             <h1>Applied Mathematical Intelligence</h1>
-            <p class="ami-tagline">{html.escape(purpose)}</p>
+            <p class="ami-tagline">See how math powers real-world prediction, risk, and decision-making.</p>
             <p class="ami-purpose">
-                A quantitative reasoning laboratory — not a textbook. Explore how professional
-                fields use mathematics to make predictions, manage risk, and build intelligent systems.
+                A hands-on quantitative laboratory — explore themes, run interactive labs,
+                and study how professionals use mathematics in finance, medicine, AI, and beyond.
             </p>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    # Platform stats
     st.markdown(
         f"""
         <div class="ami-stat-row">
-            <div class="ami-stat"><div class="ami-stat-num">{NUM_THEMES}</div><div class="ami-stat-label">Mathematical themes</div></div>
+            <div class="ami-stat"><div class="ami-stat-num">{NUM_LABS}</div><div class="ami-stat-label">Interactive labs</div></div>
+            <div class="ami-stat"><div class="ami-stat-num">{NUM_THEMES}</div><div class="ami-stat-label">Math themes</div></div>
             <div class="ami-stat"><div class="ami-stat-num">{NUM_DOMAINS}</div><div class="ami-stat-label">Applied domains</div></div>
-            <div class="ami-stat"><div class="ami-stat-num">{NUM_SIMULATIONS}</div><div class="ami-stat-label">Simulation engines</div></div>
-            <div class="ami-stat"><div class="ami-stat-num">{NUM_DOMAINS_WITH_CASE_STUDIES}</div><div class="ami-stat-label">Domains w/ case studies</div></div>
+            <div class="ami-stat"><div class="ami-stat-num">{NUM_SIMULATIONS}</div><div class="ami-stat-label">Simulations</div></div>
             <div class="ami-stat"><div class="ami-stat-num">{NUM_PORTFOLIO}</div><div class="ami-stat-label">Portfolio projects</div></div>
         </div>
-        <p style="text-align:center;color:#64748b;font-size:0.85rem;margin-top:-0.5rem;">Platform version {VERSION} · {NUM_CASE_STUDY_LIBRARY} professional case studies in library</p>
+        <p style="text-align:center;color:#64748b;font-size:0.85rem;margin-top:-0.5rem;">
+            v{VERSION} · {NUM_DOMAINS_WITH_CASE_STUDIES} domains with case studies · {NUM_CASE_STUDY_LIBRARY} in library
+        </p>
         """,
         unsafe_allow_html=True,
     )
 
+    # Explore navigation
+    st.markdown('<p class="ami-section-title">Choose what to explore</p>', unsafe_allow_html=True)
+    st.markdown(
+        '<p class="ami-section-sub">Start with Interactive Labs for hands-on practice, or dive into themes and domains.</p>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        """
+        <div class="ami-nav-grid">
+            <div class="ami-nav-tile"><div class="ami-nav-icon">🧪</div><h5>Interactive Labs</h5><p>Poker, finance, forecasting, optimization, AI training</p></div>
+            <div class="ami-nav-tile"><div class="ami-nav-icon">🧠</div><h5>Mathematical Thinking</h5><p>How quantitative intelligence works across fields</p></div>
+            <div class="ami-nav-tile"><div class="ami-nav-icon">📐</div><h5>Mathematical Themes</h5><p>Calculus, probability, stats, optimization, simulation, AI</p></div>
+            <div class="ami-nav-tile"><div class="ami-nav-icon">🌍</div><h5>Applied Domains</h5><p>Finance, epidemiology, robotics, climate, and 28+ more</p></div>
+            <div class="ami-nav-tile"><div class="ami-nav-icon">💼</div><h5>Portfolio Lab</h5><p>Excel, Python, and interview-ready project specs</p></div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # Interactive Labs highlight
+    st.markdown('<p class="ami-section-title">Interactive Labs — start here</p>', unsafe_allow_html=True)
+    st.markdown(
+        '<p class="ami-section-sub">Make predictions, test strategies, and compare decisions with real controls.</p>',
+        unsafe_allow_html=True,
+    )
+
+    lab_rows = [LAB_NAMES[i : i + 3] for i in range(0, len(LAB_NAMES), 3)]
+    for row in lab_rows:
+        cols = st.columns(len(row))
+        for col, name in zip(cols, row):
+            with col:
+                st.markdown(_lab_card(name), unsafe_allow_html=True)
+
+    st.caption("Open **Interactive Labs** in the sidebar to run any lab.")
+
     # Six systems
     st.markdown('<p class="ami-section-title">Six Mathematical Intelligence Systems</p>', unsafe_allow_html=True)
     st.markdown(
-        '<p class="ami-section-sub">The deep mathematical structures that power modern technology and high-stakes decisions.</p>',
+        '<p class="ami-section-sub">The core structures behind modern prediction and decision systems.</p>',
         unsafe_allow_html=True,
     )
 
     theme_cards = [
-        ("Accumulation Systems", "Calculus", "Continuous change, rates, integrals, compounding small effects into large outcomes."),
-        ("Uncertainty Systems", "Probability", "Risk, Bayes, expected value, and decisions when outcomes are not certain."),
-        ("Pattern Detection Systems", "Statistics", "Signal vs noise, regression, inference, and validated forecasting."),
-        ("Optimization Systems", "Optimization", "Best decisions under constraints — resources, physics, time, and capital."),
-        ("Simulation Systems", "Monte Carlo", "Alternate futures, stress tests, and distributions when formulas fail."),
-        ("AI & Learning Systems", "Machine learning", "Gradients, pattern recognition, and prediction at scale."),
+        ("Accumulation", "Calculus", "Rates, integrals, and compounding small changes into large outcomes."),
+        ("Uncertainty", "Probability", "Risk, Bayes, expected value, and decisions under unknown outcomes."),
+        ("Pattern Detection", "Statistics", "Signal vs noise, regression, and validated forecasting."),
+        ("Optimization", "Constraints", "Best choices when resources, time, and physics limit you."),
+        ("Simulation", "Monte Carlo", "Stress-test alternate futures when closed-form math fails."),
+        ("AI & Learning", "Machine learning", "Gradients, pattern recognition, and prediction at scale."),
     ]
 
     rows = [theme_cards[i : i + 3] for i in range(0, 6, 3)]
@@ -87,12 +131,10 @@ def render_home() -> None:
             with col:
                 st.markdown(_card(name, badge, desc, "ami-card-theme"), unsafe_allow_html=True)
 
-    st.caption("Open **Mathematical Themes** in the sidebar for full professional depth on each system.")
-
     # Featured domains
     st.markdown('<p class="ami-section-title">Featured Applied Domains</p>', unsafe_allow_html=True)
     st.markdown(
-        '<p class="ami-section-sub">Where mathematics meets real institutions — finance, medicine, space, AI, elections, and more.</p>',
+        '<p class="ami-section-sub">Professional fields where math drives predictions and high-stakes decisions.</p>',
         unsafe_allow_html=True,
     )
 
@@ -101,46 +143,22 @@ def render_home() -> None:
     for row in domain_rows:
         cols = st.columns(len(row))
         for col, name in zip(cols, row):
-            tagline = DOMAINS[name]["tagline"].replace("**", "").strip()[:140]
-            if len(DOMAINS[name]["tagline"]) > 140:
+            tagline = DOMAINS[name]["tagline"].replace("**", "").strip()[:120]
+            if len(DOMAINS[name]["tagline"]) > 120:
                 tagline += "…"
             with col:
-                st.markdown(_card(name, "Applied domain", tagline, "ami-card-domain"), unsafe_allow_html=True)
+                st.markdown(_card(name, "Domain", tagline, "ami-card-domain"), unsafe_allow_html=True)
 
-    st.caption(f"Browse all **{len(DOMAIN_NAMES)} domains** under **Applied Domains** in the sidebar.")
+    st.caption(f"Browse all **{len(DOMAIN_NAMES)} domains** under **Applied Domains**.")
 
-    # How to use
-    st.markdown('<p class="ami-section-title">How to Use This App</p>', unsafe_allow_html=True)
-    st.markdown(
-        '<p class="ami-section-sub">Designed for exploration — use the sidebar to switch sections, lens, and depth.</p>',
-        unsafe_allow_html=True,
-    )
+    # How to use — simplified
+    st.markdown('<p class="ami-section-title">Quick start</p>', unsafe_allow_html=True)
 
     steps = [
-        (
-            "Mathematical Thinking",
-            "Read the signature framework: modeling, uncertainty, optimization, simulation, and AI as one intelligence stack.",
-        ),
-        (
-            "Mathematical Themes",
-            "Study the six intelligence systems: why they matter, how professionals use them, and how AI inherits them.",
-        ),
-        (
-            "Applied Domains",
-            "Enter a professional field — concepts, breakthroughs, simulations, Excel/Python projects, and interview ideas.",
-        ),
-        (
-            "Mathematical lens",
-            "Frame content through calculus, probability, statistics, optimization, simulation, or AI; filter domains by primary system.",
-        ),
-        (
-            "Depth level",
-            "Professional overview for executives; technical depth for analysts; portfolio framing for interviews.",
-        ),
-        (
-            "Portfolio Lab",
-            "Build deliverables: Monte Carlo risk, SIR models, calibration studies, recommenders, and more.",
-        ),
+        ("Run a lab", "Pick Interactive Labs → choose Poker, Finance, or Forecasting. Adjust sliders and read the recommendation."),
+        ("Study a theme", "Mathematical Themes explains why calculus, probability, or optimization matter in practice."),
+        ("Enter a domain", "Applied Domains connects math to finance, medicine, AI, climate, and more — with simulations."),
+        ("Build your portfolio", "Portfolio Lab gives Excel/Python specs and interview talking points."),
     ]
 
     for i, (title, body) in enumerate(steps, 1):
@@ -157,27 +175,7 @@ def render_home() -> None:
             unsafe_allow_html=True,
         )
 
-    # Portfolio value
-    st.markdown('<p class="ami-section-title">Portfolio & Professional Value</p>', unsafe_allow_html=True)
-    st.markdown(
-        """
-        <div class="ami-value-box">
-            <p style="margin:0 0 1rem 0; color:#334155; line-height:1.6;">
-                This project demonstrates <strong>applied mathematics</strong>, <strong>data analytics</strong>,
-                <strong>AI-oriented thinking</strong>, and <strong>quantitative modeling</strong> in one coherent platform.
-                Each domain connects theory to deliverables you can discuss in interviews: simulations, uncertainty
-                quantification, optimization tradeoffs, and prediction under noise.
-            </p>
-            <p style="margin:0; color:#475569; font-size:0.9rem; line-height:1.55;">
-                Suitable for portfolios in: quantitative finance, data science, actuarial science, biostatistics,
-                operations research, sports analytics, ML engineering, and public-policy modeling.
-            </p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    # Featured portfolio cards
+    # Featured portfolio
     st.markdown('<p class="ami-section-title">Featured Portfolio Projects</p>', unsafe_allow_html=True)
     featured_projects = PORTFOLIO_PROBLEMS[:3]
     pcols = st.columns(3)
@@ -187,7 +185,7 @@ def render_home() -> None:
                 _card(
                     proj["title"],
                     proj["domain"],
-                    proj["question"][:120] + ("…" if len(proj["question"]) > 120 else ""),
+                    proj["question"][:100] + ("…" if len(proj["question"]) > 100 else ""),
                     "ami-card-portfolio",
                 ),
                 unsafe_allow_html=True,
@@ -195,23 +193,7 @@ def render_home() -> None:
 
     st.caption(f"See all **{len(PORTFOLIO_PROBLEMS)} projects** in **Portfolio Lab**.")
 
-    # Development status
-    st.markdown('<p class="ami-section-title">Development Status</p>', unsafe_allow_html=True)
-    st.markdown(
-        f"""
-        <div class="ami-card ami-card-accent">
-            <h4>Platform roadmap</h4>
-            <p><strong>Version {VERSION}</strong> — {NUM_DOMAINS} domains, {NUM_SIMULATIONS} simulation engines,
-            {NUM_DOMAINS_WITH_CASE_STUDIES} domains with professional case studies, {NUM_PORTFOLIO} portfolio specs.</p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    for item in ROADMAP:
-        st.markdown(f"- {item}")
-
     st.info(
-        "Start with **Mathematical Thinking** for the unified framework, then **Applied Domains** "
-        "for field-specific case studies and simulations."
+        "**New to the platform?** Start with **Interactive Labs**, then explore **Applied Domains** "
+        "for field-specific depth."
     )

@@ -2,11 +2,12 @@
 
 from content.case_studies import CASE_STUDIES
 from content.domains import DOMAINS, DOMAIN_NAMES
+from content.interactive_labs import NUM_LABS
 from content.portfolio import PORTFOLIO_PROBLEMS
 from content.themes import THEME_NAMES
 from simulations.registry import SIMULATION_COUNT
 
-VERSION = "2.1.1"
+VERSION = "2.2.0"
 
 FEATURED_DOMAINS = [
     "Quantitative Finance",
@@ -20,11 +21,11 @@ FEATURED_DOMAINS = [
 ]
 
 ROADMAP = [
+    "Plotly interactive charts for lab visualizations",
     "Wire yfinance and public CSV loaders into domain simulations",
     "Per-domain case study PDF exports for portfolio",
-    "Plotly interactive charts replacing static matplotlib where valuable",
     "Bayesian inference notebooks linked from Portfolio Lab",
-    "Streamlit multipage URLs for shareable domain links",
+    "Streamlit multipage URLs for shareable domain and lab links",
 ]
 
 NUM_THEMES = len(THEME_NAMES)
