@@ -2,6 +2,13 @@
 
 import streamlit as st
 
+from content.consultant import (
+    BRANCHING_FOLLOWUPS,
+    MODEL_BUILDER_FIELDS,
+    MODEL_TEMPLATES,
+    REAL_PROBLEM_REFRAMES,
+    get_critical_pushbacks,
+)
 from content.problem_coach import (
     CHALLENGE_QUESTIONS,
     EXPERT_PERSPECTIVES,
@@ -9,6 +16,92 @@ from content.problem_coach import (
     SCORE_DIMENSIONS,
 )
 from content.problem_solving import ADAPTIVE_QUESTIONS
+
+
+def render_conversational_adaptive(pattern_id: str, key_prefix: str) -> dict[str, str | list]:
+    """Branching discussion — first question drives follow-ups."""
+    questions = ADAPTIVE_QUESTIONS.get(pattern_id, ADAPTIVE_QUESTIONS["default"])
+    responses: dict[str, str | list] = {}
+    branch_answers: dict[str, str] = {}
+
+    st.markdown("##### Let's talk it through")
+    st.caption("The coach adapts follow-up questions based on what matters most to you.")
+
+    first = questions[0]
+    st.markdown(f"**Coach:** {first['question']}")
+    optimizing = st.radio(
+        first["options"],
+        key=f"{key_prefix}_adaptive_{first['id']}",
+        label_visibility="collapsed",
+    )
+    responses[first["id"]] = optimizing
+
+    branch_key = pattern_id if pattern_id in BRANCHING_FOLLOWUPS else "default"
+    followups = BRANCHING_FOLLOWUPS.get(branch_key, {}).get(optimizing, [])
+    if followups:
+        with st.chat_message("assistant"):
+            st.markdown(f"**Coach:** You said **{optimizing}** matters most. A few more questions:")
+        for fq in followups:
+            st.markdown(f"**{fq['question']}**")
+            branch_answers[fq["question"]] = st.radio(
+                fq["options"],
+                key=f"{key_prefix}_branch_{fq['question'][:40]}",
+                label_visibility="collapsed",
+            )
+    responses["branch_answers"] = branch_answers
+
+    for q in questions[1:]:
+        st.markdown(f"**{q['question']}**")
+        if q.get("multi"):
+            responses[q["id"]] = st.multiselect(
+                "Select all that apply",
+                q["options"],
+                key=f"{key_prefix}_adaptive_{q['id']}",
+                label_visibility="collapsed",
+            )
+        else:
+            responses[q["id"]] = st.radio(
+                q["options"],
+                key=f"{key_prefix}_adaptive_{q['id']}",
+                label_visibility="collapsed",
+            )
+
+    return responses
+
+
+def render_real_problem_section(problem: str, pattern_id: str) -> None:
+    """Help user distinguish stated vs. underlying vs. measurable problem."""
+    reframe = REAL_PROBLEM_REFRAMES.get(pattern_id, REAL_PROBLEM_REFRAMES["default"])
+
+    st.markdown("##### What is the real problem?")
+    st.caption("Many people solve the wrong problem. Let's separate layers.")
+
+    with st.container(border=True):
+        st.markdown(f"**Stated problem:** *{problem}*")
+        st.markdown(f"**Underlying problem:** {reframe['underlying']}")
+        st.markdown(f"**Measurable problem:** {reframe['measurable']}")
+        st.markdown(f"**Optimization target:** {reframe['optimization_target']}")
+
+    for wrong, right in reframe.get("wrong_problem_examples", []):
+        with st.expander(f"Common trap: \"{wrong}\""):
+            st.warning(right)
+
+    st.text_area(
+        "In your own words — what is the real problem you're trying to solve?",
+        key=f"ps_real_{pattern_id}",
+        placeholder="Not what you said first — what you'd actually measure and optimize…",
+        height=72,
+    )
+
+
+def render_critical_pushback(adaptive: dict, pattern_id: str) -> None:
+    """Coach challenges assumptions — does not always agree."""
+    st.markdown("##### Coach pushback")
+    st.caption("A consultant tests your thinking, not just your confidence.")
+
+    for msg in get_critical_pushbacks(adaptive, pattern_id):
+        with st.chat_message("assistant"):
+            st.markdown(msg)
 
 
 def render_adaptive_questions(pattern_id: str, key_prefix: str) -> dict[str, str | list]:
@@ -59,11 +152,43 @@ def render_challenge_questions(key_prefix: str) -> dict[str, str]:
     return answers
 
 
+def render_expert_comparison(pattern: dict, problem: str) -> None:
+    """Compare how different experts would approach the same problem."""
+    st.markdown("##### How would different experts approach this?")
+    snippet = problem[:80] + ("…" if len(problem) > 80 else "")
+    st.caption(f"Same problem — six lenses. *{snippet}*")
+
+    roles = [e["role"] for e in EXPERT_PERSPECTIVES]
+    selected = st.multiselect(
+        "Compare perspectives (pick 2–3 for side-by-side view)",
+        roles,
+        default=roles[:3],
+        key="ps_expert_compare",
+    )
+    compare = [e for e in EXPERT_PERSPECTIVES if e["role"] in selected] or EXPERT_PERSPECTIVES[:3]
+
+    cols = st.columns(len(compare))
+    for col, expert in zip(cols, compare):
+        with col:
+            with st.container(border=True):
+                st.markdown(f"{expert['icon']} **{expert['role']}**")
+                st.caption(expert["lens"])
+                st.markdown(f"*Approach:* {expert.get('approach', expert['lens'])}")
+                for q in expert["questions"][:2]:
+                    st.markdown(f"- {q}")
+                tools = pattern.get("tools", [])
+                if tools:
+                    st.caption(f"Tools: {', '.join(tools[:2])}")
+
+    with st.expander("All six expert perspectives", expanded=False):
+        render_expert_perspectives(pattern, problem)
+
+
 def render_expert_perspectives(pattern: dict, problem: str) -> None:
     """Show how different experts would approach this problem."""
     st.markdown("##### How would different experts think?")
     snippet = problem[:80] + ("…" if len(problem) > 80 else "")
-    st.caption(f"Same problem — five different lenses. Problem: *{snippet}*")
+    st.caption(f"Same problem — six different lenses. Problem: *{snippet}*")
 
     cols = st.columns(2)
     for i, expert in enumerate(EXPERT_PERSPECTIVES):
@@ -76,6 +201,66 @@ def render_expert_perspectives(pattern: dict, problem: str) -> None:
                 tools = pattern.get("tools", [])
                 if tools:
                     st.caption(f"Would likely use: {', '.join(tools[:2])}")
+
+
+def render_model_builder(pattern_id: str, key_prefix: str) -> dict[str, str]:
+    """Build a mathematical model — objective through improvements."""
+    template = MODEL_TEMPLATES.get(pattern_id, MODEL_TEMPLATES["default"])
+    defaults = template.get("defaults", {})
+
+    st.markdown("##### Build a mathematical model")
+    st.caption("Structure your thinking before any formulas — a consultant builds models in plain language first.")
+
+    if template.get("model_types"):
+        st.markdown("**Example model types for your domain:**")
+        for mt in template["model_types"]:
+            with st.container(border=True):
+                st.markdown(f"**{mt['name']}** — {mt['purpose']}")
+                st.caption(mt["plain"])
+
+    model: dict[str, str] = {}
+    for field_id, label, hint in MODEL_BUILDER_FIELDS:
+        with st.expander(label, expanded=field_id in ("objective", "variables", "simplified_model")):
+            st.caption(hint)
+            model[field_id] = st.text_area(
+                f"Your {label.lower()}",
+                value=defaults.get(field_id, ""),
+                key=f"{key_prefix}_model_{field_id}",
+                height=68,
+                label_visibility="collapsed",
+            )
+    return model
+
+
+def render_decision_support(
+    problem: str,
+    breakdown: dict[int, str],
+    model: dict[str, str],
+    pattern: dict,
+) -> None:
+    """Decision support — what to do next based on structured reasoning."""
+    st.markdown("##### Decision support")
+    st.caption("Problem → Discussion → Modeling → Decision — what would you do next?")
+
+    objective = model.get("objective") or breakdown.get(1, "")
+    simplified = model.get("simplified_model") or breakdown.get(6, "")
+    decision = breakdown.get(8, "")
+
+    with st.container(border=True):
+        st.markdown("**Summary**")
+        if objective.strip():
+            st.markdown(f"- **Objective:** {objective.strip()}")
+        if simplified.strip():
+            st.markdown(f"- **Model:** {simplified.strip()}")
+        if decision.strip():
+            st.markdown(f"- **Decision:** {decision.strip()}")
+        else:
+            st.markdown("- **Decision:** Define what action you'll take once you've validated your model.")
+
+    st.info(
+        f"**Next step:** Test one assumption with data or a small experiment before opening "
+        f"**{pattern.get('suggested_lab', 'a lab')}**. A model you haven't tested is still a guess."
+    )
 
 
 def compute_thinking_score(

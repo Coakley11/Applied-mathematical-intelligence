@@ -19,6 +19,12 @@ def main() -> int:
         from content.idea_analysis import IDEA_ANALYSIS, ANALYSIS_DIMENSIONS
         from content.mathematical_thinking import MATHEMATICAL_THINKING
         from content.navigation import PRIMARY_ACTIONS as NAV_PRIMARY_ACTIONS
+        from content.consultant import (
+            BRANCHING_FOLLOWUPS,
+            MODEL_BUILDER_FIELDS,
+            MODEL_TEMPLATES,
+            REAL_PROBLEM_REFRAMES,
+        )
         from content.problem_coach import (
             CHALLENGE_QUESTIONS,
             EXPERT_PERSPECTIVES,
@@ -105,8 +111,21 @@ def main() -> int:
     if len(PROBLEM_LIBRARY) != 7:
         errors.append(f"Expected 7 problem library entries, got {len(PROBLEM_LIBRARY)}")
 
-    if len(EXPERT_PERSPECTIVES) != 5:
-        errors.append(f"Expected 5 expert perspectives, got {len(EXPERT_PERSPECTIVES)}")
+    if len(EXPERT_PERSPECTIVES) != 6:
+        errors.append(f"Expected 6 expert perspectives, got {len(EXPERT_PERSPECTIVES)}")
+
+    if len(MODEL_BUILDER_FIELDS) != 8:
+        errors.append(f"Expected 8 model builder fields, got {len(MODEL_BUILDER_FIELDS)}")
+
+    if len(BRANCHING_FOLLOWUPS) < 5:
+        errors.append(f"Expected at least 5 branching followup sets, got {len(BRANCHING_FOLLOWUPS)}")
+
+    for pid in ("sports", "betting", "medicine", "business", "ai"):
+        if pid not in MODEL_TEMPLATES:
+            errors.append(f"Missing model template for: {pid}")
+
+    if "default" not in REAL_PROBLEM_REFRAMES:
+        errors.append("Missing default real problem reframe")
 
     if len(CHALLENGE_QUESTIONS) != 5:
         errors.append(f"Expected 5 challenge questions, got {len(CHALLENGE_QUESTIONS)}")

@@ -33,6 +33,7 @@ def main() -> int:
         from components.problem_thinking import render_lab_thinking_gate  # noqa: F401
         from components.thinking_lab import render_thinking_topics_panel  # noqa: F401
         from components.problem_coach import compute_thinking_score  # noqa: F401
+        from content.consultant import MODEL_TEMPLATES, BRANCHING_FOLLOWUPS
         from content.problem_coach import EXPERT_PERSPECTIVES, PROBLEM_LIBRARY
         from content.problem_solving import (
             ADAPTIVE_QUESTIONS,
@@ -108,8 +109,14 @@ def main() -> int:
     if len(PROBLEM_LIBRARY) != 7:
         errors.append("Problem library != 7")
 
-    if len(EXPERT_PERSPECTIVES) != 5:
-        errors.append("Expert perspectives != 5")
+    if len(EXPERT_PERSPECTIVES) != 6:
+        errors.append("Expert perspectives != 6")
+
+    if len(MODEL_TEMPLATES) < 5:
+        errors.append("Model templates < 5")
+
+    if len(BRANCHING_FOLLOWUPS) < 5:
+        errors.append("Branching followups < 5")
 
     if len(ADAPTIVE_QUESTIONS) < 8:
         errors.append("Adaptive question sets < 8")

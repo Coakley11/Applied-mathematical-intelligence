@@ -4,10 +4,11 @@ PROBLEM_SOLVING_LAB = {
     "title": "Mathematical Problem Solving Lab",
     "icon": "🧠",
     "action": "Solve a Problem",
-    "tagline": "Your mathematical thinking coach — questions first, formulas only when they matter.",
+    "tagline": "Your mathematical consultant — discussion, modeling, and decision support before formulas.",
     "intro": (
-        "Describe any problem. The coach adapts its questions, challenges your assumptions, "
-        "shows how different experts would think, and scores the clarity of your reasoning."
+        "Describe any problem. The consultant reframes what you're really solving, adapts follow-up "
+        "questions to your answers, challenges assumptions, compares expert perspectives, and helps "
+        "you build a model in plain language."
     ),
 }
 

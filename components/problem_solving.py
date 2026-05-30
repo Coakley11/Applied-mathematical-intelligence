@@ -1,4 +1,4 @@
-"""Mathematical Problem Solving Lab — adaptive thinking coach."""
+"""Mathematical Problem Solving Lab — adaptive thinking consultant."""
 
 import re
 
@@ -6,11 +6,15 @@ import streamlit as st
 
 from components.problem_coach import (
     compute_thinking_score,
-    render_adaptive_questions,
     render_challenge_questions,
-    render_expert_perspectives,
+    render_conversational_adaptive,
+    render_critical_pushback,
+    render_decision_support,
+    render_expert_comparison,
+    render_model_builder,
     render_problem_library,
     render_problem_pipeline,
+    render_real_problem_section,
     render_thinking_score,
 )
 from components.section_intro import render_section_header
@@ -49,7 +53,7 @@ def render_problem_solving_lab() -> None:
     )
 
     tab_coach, tab_library, tab_mathematician, tab_topics = st.tabs(
-        ["Your coach", "Problem library", "Think like a mathematician", "Thinking topics"]
+        ["Your consultant", "Problem library", "Think like a mathematician", "Thinking topics"]
     )
 
     with tab_coach:
@@ -66,7 +70,7 @@ def render_problem_solving_lab() -> None:
 
 
 def _render_coaching_flow() -> None:
-    st.markdown("#### Tell the coach your problem")
+    st.markdown("#### Tell the consultant your problem")
 
     library_problem = st.session_state.get("ps_library_problem", "")
     example = st.selectbox("Start from an example", EXAMPLE_PROBLEMS, key="ps_example")
@@ -81,26 +85,29 @@ def _render_coaching_flow() -> None:
 
     problem = custom.strip() if custom.strip() else example
     if problem == "Custom problem (describe below)":
-        st.info("Describe your problem above — the coach will adapt its questions.")
+        st.info("Describe your problem above — the consultant will adapt the discussion.")
         return
 
     pattern = _match_pattern(problem)
     pattern_id = pattern.get("id", "default")
     key_prefix = f"ps_{pattern_id}"
 
-    # Coach opening — conversational
     st.markdown("---")
     with st.chat_message("assistant"):
         st.markdown(
-            f"**Coach:** I hear you working on: *{problem}*\n\n"
+            f"**Consultant:** I hear you working on: *{problem}*\n\n"
             f"This looks like a **{', '.join(pattern.get('categories', ['general']))}** problem. "
-            f"Before any formulas — let's think it through together."
+            f"Before any formulas — let's discuss, model, and decide together."
         )
 
-    # Adaptive questions
-    adaptive = render_adaptive_questions(pattern_id, key_prefix)
+    # What is the real problem?
+    st.markdown("---")
+    render_real_problem_section(problem, pattern_id)
 
-    # Reflect back adaptive answers
+    # Branching discussion
+    st.markdown("---")
+    adaptive = render_conversational_adaptive(pattern_id, key_prefix)
+
     if any(adaptive.values()):
         with st.chat_message("assistant"):
             parts = []
@@ -113,12 +120,16 @@ def _render_coaching_flow() -> None:
             if adaptive.get("challenge"):
                 parts.append(f"where the main challenge is **{adaptive['challenge']}**")
             if parts:
-                st.markdown(f"**Coach:** So you're {', '.join(parts)}. Let's structure that.")
+                st.markdown(f"**Consultant:** So you're {', '.join(parts)}. Good — let's stress-test that.")
 
-    # Problem breakdown — conversational steps
+    # Coach pushback
+    st.markdown("---")
+    render_critical_pushback(adaptive, pattern_id)
+
+    # Problem structure
     st.markdown("---")
     st.markdown("#### Build your problem structure")
-    st.caption("Answer in your own words — the coach uses this to score your thinking.")
+    st.caption("Answer in your own words — abstraction, assumptions, and uncertainty matter more than formulas.")
 
     breakdown: dict[int, str] = {}
     hints = {
@@ -145,9 +156,9 @@ def _render_coaching_flow() -> None:
     st.markdown("---")
     challenges = render_challenge_questions(key_prefix)
 
-    # Expert perspectives
+    # Expert comparison
     st.markdown("---")
-    render_expert_perspectives(pattern, problem)
+    render_expert_comparison(pattern, problem)
 
     # Score
     st.markdown("---")
@@ -156,17 +167,24 @@ def _render_coaching_flow() -> None:
     )
     render_thinking_score(total, dim_scores, strengths, weaknesses)
 
+    # Model builder
+    st.markdown("---")
+    model = render_model_builder(pattern_id, key_prefix)
+
+    # Decision support
+    st.markdown("---")
+    render_decision_support(problem, breakdown, model, pattern)
+
     # Reasoning pipeline
     st.markdown("---")
     thinking_summary = breakdown.get(1, pattern.get("tradeoff", ""))
-    model_summary = breakdown.get(6, pattern.get("simple_model", ""))
+    model_summary = model.get("simplified_model") or breakdown.get(6, pattern.get("simple_model", ""))
     math_summary = (
         f"Tools that fit: {', '.join(pattern.get('tools', []))}. "
         f"Tradeoff: {pattern.get('tradeoff', '')}"
     )
     render_problem_pipeline(problem, thinking_summary, model_summary, math_summary)
 
-    # Next step
     st.success(
         f"**Ready to explore?** Open **{pattern['suggested_lab']}** in the sidebar to run a "
         f"simulation connected to this problem — with thinking first, math second."
@@ -200,6 +218,6 @@ def _render_mathematician_mode() -> None:
     if user_apply.strip():
         with st.chat_message("assistant"):
             st.markdown(
-                "**Coach:** Good — you've started abstract thinking. What did you strip away? "
+                "**Consultant:** Good — you've started abstract thinking. What did you strip away? "
                 "What structure remains? Could someone in a different field use the same structure?"
             )

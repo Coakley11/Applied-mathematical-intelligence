@@ -36,7 +36,7 @@ def render_action_button(action: str, key: str) -> None:
         """,
         unsafe_allow_html=True,
     )
-    label = "Open coach →" if is_flagship else "Start →"
+    label = "Open consultant →" if is_flagship else "Start →"
     if st.button(label, key=key, use_container_width=True, type="primary" if is_flagship else "secondary"):
         navigate_to(action)
 

@@ -51,7 +51,23 @@ EXPERT_PERSPECTIVES = [
         ],
         "lens": "Frames problems as optimization — find parameters that minimize error.",
     },
+    {
+        "role": "Engineer",
+        "icon": "⚙",
+        "questions": [
+            "What are the physical or operational constraints?",
+            "What tolerances and safety margins apply?",
+            "Can you build, test, and iterate a prototype cheaply?",
+        ],
+        "lens": "Focuses on feasibility, constraints, and building something that works in reality.",
+        "approach": "Define requirements → model constraints → prototype → measure → iterate.",
+    },
 ]
+
+# Add approach field to existing experts for comparison view
+for _expert in EXPERT_PERSPECTIVES:
+    if "approach" not in _expert:
+        _expert["approach"] = _expert["lens"]
 
 CHALLENGE_QUESTIONS = [
     {

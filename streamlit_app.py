@@ -36,7 +36,7 @@ if "view_mode" not in st.session_state:
 # SIDEBAR
 # =====================================================
 
-st.sidebar.title("Mathematical Thinking Coach")
+st.sidebar.title("Mathematical Consultant")
 st.sidebar.caption(f"Applied Mathematical Intelligence · v{VERSION}")
 
 nav_index = (
@@ -112,5 +112,5 @@ elif view_mode in ACTION_SECTION_TYPES:
 st.markdown("---")
 st.caption(
     f"Applied Mathematical Intelligence v{VERSION} | "
-    "Think through your problem → get coached → try a lab."
+    "Think through your problem → build a model → try a lab."
 )
