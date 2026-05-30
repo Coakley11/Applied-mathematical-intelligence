@@ -17,7 +17,7 @@ An advanced **applied mathematics laboratory** built with Streamlit.
 | Portfolio projects | 12 |
 | Data modules (placeholders) | 6 |
 
-Run QA before merging: `python scripts/qa_check.py`
+Run QA before merging: `python scripts/qa_check.py` and `python scripts/smoke_test.py`
 
 ## Navigation
 
