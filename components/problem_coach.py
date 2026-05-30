@@ -36,6 +36,7 @@ def render_conversational_adaptive(pattern_id: str, key_prefix: str) -> dict[str
     first = questions[0]
     st.markdown(f"**Coach:** {first['question']}")
     optimizing = st.radio(
+        first.get("label", first.get("question", "Choose one option")),
         first["options"],
         key=f"{key_prefix}_adaptive_{first['id']}",
         label_visibility="collapsed",
@@ -50,6 +51,7 @@ def render_conversational_adaptive(pattern_id: str, key_prefix: str) -> dict[str
         for fq in followups:
             st.markdown(f"**{fq['question']}**")
             branch_answers[fq["question"]] = st.radio(
+                fq.get("label", fq.get("question", "Choose one option")),
                 fq["options"],
                 key=f"{key_prefix}_branch_{fq['question'][:40]}",
                 label_visibility="collapsed",
@@ -67,6 +69,7 @@ def render_conversational_adaptive(pattern_id: str, key_prefix: str) -> dict[str
             )
         else:
             responses[q["id"]] = st.radio(
+                q.get("label", q.get("question", "Choose one option")),
                 q["options"],
                 key=f"{key_prefix}_adaptive_{q['id']}",
                 label_visibility="collapsed",
@@ -130,6 +133,7 @@ def render_adaptive_questions(pattern_id: str, key_prefix: str) -> dict[str, str
             responses[q["id"]] = selected
         else:
             selected = st.radio(
+                q.get("label", q.get("question", "Choose one option")),
                 q["options"],
                 key=f"{key_prefix}_adaptive_{q['id']}",
                 label_visibility="collapsed",
