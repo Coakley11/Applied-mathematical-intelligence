@@ -29,14 +29,23 @@ def render_idea_analysis() -> None:
     )
 
     render_start_here(
-        "Type your idea in the box below. The app suggests what to measure, "
-        "what data you'd need, and which tool to try next.",
+        "Type your idea below. Before brainstorming variables, ask: "
+        "**what question am I actually trying to answer?**",
         [
-            "Describe your idea in a sentence or two.",
-            "Read the five quick answers.",
-            "Follow the suggested next step at the bottom.",
+            "State the idea in one or two sentences.",
+            "Answer the thinking prompt below.",
+            "Read the structured breakdown and follow the suggested lab.",
         ],
     )
+
+    with st.container(border=True):
+        st.markdown('<p class="ami-start-label">Think first</p>', unsafe_allow_html=True)
+        st.markdown("**What decision or prediction would change if you knew the answer?**")
+        st.text_input(
+            "The real question behind this idea",
+            placeholder="e.g. Will this product be profitable within 12 months?",
+            key="idea_think_question",
+        )
 
     idea = st.text_area(
         "Your idea",

@@ -20,14 +20,23 @@ def render_optimization_workshop() -> None:
     )
 
     render_start_here(
-        "Pick an example problem (or describe your own), skim the quick analysis, "
-        "then try the interactive optimizer at the bottom.",
+        "Pick an example problem (or describe your own). Think through the objective first — "
+        "then try the interactive optimizer.",
         [
-            "Choose a problem type from the dropdown.",
-            "Read the suggested objective and constraints.",
-            "Scroll to **Try the optimizer** and move the sliders.",
+            "Answer the thinking question below.",
+            "Choose a problem type and read the quick analysis.",
+            "Try the optimizer and compare your mix to the optimal one.",
         ],
     )
+
+    with st.container(border=True):
+        st.markdown('<p class="ami-start-label">Think first</p>', unsafe_allow_html=True)
+        st.markdown("**What are we trying to optimize — and what tradeoff are we willing to make?**")
+        st.text_input(
+            "Your objective in plain language",
+            placeholder="e.g. Maximize return without exceeding a risk limit",
+            key="opt_think_objective",
+        )
 
     problem_choice = st.selectbox("What do you want to improve?", EXAMPLE_PROBLEMS)
     custom_problem = ""

@@ -8,7 +8,7 @@ from components.optimization_workshop import render_optimization_workshop
 from components.practical_labs import render_practical_lab
 from components.reference import render_reference_library
 from components.styles import inject_platform_styles
-from components.thinking_lab import render_thinking_lab
+from components.problem_solving import render_problem_solving_lab
 from content.practical_labs import (
     ACTION_SECTION_TYPES,
     ACTION_TO_LAB,
@@ -86,7 +86,7 @@ if view_mode == "Advanced reference":
     )
 
 st.sidebar.markdown("---")
-st.sidebar.caption("Mathematical thinking lab · not professional advice")
+st.sidebar.caption("Think first · simulate second · optional depth last")
 
 # =====================================================
 # MAIN CONTENT
@@ -106,11 +106,11 @@ elif view_mode in ACTION_SECTION_TYPES:
         render_optimization_workshop()
     elif section_type == "idea":
         render_idea_analysis()
-    elif section_type == "thinking":
-        render_thinking_lab()
+    elif section_type == "problem_solving":
+        render_problem_solving_lab()
 
 st.markdown("---")
 st.caption(
     f"Applied Mathematical Intelligence v{VERSION} | "
-    "Choose a problem → think mathematically → run a simulation."
+    "Think through the problem → run a simulation → interpret the result."
 )

@@ -194,74 +194,74 @@ NUM_PRACTICAL_LABS = len(PRACTICAL_LAB_NAMES)
 # ---------------------------------------------------------------------------
 
 PRIMARY_ACTIONS = [
+    "Solve a Problem",
     "Analyze a Bet",
     "Predict a Game",
     "Model a Disease",
     "Train an AI",
     "Optimize a Decision",
     "Analyze an Idea",
-    "Explore Mathematical Thinking",
 ]
 
 PRIMARY_ACTION_TAGLINES = {
+    "Solve a Problem": "Structure any problem before formulas.",
     "Analyze a Bet": "Is this call or wager worth it?",
     "Predict a Game": "Find edge in odds and forecasts.",
     "Model a Disease": "Simulate spread, growth, and treatment.",
     "Train an AI": "Watch a model learn in real time.",
     "Optimize a Decision": "Improve a strategy or process.",
     "Analyze an Idea": "See what to measure and model.",
-    "Explore Mathematical Thinking": "Think like a quant — step by step.",
 }
 
 PRIMARY_ACTION_DESCRIPTIONS = {
+    "Solve a Problem": "Describe your problem — get guided questions, not instant answers.",
     "Analyze a Bet": "Run expected-value checks on poker calls and casino bets.",
     "Predict a Game": "Compare win probabilities to the odds on the board.",
     "Model a Disease": "Explore outbreaks, tumor growth, and drug levels.",
     "Train an AI": "Adjust learning rate and watch training unfold.",
     "Optimize a Decision": "Pick a problem, define the goal, try an optimizer.",
     "Analyze an Idea": "Type an idea — get variables, data, and next steps.",
-    "Explore Mathematical Thinking": "Short frameworks for any real-world problem.",
 }
 
 PRIMARY_ACTION_ICONS = {
+    "Solve a Problem": "🧠",
     "Analyze a Bet": PRACTICAL_LABS["Betting & Poker Lab"]["icon"],
     "Predict a Game": PRACTICAL_LABS["Sports Prediction Lab"]["icon"],
     "Model a Disease": PRACTICAL_LABS["Medicine & Disease Lab"]["icon"],
     "Train an AI": PRACTICAL_LABS["AI Learning Lab"]["icon"],
     "Optimize a Decision": "⚙",
     "Analyze an Idea": "💡",
-    "Explore Mathematical Thinking": "🧭",
 }
 
 PRIMARY_ACTION_LABELS = {
+    "Solve a Problem": "Mathematical Problem Solving Lab",
     "Analyze a Bet": "Betting & Poker Lab",
     "Predict a Game": "Sports Prediction Lab",
     "Model a Disease": "Medicine & Disease Lab",
     "Train an AI": "AI Learning Lab",
     "Optimize a Decision": "Optimization Workshop",
     "Analyze an Idea": "Idea & Invention Analysis",
-    "Explore Mathematical Thinking": "Mathematical Thinking Lab",
 }
 
 ACTION_SECTION_TYPES = {
+    "Solve a Problem": "problem_solving",
     "Analyze a Bet": "lab",
     "Predict a Game": "lab",
     "Model a Disease": "lab",
     "Train an AI": "lab",
     "Optimize a Decision": "optimization",
     "Analyze an Idea": "idea",
-    "Explore Mathematical Thinking": "thinking",
 }
 
 NAV_HELP = {
     "Home": "Pick a problem and jump in.",
+    "Solve a Problem": "Your thinking partner — structure problems step by step.",
     "Analyze a Bet": "Check expected value and pot odds.",
     "Predict a Game": "Compare probabilities to betting odds.",
     "Model a Disease": "Simulate spread, tumors, and drug levels.",
     "Train an AI": "Watch gradient descent train a model.",
     "Optimize a Decision": "Define your goal and find the best mix.",
     "Analyze an Idea": "Brainstorm variables, data, and tools.",
-    "Explore Mathematical Thinking": "Frameworks for approaching any problem.",
     "Advanced reference": "Optional reading — skip if you're just getting started.",
 }
 

@@ -29,7 +29,10 @@ def main() -> int:
         from components.optimization_workshop import render_optimization_workshop  # noqa: F401
         from components.practical_labs import render_practical_lab  # noqa: F401
         from components.reference import render_reference_library  # noqa: F401
-        from components.thinking_lab import render_thinking_lab  # noqa: F401
+        from components.problem_solving import render_problem_solving_lab  # noqa: F401
+        from components.problem_thinking import render_lab_thinking_gate  # noqa: F401
+        from components.thinking_lab import render_thinking_topics_panel  # noqa: F401
+        from content.problem_solving import PROBLEM_BREAKDOWN_STEPS, PROBLEM_SOLVING_LAB
         from content.case_studies import CASE_STUDIES
         from content.domains import DOMAINS, DOMAIN_NAMES
         from content.navigation import PRIMARY_ACTIONS  # noqa: F401 — re-export shim
@@ -95,6 +98,16 @@ def main() -> int:
 
     if len(MATHEMATICAL_THINKING.get("pillars", [])) != 10:
         errors.append("Mathematical Thinking pillars != 10")
+
+    if len(PROBLEM_BREAKDOWN_STEPS) != 8:
+        errors.append("Problem breakdown steps != 8")
+
+    for key in ("title", "action", "tagline", "intro"):
+        if not PROBLEM_SOLVING_LAB.get(key):
+            errors.append(f"PROBLEM_SOLVING_LAB missing key: {key}")
+
+    if "problem_solving" not in ACTION_SECTION_TYPES.values():
+        errors.append("Missing problem_solving section type")
 
     if len(THINKING_TOPICS) != 11:
         errors.append("Thinking Lab topics != 11")

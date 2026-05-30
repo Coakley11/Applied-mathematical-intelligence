@@ -27,6 +27,10 @@ def render_guided_tool(runner_id: str) -> None:
     st.markdown(f"### {guide['plain_name']}")
     st.markdown(guide["what"])
 
+    with st.expander("Why are we asking this? (think first)", expanded=False):
+        st.markdown(guide["figuring_out"])
+        st.markdown(f"*In context:* {guide['why']}")
+
     st.markdown("#### Run it")
     run_tool(runner_id)
 
@@ -43,7 +47,10 @@ def render_guided_tool(runner_id: str) -> None:
         st.markdown("---")
         st.markdown("**The math behind this**")
         st.markdown(guide["math_behind"])
-        st.caption(f"Concepts used: {guide['math_used']}")
+        st.caption(
+            f"Connected to your problem: {guide['figuring_out'][:120]}… "
+            f"Concepts: {guide['math_used']}"
+        )
         st.markdown("---")
         st.markdown("**Try the math yourself**")
         practice_id = guide.get("practice_id", "")

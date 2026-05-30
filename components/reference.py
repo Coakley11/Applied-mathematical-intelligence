@@ -51,8 +51,8 @@ def render_reference_library(
         _render_themes_reference(depth)
     elif section == "Full thinking framework":
         st.caption(
-            "The long-form version. For short interactive topics, use "
-            "**Explore Mathematical Thinking** in the main sidebar."
+            "The long-form version. For interactive problem-solving, use "
+            "**Solve a Problem** in the main sidebar."
         )
         render_mathematical_thinking(MATHEMATICAL_THINKING)
     else:

@@ -10,10 +10,11 @@ def render_home() -> None:
     st.markdown(
         """
         <div class="ami-hero ami-hero-action">
-            <h1>What do you want to do?</h1>
-            <p class="ami-tagline">Pick a problem. Run a simulation. See what the math says.</p>
+            <h1>What problem are you working on?</h1>
+            <p class="ami-tagline">Think it through first. Then simulate. Then go deeper.</p>
             <p class="ami-purpose">
-                No textbook — just hands-on tools for bets, games, medicine, AI, decisions, and ideas.
+                A mathematical thinking partner — not a formula reference. Start with
+                <strong>Solve a Problem</strong>, or jump straight to a hands-on lab.
             </p>
         </div>
         """,
@@ -27,10 +28,9 @@ def render_home() -> None:
     with st.expander("How this works (30 seconds)", expanded=False):
         st.markdown(
             """
-            1. **Pick a card** — each one is a standalone tool.
-            2. **Follow Start here** — plain English, no prerequisites.
-            3. **Run the simulation** — change sliders, see results.
-            4. **Go deeper** — optional expanders for the math behind it.
+            1. **Solve a Problem** — describe your situation, answer guided questions.
+            2. **Pick a lab** — run a simulation connected to your reasoning.
+            3. **Go deeper** — optional expanders for the math behind it.
             """
         )
 

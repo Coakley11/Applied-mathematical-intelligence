@@ -4,6 +4,7 @@ import html
 
 import streamlit as st
 
+from components.problem_thinking import render_lab_thinking_gate
 from components.lab_guide import render_guided_tool
 from components.section_intro import render_section_header, render_start_here
 from content.domains import DOMAINS
@@ -24,7 +25,9 @@ def render_practical_lab(lab_name: str) -> None:
     if lab.get("is_math_hub"):
         _render_math_systems_overview()
 
-    st.markdown("#### Pick a tool")
+    render_lab_thinking_gate(lab_name, key_prefix=lab_name.replace(" ", "_"))
+
+    st.markdown("#### Now try it")
     if len(tools) == 1:
         render_guided_tool(tools[0]["runner_id"])
     else:

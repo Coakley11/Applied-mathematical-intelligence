@@ -19,6 +19,12 @@ def main() -> int:
         from content.idea_analysis import IDEA_ANALYSIS, ANALYSIS_DIMENSIONS
         from content.mathematical_thinking import MATHEMATICAL_THINKING
         from content.navigation import PRIMARY_ACTIONS as NAV_PRIMARY_ACTIONS
+        from content.problem_solving import (
+            LAB_THINKING_PROMPTS,
+            MATHEMATICIAN_MODE_TOPICS,
+            PROBLEM_BREAKDOWN_STEPS,
+            PROBLEM_SOLVING_LAB,
+        )
         from content.optimization_workshop import OPTIMIZATION_WORKSHOP, WORKSHOP_STEPS
         from content.portfolio import PORTFOLIO_PROBLEMS
         from content.practical_labs import (
@@ -90,7 +96,18 @@ def main() -> int:
     if len(ANALYSIS_DIMENSIONS) != 5:
         errors.append(f"Expected 5 idea analysis dimensions, got {len(ANALYSIS_DIMENSIONS)}")
 
+    if len(PROBLEM_BREAKDOWN_STEPS) != 8:
+        errors.append(f"Expected 8 problem breakdown steps, got {len(PROBLEM_BREAKDOWN_STEPS)}")
+
+    if len(MATHEMATICIAN_MODE_TOPICS) != 8:
+        errors.append(f"Expected 8 mathematician mode topics, got {len(MATHEMATICIAN_MODE_TOPICS)}")
+
+    if len(LAB_THINKING_PROMPTS) != 4:
+        errors.append(f"Expected 4 lab thinking prompts, got {len(LAB_THINKING_PROMPTS)}")
+
     for key in ("title", "action", "tagline", "intro"):
+        if not PROBLEM_SOLVING_LAB.get(key):
+            errors.append(f"PROBLEM_SOLVING_LAB missing key: {key}")
         if not THINKING_LAB.get(key):
             errors.append(f"THINKING_LAB missing key: {key}")
         if not OPTIMIZATION_WORKSHOP.get(key):
