@@ -4,7 +4,7 @@ import html
 
 import streamlit as st
 
-from content.navigation import (
+from content.practical_labs import (
     PRIMARY_ACTION_DESCRIPTIONS,
     PRIMARY_ACTION_ICONS,
     PRIMARY_ACTION_LABELS,

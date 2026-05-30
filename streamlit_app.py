@@ -9,7 +9,7 @@ from components.practical_labs import render_practical_lab
 from components.reference import render_reference_library
 from components.styles import inject_platform_styles
 from components.thinking_lab import render_thinking_lab
-from content.navigation import (
+from content.practical_labs import (
     ACTION_SECTION_TYPES,
     ACTION_TO_LAB,
     NAV_HELP,

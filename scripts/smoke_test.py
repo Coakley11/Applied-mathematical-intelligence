@@ -32,8 +32,13 @@ def main() -> int:
         from components.thinking_lab import render_thinking_lab  # noqa: F401
         from content.case_studies import CASE_STUDIES
         from content.domains import DOMAINS, DOMAIN_NAMES
-        from content.navigation import ACTION_SECTION_TYPES, PRIMARY_ACTIONS
-        from content.practical_labs import PRACTICAL_LABS, PRACTICAL_LAB_NAMES, SECONDARY_LAB_NAMES
+        from content.navigation import PRIMARY_ACTIONS  # noqa: F401 — re-export shim
+        from content.practical_labs import (
+            ACTION_SECTION_TYPES,
+            PRACTICAL_LABS,
+            PRACTICAL_LAB_NAMES,
+            SECONDARY_LAB_NAMES,
+        )
         from content.thinking_lab import THINKING_TOPICS
         from content.tool_guides import TOOL_GUIDES
         from content.mathematical_thinking import MATHEMATICAL_THINKING

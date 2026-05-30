@@ -18,14 +18,19 @@ def main() -> int:
         from content.domains import DOMAINS, DOMAIN_NAMES
         from content.idea_analysis import IDEA_ANALYSIS, ANALYSIS_DIMENSIONS
         from content.mathematical_thinking import MATHEMATICAL_THINKING
-        from content.navigation import (
-            ACTION_SECTION_TYPES,
-            ACTION_TO_LAB,
-            PRIMARY_ACTIONS,
-        )
+        from content.navigation import PRIMARY_ACTIONS as NAV_PRIMARY_ACTIONS
         from content.optimization_workshop import OPTIMIZATION_WORKSHOP, WORKSHOP_STEPS
         from content.portfolio import PORTFOLIO_PROBLEMS
-        from content.practical_labs import PRACTICAL_LABS, PRACTICAL_LAB_NAMES, SECONDARY_LAB_NAMES
+        from content.practical_labs import (
+            ACTION_SECTION_TYPES,
+            ACTION_TO_LAB,
+            NAV_HELP,
+            NUM_PRIMARY_ACTIONS,
+            PRIMARY_ACTIONS,
+            PRACTICAL_LABS,
+            PRACTICAL_LAB_NAMES,
+            SECONDARY_LAB_NAMES,
+        )
         from content.thinking_lab import THINKING_LAB, THINKING_TOPICS
         from content.themes import THEME_NAMES
         from content.tool_guides import TOOL_GUIDES
@@ -60,6 +65,9 @@ def main() -> int:
 
     if len(PRIMARY_ACTIONS) != 7:
         errors.append(f"Expected 7 primary actions, got {len(PRIMARY_ACTIONS)}")
+
+    if NAV_PRIMARY_ACTIONS is not PRIMARY_ACTIONS:
+        errors.append("content.navigation re-export mismatch for PRIMARY_ACTIONS")
 
     for action in PRIMARY_ACTIONS:
         if action not in ACTION_SECTION_TYPES:
