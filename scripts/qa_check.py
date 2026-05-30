@@ -20,10 +20,16 @@ def main() -> int:
         from content.mathematical_thinking import MATHEMATICAL_THINKING
         from content.navigation import PRIMARY_ACTIONS as NAV_PRIMARY_ACTIONS
         from content.consultant import (
+            ALTERNATIVE_MODELS,
             BRANCHING_FOLLOWUPS,
             MODEL_BUILDER_FIELDS,
+            MODEL_FAILURE_MODES,
             MODEL_TEMPLATES,
             REAL_PROBLEM_REFRAMES,
+            REAL_WORLD_EXAMPLES,
+            SIMILAR_PROBLEMS,
+            assess_confidence,
+            critique_model,
         )
         from content.problem_coach import (
             CHALLENGE_QUESTIONS,
@@ -126,6 +132,29 @@ def main() -> int:
 
     if "default" not in REAL_PROBLEM_REFRAMES:
         errors.append("Missing default real problem reframe")
+
+    if "default" not in SIMILAR_PROBLEMS:
+        errors.append("Missing default similar problems")
+
+    if "default" not in MODEL_FAILURE_MODES:
+        errors.append("Missing default model failure modes")
+
+    if "default" not in ALTERNATIVE_MODELS:
+        errors.append("Missing default alternative models")
+
+    for pid in ("sports", "betting", "medicine", "business", "ai"):
+        if pid not in REAL_WORLD_EXAMPLES:
+            errors.append(f"Missing real-world examples for: {pid}")
+
+    # Sanity-check critique and confidence functions
+    sample = critique_model({}, {}, {}, "sports")
+    for key in ("strengths", "weaknesses", "blind_spots", "improvements"):
+        if key not in sample or not sample[key]:
+            errors.append(f"critique_model missing or empty: {key}")
+
+    conf = assess_confidence({}, {}, {}, "default")
+    if conf.get("score") is None or not conf.get("label"):
+        errors.append("assess_confidence returned invalid result")
 
     if len(CHALLENGE_QUESTIONS) != 5:
         errors.append(f"Expected 5 challenge questions, got {len(CHALLENGE_QUESTIONS)}")

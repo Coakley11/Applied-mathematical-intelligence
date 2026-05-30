@@ -33,7 +33,13 @@ def main() -> int:
         from components.problem_thinking import render_lab_thinking_gate  # noqa: F401
         from components.thinking_lab import render_thinking_topics_panel  # noqa: F401
         from components.problem_coach import compute_thinking_score  # noqa: F401
-        from content.consultant import MODEL_TEMPLATES, BRANCHING_FOLLOWUPS
+        from content.consultant import (
+            ALTERNATIVE_MODELS,
+            MODEL_TEMPLATES,
+            BRANCHING_FOLLOWUPS,
+            SIMILAR_PROBLEMS,
+            critique_model,
+        )
         from content.problem_coach import EXPERT_PERSPECTIVES, PROBLEM_LIBRARY
         from content.problem_solving import (
             ADAPTIVE_QUESTIONS,
@@ -117,6 +123,15 @@ def main() -> int:
 
     if len(BRANCHING_FOLLOWUPS) < 5:
         errors.append("Branching followups < 5")
+
+    if len(SIMILAR_PROBLEMS) < 5:
+        errors.append("Similar problems < 5")
+
+    if len(ALTERNATIVE_MODELS) < 5:
+        errors.append("Alternative models < 5")
+
+    if not critique_model({}, {}, {}, "default").get("strengths"):
+        errors.append("critique_model failed")
 
     if len(ADAPTIVE_QUESTIONS) < 8:
         errors.append("Adaptive question sets < 8")

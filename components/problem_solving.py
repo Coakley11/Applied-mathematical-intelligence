@@ -6,16 +6,22 @@ import streamlit as st
 
 from components.problem_coach import (
     compute_thinking_score,
+    render_alternative_models,
     render_challenge_questions,
+    render_confidence_uncertainty,
+    render_consultant_personalities,
     render_conversational_adaptive,
     render_critical_pushback,
     render_decision_support,
-    render_expert_comparison,
     render_model_builder,
+    render_model_critique,
     render_problem_library,
     render_problem_pipeline,
     render_real_problem_section,
+    render_real_world_examples,
+    render_similar_problems,
     render_thinking_score,
+    render_what_could_break,
 )
 from components.section_intro import render_section_header
 from components.thinking_lab import render_thinking_topics_panel
@@ -24,10 +30,8 @@ from content.problem_solving import (
     EXAMPLE_PROBLEMS,
     MATHEMATICIAN_MODE_TOPICS,
     PROBLEM_BREAKDOWN_STEPS,
-    PROBLEM_CATEGORIES,
     PROBLEM_PATTERNS,
     PROBLEM_SOLVING_LAB,
-    QUESTION_INTENTS,
 )
 
 
@@ -104,6 +108,13 @@ def _render_coaching_flow() -> None:
     st.markdown("---")
     render_real_problem_section(problem, pattern_id)
 
+    # Similar problems & real-world context
+    st.markdown("---")
+    render_similar_problems(pattern_id)
+
+    st.markdown("---")
+    render_real_world_examples(pattern_id)
+
     # Branching discussion
     st.markdown("---")
     adaptive = render_conversational_adaptive(pattern_id, key_prefix)
@@ -156,9 +167,9 @@ def _render_coaching_flow() -> None:
     st.markdown("---")
     challenges = render_challenge_questions(key_prefix)
 
-    # Expert comparison
+    # Alternative models (before building)
     st.markdown("---")
-    render_expert_comparison(pattern, problem)
+    render_alternative_models(pattern_id)
 
     # Score
     st.markdown("---")
@@ -170,6 +181,22 @@ def _render_coaching_flow() -> None:
     # Model builder
     st.markdown("---")
     model = render_model_builder(pattern_id, key_prefix)
+
+    # Model critique
+    st.markdown("---")
+    render_model_critique(model, breakdown, adaptive, pattern_id)
+
+    # What could break
+    st.markdown("---")
+    render_what_could_break(pattern_id, model)
+
+    # Confidence & uncertainty
+    st.markdown("---")
+    render_confidence_uncertainty(model, breakdown, adaptive, pattern_id)
+
+    # Consultant personalities
+    st.markdown("---")
+    render_consultant_personalities(pattern, problem, model)
 
     # Decision support
     st.markdown("---")

@@ -3,10 +3,16 @@
 import streamlit as st
 
 from content.consultant import (
+    ALTERNATIVE_MODELS,
     BRANCHING_FOLLOWUPS,
     MODEL_BUILDER_FIELDS,
+    MODEL_FAILURE_MODES,
     MODEL_TEMPLATES,
     REAL_PROBLEM_REFRAMES,
+    REAL_WORLD_EXAMPLES,
+    SIMILAR_PROBLEMS,
+    assess_confidence,
+    critique_model,
     get_critical_pushbacks,
 )
 from content.problem_coach import (
@@ -152,6 +158,181 @@ def render_challenge_questions(key_prefix: str) -> dict[str, str]:
     return answers
 
 
+def render_similar_problems(pattern_id: str) -> None:
+    """Show related fields and shared concepts — mathematical ideas transfer."""
+    info = SIMILAR_PROBLEMS.get(pattern_id, SIMILAR_PROBLEMS["default"])
+
+    st.markdown("##### Similar problems")
+    st.caption("The same mathematical ideas appear in many domains.")
+
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("**Related fields**")
+        for field in info["related_fields"]:
+            st.markdown(f"- {field}")
+    with c2:
+        st.markdown("**Shared concepts**")
+        for concept in info["shared_concepts"]:
+            st.markdown(f"- {concept}")
+
+    st.info(f"**Transfer insight:** {info['transfer_insight']}")
+
+
+def render_real_world_examples(pattern_id: str) -> None:
+    """Concise real-world applications of similar modeling."""
+    examples = REAL_WORLD_EXAMPLES.get(pattern_id, REAL_WORLD_EXAMPLES["default"])
+
+    st.markdown("##### Where this has been used in real life")
+    st.caption("Practical applications — not theory.")
+
+    for ex in examples:
+        with st.container(border=True):
+            st.markdown(f"**{ex['name']}**")
+            st.caption(ex["use"])
+
+
+def render_alternative_models(pattern_id: str) -> None:
+    """Show different ways to model the same problem."""
+    alternatives = ALTERNATIVE_MODELS.get(pattern_id, ALTERNATIVE_MODELS["default"])
+    template_types = MODEL_TEMPLATES.get(pattern_id, MODEL_TEMPLATES["default"]).get("model_types", [])
+
+    st.markdown("##### Is there another way to think about this?")
+    st.caption("Most problems can be modeled in several valid ways — each with tradeoffs.")
+
+    for alt in alternatives:
+        with st.expander(f"**{alt['name']}**", expanded=False):
+            st.markdown(f"**When to use:** {alt['when']}")
+            st.markdown(f"**Tradeoff:** {alt['tradeoff']}")
+
+    if template_types:
+        st.markdown("**Domain model types you could combine:**")
+        for mt in template_types:
+            st.caption(f"- **{mt['name']}:** {mt['plain']}")
+
+
+def render_model_critique(
+    model: dict[str, str],
+    breakdown: dict[int, str],
+    adaptive: dict,
+    pattern_id: str,
+) -> None:
+    """Evaluate the user's model with strengths, weaknesses, blind spots, improvements."""
+    result = critique_model(model, breakdown, adaptive, pattern_id)
+
+    st.markdown("##### Model critique")
+    st.caption("The consultant evaluates your model — and explains why.")
+
+    dim_labels = [
+        ("Objective clarity", model.get("objective", "") or breakdown.get(1, "")),
+        ("Variable quality", model.get("variables", "") or breakdown.get(2, "")),
+        ("Constraints", model.get("constraints", "") or breakdown.get(3, "")),
+        ("Data quality", model.get("data_inputs", "") or breakdown.get(5, "")),
+        ("Uncertainty", model.get("uncertainty", "") or breakdown.get(4, "")),
+        ("Model complexity", model.get("simplified_model", "") or breakdown.get(6, "")),
+    ]
+    cols = st.columns(3)
+    for i, (label, text) in enumerate(dim_labels):
+        with cols[i % 3]:
+            n = len(text.strip())
+            pct = min(100, int(n / 40 * 100)) if n else 0
+            st.progress(pct / 100, text=f"{label}")
+
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("**Strengths**")
+        for item in result["strengths"]:
+            st.markdown(f"- **{item['text']}** — {item['why']}")
+        st.markdown("**Blind spots**")
+        for item in result["blind_spots"]:
+            st.warning(f"**{item['text']}** — {item['why']}")
+    with c2:
+        st.markdown("**Weaknesses**")
+        for item in result["weaknesses"]:
+            st.markdown(f"- **{item['text']}** — {item['why']}")
+        st.markdown("**Suggested improvements**")
+        for item in result["improvements"]:
+            st.success(f"**{item['text']}** — {item['why']}")
+
+
+def render_what_could_break(pattern_id: str, model: dict[str, str]) -> None:
+    """Identify failure modes — teach robustness and critical thinking."""
+    failure = MODEL_FAILURE_MODES.get(pattern_id, MODEL_FAILURE_MODES["default"])
+
+    st.markdown("##### What could break this model?")
+    st.caption("Robust thinking means knowing how your model fails.")
+
+    for cat in failure["categories"]:
+        with st.expander(f"**{cat['type']}**", expanded=cat["type"] in ("Bad assumptions", "Missing information")):
+            for ex in cat["examples"]:
+                st.markdown(f"- {ex}")
+
+    user_risk = st.text_area(
+        "What is the single biggest risk to *your* model?",
+        key=f"ps_break_{pattern_id}",
+        placeholder="Name one assumption that, if wrong, would invalidate your approach…",
+        height=68,
+    )
+    if user_risk.strip():
+        with st.chat_message("assistant"):
+            st.markdown(
+                f"**Consultant:** You flagged: *{user_risk.strip()}* — good. "
+                "How would you detect this failing before it costs you? What's your early warning signal?"
+            )
+
+
+def render_confidence_uncertainty(
+    model: dict[str, str],
+    breakdown: dict[int, str],
+    adaptive: dict,
+    pattern_id: str,
+) -> None:
+    """Discuss how confident we should be — uncertainty is part of good thinking."""
+    assessment = assess_confidence(model, breakdown, adaptive, pattern_id)
+
+    st.markdown("##### How confident should we be?")
+    st.caption("Good mathematical thinking includes honest uncertainty.")
+
+    color = "#059669" if assessment["score"] >= 65 else "#d97706" if assessment["score"] >= 40 else "#dc2626"
+    st.markdown(
+        f"<div style='text-align:center;padding:0.75rem;border-radius:8px;"
+        f"background:#f8fafc;border:1px solid {color};'>"
+        f"<div style='font-size:1.5rem;font-weight:600;color:{color};'>{assessment['label']}</div>"
+        f"<div style='color:#64748b;font-size:0.85rem;'>Confidence index: {assessment['score']}/90</div></div>",
+        unsafe_allow_html=True,
+    )
+
+    for f in assessment["factors"]:
+        icon = "✓" if f["impact"] == "positive" else "⚠"
+        st.markdown(f"{icon} **{f['factor']}** — {f['detail']}")
+
+    st.info(assessment["guidance"])
+
+
+def render_consultant_personalities(pattern: dict, problem: str, model: dict[str, str]) -> None:
+    """View the problem through different consultant personalities."""
+    st.markdown("##### Consultant personalities")
+    st.caption("Each expert emphasizes different concerns — pick one to hear their take.")
+
+    roles = [e["role"] for e in EXPERT_PERSPECTIVES]
+    chosen = st.selectbox("Whose perspective?", roles, key="ps_personality")
+
+    expert = next(e for e in EXPERT_PERSPECTIVES if e["role"] == chosen)
+    objective = model.get("objective", "")[:80] or problem[:80]
+
+    with st.chat_message("assistant"):
+        st.markdown(
+            f"{expert['icon']} **As a {expert['role']}**, my primary concern is "
+            f"**{expert.get('primary_concern', expert['lens'])}**.\n\n"
+            f"{expert.get('personality', expert['lens'])}\n\n"
+            f"On your problem — *{objective}* — I'd ask:"
+        )
+        for q in expert["questions"]:
+            st.markdown(f"- {q}")
+
+    with st.expander("Compare all six personalities", expanded=False):
+        render_expert_comparison(pattern, problem)
+
+
 def render_expert_comparison(pattern: dict, problem: str) -> None:
     """Compare how different experts would approach the same problem."""
     st.markdown("##### How would different experts approach this?")
@@ -173,6 +354,7 @@ def render_expert_comparison(pattern: dict, problem: str) -> None:
             with st.container(border=True):
                 st.markdown(f"{expert['icon']} **{expert['role']}**")
                 st.caption(expert["lens"])
+                st.caption(f"*Emphasis:* {expert.get('primary_concern', '')}")
                 st.markdown(f"*Approach:* {expert.get('approach', expert['lens'])}")
                 for q in expert["questions"][:2]:
                     st.markdown(f"- {q}")

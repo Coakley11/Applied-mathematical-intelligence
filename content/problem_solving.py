@@ -4,11 +4,10 @@ PROBLEM_SOLVING_LAB = {
     "title": "Mathematical Problem Solving Lab",
     "icon": "🧠",
     "action": "Solve a Problem",
-    "tagline": "Your mathematical consultant — discussion, modeling, and decision support before formulas.",
+    "tagline": "Your quantitative consultant — critique models, stress-test assumptions, decide with clarity.",
     "intro": (
-        "Describe any problem. The consultant reframes what you're really solving, adapts follow-up "
-        "questions to your answers, challenges assumptions, compares expert perspectives, and helps "
-        "you build a model in plain language."
+        "Describe any problem. The consultant reframes it, shows similar problems and real-world examples, "
+        "helps you build and critique a model, identifies what could break it, and assesses confidence honestly."
     ),
 }
 
