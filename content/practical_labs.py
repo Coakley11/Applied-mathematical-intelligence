@@ -47,6 +47,12 @@ PRACTICAL_LABS = {
             "Use expected value and pot odds to check poker decisions and casino bets. "
             "The math tells you what wins long-term — not what happens on one hand."
         ),
+        "start_here": "Pick a tool below, set your numbers, and run the simulation. The app tells you whether the decision is worth it long-term.",
+        "start_steps": [
+            "Open **Is This Call Worth It?** for poker decisions.",
+            "Enter pot size, call amount, and your win chance.",
+            "Read the verdict — positive expected value means the call wins over time.",
+        ],
         "tools": [
             {"name": "Is This Call Worth It?", "runner_id": "lab_poker"},
             {"name": "Why the House Always Wins", "runner_id": "casino_edge"},
@@ -64,6 +70,12 @@ PRACTICAL_LABS = {
             "Translate odds into probabilities, check if a bet has positive expected value, "
             "and adjust team ratings when sample sizes are small."
         ),
+        "start_here": "Start with **Is This Bet Worth It?** — enter the odds and your estimated win chance to see if there's an edge.",
+        "start_steps": [
+            "Convert betting odds to an implied probability.",
+            "Compare that to your own win estimate.",
+            "If your estimate is higher, the bet may have positive expected value.",
+        ],
         "tools": [
             {"name": "Is This Bet Worth It?", "runner_id": "lab_sports_betting"},
             {"name": "Separate Signal from Noise", "runner_id": "sports_shrinkage"},
@@ -83,6 +95,12 @@ PRACTICAL_LABS = {
             "See how diseases spread through populations, whether treatment beats tumor growth, "
             "and how drug concentration changes over time."
         ),
+        "start_here": "Pick a scenario — disease outbreak, tumor vs treatment, or drug levels — then move the sliders and watch what changes.",
+        "start_steps": [
+            "Open **Disease Spread Simulator** to model an outbreak.",
+            "Adjust infection and recovery rates.",
+            "See how many people are susceptible, infected, or recovered over time.",
+        ],
         "tools": [
             {"name": "Disease Spread Simulator", "runner_id": "epidemic_sir"},
             {"name": "Tumor Growth vs Treatment", "runner_id": "tumor_growth"},
@@ -102,6 +120,12 @@ PRACTICAL_LABS = {
             "AI learns by minimizing error — gradient descent is the engine. "
             "Adjust learning rate and training steps to see convergence in action."
         ),
+        "start_here": "Open **How AI Learns**, pick a learning rate, and watch the model improve step by step.",
+        "start_steps": [
+            "Start with a moderate learning rate.",
+            "Run training and watch the loss drop.",
+            "Try too high or too low — see why the rate matters.",
+        ],
         "tools": [
             {"name": "How AI Learns", "runner_id": "lab_ai_training"},
             {"name": "Train a Mini Neural Network", "runner_id": "ai_ml_suite"},
@@ -179,23 +203,24 @@ PRIMARY_ACTIONS = [
     "Explore Mathematical Thinking",
 ]
 
+PRIMARY_ACTION_TAGLINES = {
+    "Analyze a Bet": "Is this call or wager worth it?",
+    "Predict a Game": "Find edge in odds and forecasts.",
+    "Model a Disease": "Simulate spread, growth, and treatment.",
+    "Train an AI": "Watch a model learn in real time.",
+    "Optimize a Decision": "Improve a strategy or process.",
+    "Analyze an Idea": "See what to measure and model.",
+    "Explore Mathematical Thinking": "Think like a quant — step by step.",
+}
+
 PRIMARY_ACTION_DESCRIPTIONS = {
-    "Analyze a Bet": ACTION_DESCRIPTIONS["Betting & Poker Lab"],
-    "Predict a Game": ACTION_DESCRIPTIONS["Sports Prediction Lab"],
-    "Model a Disease": ACTION_DESCRIPTIONS["Medicine & Disease Lab"],
-    "Train an AI": ACTION_DESCRIPTIONS["AI Learning Lab"],
-    "Optimize a Decision": (
-        "Define your objective, variables, and constraints — then build a mathematical framework "
-        "to improve poker strategy, traffic, treatment outcomes, or any decision."
-    ),
-    "Analyze an Idea": (
-        "Enter a business idea, invention, or strategy. Discover what variables matter, "
-        "what to model, and which mathematical tools could help."
-    ),
-    "Explore Mathematical Thinking": (
-        "Learn how mathematical thinkers approach problems — modeling, uncertainty, "
-        "simplification, and turning real-world questions into math."
-    ),
+    "Analyze a Bet": "Run expected-value checks on poker calls and casino bets.",
+    "Predict a Game": "Compare win probabilities to the odds on the board.",
+    "Model a Disease": "Explore outbreaks, tumor growth, and drug levels.",
+    "Train an AI": "Adjust learning rate and watch training unfold.",
+    "Optimize a Decision": "Pick a problem, define the goal, try an optimizer.",
+    "Analyze an Idea": "Type an idea — get variables, data, and next steps.",
+    "Explore Mathematical Thinking": "Short frameworks for any real-world problem.",
 }
 
 PRIMARY_ACTION_ICONS = {
@@ -229,15 +254,15 @@ ACTION_SECTION_TYPES = {
 }
 
 NAV_HELP = {
-    "Home": "Pick a real-world problem and start experimenting.",
-    "Analyze a Bet": "Expected value, pot odds, and casino edge — is the decision worth it?",
-    "Predict a Game": "Sports probabilities, odds, ratings, and trend forecasting.",
-    "Model a Disease": "Disease spread, tumor growth, and drug concentration.",
-    "Train an AI": "Gradient descent and neural network training.",
-    "Optimize a Decision": "Define objectives, constraints, and build an optimization framework.",
-    "Analyze an Idea": "Mathematical brainstorming for inventions, strategies, and systems.",
-    "Explore Mathematical Thinking": "How quantitative thinkers approach any problem.",
-    "Advanced reference": "Optional — extra labs, 32 domain case studies, and portfolio specs.",
+    "Home": "Pick a problem and jump in.",
+    "Analyze a Bet": "Check expected value and pot odds.",
+    "Predict a Game": "Compare probabilities to betting odds.",
+    "Model a Disease": "Simulate spread, tumors, and drug levels.",
+    "Train an AI": "Watch gradient descent train a model.",
+    "Optimize a Decision": "Define your goal and find the best mix.",
+    "Analyze an Idea": "Brainstorm variables, data, and tools.",
+    "Explore Mathematical Thinking": "Frameworks for approaching any problem.",
+    "Advanced reference": "Optional reading — skip if you're just getting started.",
 }
 
 NUM_PRIMARY_ACTIONS = len(PRIMARY_ACTIONS)

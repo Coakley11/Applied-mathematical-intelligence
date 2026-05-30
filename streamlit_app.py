@@ -39,7 +39,11 @@ if "view_mode" not in st.session_state:
 st.sidebar.title("What do you want to do?")
 st.sidebar.caption(f"Applied Mathematical Intelligence · v{VERSION}")
 
-nav_index = PRIMARY_NAV.index(st.session_state.view_mode) if st.session_state.view_mode in PRIMARY_NAV else 0
+nav_index = (
+    PRIMARY_NAV.index(st.session_state.view_mode)
+    if st.session_state.view_mode in PRIMARY_NAV
+    else 0
+)
 
 view_mode = st.sidebar.radio(
     "Choose",
@@ -50,17 +54,22 @@ view_mode = st.sidebar.radio(
 
 st.session_state.view_mode = view_mode
 
-st.sidebar.markdown(
-    f"<p style='font-size:0.82rem;color:#64748b;margin:-0.25rem 0 1rem 0;'>{NAV_HELP[view_mode]}</p>",
-    unsafe_allow_html=True,
-)
+help_text = NAV_HELP.get(view_mode, "")
+if help_text:
+    st.sidebar.markdown(
+        f"<p style='font-size:0.82rem;color:#64748b;margin:-0.25rem 0 1rem 0;'>{help_text}</p>",
+        unsafe_allow_html=True,
+    )
+
+st.sidebar.caption("Items at the bottom of the list are optional reading.")
 
 ref_lens = "Statistics / Pattern Detection"
 ref_depth = "Professional Overview"
 if view_mode == "Advanced reference":
     st.sidebar.markdown("---")
+    st.sidebar.caption("Optional filters for background reading")
     ref_lens = st.sidebar.selectbox(
-        "Math lens",
+        "Focus area",
         [
             "Calculus / Accumulation",
             "Probability / Uncertainty",
@@ -69,9 +78,10 @@ if view_mode == "Advanced reference":
             "Simulation / Alternate Futures",
             "AI / Learning Systems",
         ],
+        label_visibility="visible",
     )
     ref_depth = st.sidebar.radio(
-        "Depth",
+        "Detail level",
         ["Professional Overview", "Technical Explanation", "Portfolio / Interview Framing"],
     )
 

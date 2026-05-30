@@ -275,11 +275,28 @@ def inject_platform_styles() -> None:
             color: #0f172a;
             line-height: 1.3;
         }
-        .ami-action-card p {
-            margin: 0;
-            font-size: 0.88rem;
-            color: #64748b;
-            line-height: 1.5;
+        .ami-action-card-compact {
+            padding: 1.25rem 1rem 0.75rem 1rem;
+        }
+        .ami-action-card-compact h3 {
+            font-size: 1.1rem;
+            margin: 0 0 0.35rem 0;
+        }
+        .ami-action-card-compact p {
+            font-size: 0.84rem;
+            line-height: 1.4;
+        }
+        .ami-action-card-compact .ami-action-icon {
+            font-size: 2.25rem;
+            margin-bottom: 0.5rem;
+        }
+        .ami-start-label {
+            font-size: 0.72rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: #059669;
+            margin: 0 0 0.5rem 0;
         }
         .ami-action-tools {
             margin-top: 0.75rem;

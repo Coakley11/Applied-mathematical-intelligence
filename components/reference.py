@@ -17,40 +17,42 @@ def render_reference_library(
     math_lens: str = "Statistics / Pattern Detection",
     depth: str = "Professional Overview",
 ) -> None:
+    st.warning(
+        "**Optional section** — you do not need this to use the main tools. "
+        "Come here for extra labs, background reading, or interview project ideas."
+    )
+
     st.markdown(
         """
         <div class="ami-hero ami-hero-ref">
-            <h1>Advanced Reference</h1>
-            <p class="ami-tagline">Optional depth — extra labs, case studies, domain write-ups, and portfolio specs.</p>
-            <p class="ami-purpose">You do not need this for the main experience. Open it when you want background reading, additional simulation labs, or interview project ideas.</p>
+            <h1>Advanced reference</h1>
+            <p class="ami-tagline">Encyclopedia depth — for when you want to read, not just do.</p>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    section = st.radio(
-        "Browse",
+    section = st.selectbox(
+        "What are you looking for?",
         [
             "Extra simulation labs",
             "Domain case studies",
-            "Math themes",
-            "Mathematical thinking (full)",
-            "Portfolio projects",
+            "Background reading on math ideas",
+            "Full thinking framework",
+            "Portfolio project specs",
         ],
-        horizontal=True,
-        label_visibility="collapsed",
     )
 
     if section == "Extra simulation labs":
         _render_secondary_labs()
     elif section == "Domain case studies":
         _render_domains_reference(run_simulation, math_lens, depth)
-    elif section == "Math themes":
+    elif section == "Background reading on math ideas":
         _render_themes_reference(depth)
-    elif section == "Mathematical thinking (full)":
+    elif section == "Full thinking framework":
         st.caption(
-            "The full cross-domain thinking framework. For interactive topic-by-topic exploration, "
-            "use **Explore Mathematical Thinking** in the main sidebar."
+            "The long-form version. For short interactive topics, use "
+            "**Explore Mathematical Thinking** in the main sidebar."
         )
         render_mathematical_thinking(MATHEMATICAL_THINKING)
     else:
@@ -58,15 +60,15 @@ def render_reference_library(
 
 
 def _render_secondary_labs() -> None:
-    st.caption("Additional simulation labs — weather, space, and core math systems.")
+    st.caption("Weather, space, and core math tools — same guided format as the main sections.")
     choice = st.selectbox("Lab", SECONDARY_LAB_NAMES)
     render_practical_lab(choice)
 
 
 def _render_domains_reference(run_simulation, math_lens: str, depth: str) -> None:
-    st.caption(f"{len(DOMAIN_NAMES)} professional domains — simulation first, reading optional.")
+    st.caption(f"{len(DOMAIN_NAMES)} professional domains — run a simulation first, read later.")
 
-    search = st.text_input("Search domains", placeholder="e.g. finance, epidemic, climate…")
+    search = st.text_input("Search", placeholder="e.g. finance, epidemic, climate…")
     filtered = DOMAIN_NAMES
     if search.strip():
         q = search.strip().lower()
@@ -110,7 +112,7 @@ def _render_domains_reference(run_simulation, math_lens: str, depth: str) -> Non
 
 
 def _render_themes_reference(depth: str) -> None:
-    st.caption("Six mathematical systems — read when you want theory behind the labs.")
-    choice = st.selectbox("Theme", THEME_NAMES)
-    with st.expander("Full theme reference", expanded=True):
+    st.caption("Six big ideas behind the simulations — read when you're curious, not before you start.")
+    choice = st.selectbox("Topic", THEME_NAMES)
+    with st.expander("Full write-up", expanded=True):
         render_theme_page(THEMES[choice], depth)

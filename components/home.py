@@ -3,57 +3,39 @@
 import streamlit as st
 
 from components.nav import render_action_grid
-from content.platform_meta import NUM_PRIMARY_ACTIONS, VERSION
+from content.platform_meta import VERSION
 
 
 def render_home() -> None:
     st.markdown(
         """
         <div class="ami-hero ami-hero-action">
-            <h1>Applied Mathematical Intelligence</h1>
-            <p class="ami-tagline">A Mathematical Thinking Lab — not a textbook.</p>
+            <h1>What do you want to do?</h1>
+            <p class="ami-tagline">Pick a problem. Run a simulation. See what the math says.</p>
             <p class="ami-purpose">
-                Bring a problem, decision, prediction, strategy, or idea. The app helps you
-                think about it mathematically — through simulations, optimization, and guided reasoning.
+                No textbook — just hands-on tools for bets, games, medicine, AI, decisions, and ideas.
             </p>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    st.markdown('<p class="ami-section-title">What do you want to do?</p>', unsafe_allow_html=True)
-    st.markdown(
-        '<p class="ami-section-sub">Pick a card below or use the sidebar. Each section guides you step by step.</p>',
-        unsafe_allow_html=True,
-    )
-
     render_action_grid()
 
-    st.caption(
-        f"v{VERSION} · {NUM_PRIMARY_ACTIONS} action labs · "
-        "Educational simulations only"
-    )
+    st.caption(f"v{VERSION} · Educational simulations only · Not professional advice")
 
-    with st.expander("How this app works", expanded=False):
+    with st.expander("How this works (30 seconds)", expanded=False):
         st.markdown(
             """
-            1. **Pick a problem** — betting, sports, medicine, AI, optimization, ideas, or thinking frameworks.
-            2. **Work through the guided steps** — define objectives, variables, and constraints.
-            3. **Run simulations** — change assumptions and see what happens.
-            4. **Show the math behind this** — optional expander explains why the mathematics matters.
-            5. **Try the math yourself** — hands-on calculators and brainstorming prompts.
+            1. **Pick a card** — each one is a standalone tool.
+            2. **Follow Start here** — plain English, no prerequisites.
+            3. **Run the simulation** — change sliders, see results.
+            4. **Go deeper** — optional expanders for the math behind it.
             """
         )
 
-    with st.expander("More labs & advanced reference (optional)", expanded=False):
+    with st.expander("Looking for encyclopedia depth?", expanded=False):
         st.markdown(
-            """
-            **Additional simulation labs** (Weather, Space, Math Systems) and **32 domain case studies**
-            live under **Advanced reference** in the sidebar — open when you want encyclopedia depth.
-            """
+            "Extra labs (weather, space) and 32 domain write-ups live under "
+            "**Advanced reference** at the bottom of the sidebar — completely optional."
         )
-
-    st.info(
-        "**New here?** Click **Analyze a Bet** or **Explore Mathematical Thinking** above, "
-        "or pick any card from the sidebar."
-    )

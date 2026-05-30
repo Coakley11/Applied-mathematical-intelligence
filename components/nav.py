@@ -5,9 +5,8 @@ import html
 import streamlit as st
 
 from content.practical_labs import (
-    PRIMARY_ACTION_DESCRIPTIONS,
     PRIMARY_ACTION_ICONS,
-    PRIMARY_ACTION_LABELS,
+    PRIMARY_ACTION_TAGLINES,
     PRIMARY_ACTIONS,
 )
 
@@ -19,22 +18,20 @@ def navigate_to(action: str) -> None:
 
 
 def render_action_button(action: str, key: str) -> None:
-    """Large action card with click-to-navigate button."""
+    """Compact action card — icon, title, one short line."""
     icon = PRIMARY_ACTION_ICONS[action]
-    label = PRIMARY_ACTION_LABELS[action]
-    desc = PRIMARY_ACTION_DESCRIPTIONS[action]
+    tagline = PRIMARY_ACTION_TAGLINES[action]
     st.markdown(
         f"""
-        <div class="ami-action-card">
+        <div class="ami-action-card ami-action-card-compact">
             <div class="ami-action-icon">{html.escape(icon)}</div>
-            <div class="ami-action-label">{html.escape(action)}</div>
-            <h3>{html.escape(label)}</h3>
-            <p>{html.escape(desc)}</p>
+            <h3>{html.escape(action)}</h3>
+            <p>{html.escape(tagline)}</p>
         </div>
         """,
         unsafe_allow_html=True,
     )
-    if st.button(f"Open → {action}", key=key, use_container_width=True):
+    if st.button("Start →", key=key, use_container_width=True, type="primary"):
         navigate_to(action)
 
 

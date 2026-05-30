@@ -1,6 +1,4 @@
-"""Guided tool renderer — plain-language intro, simulation, math expanders."""
-
-import html
+"""Guided tool renderer — plain-language intro, simulation, optional depth."""
 
 import streamlit as st
 
@@ -27,37 +25,33 @@ def render_guided_tool(runner_id: str) -> None:
         return
 
     st.markdown(f"### {guide['plain_name']}")
+    st.markdown(guide["what"])
 
-    with st.container(border=True):
-        st.markdown("#### What is this?")
-        st.markdown(guide["what"])
-        c1, c2 = st.columns(2)
-        with c1:
-            st.markdown("**Why should I care?**")
-            st.markdown(guide["why"])
-        with c2:
-            st.markdown("**What am I trying to figure out?**")
-            st.markdown(guide["figuring_out"])
-        st.markdown(f"**Math used:** {guide['math_used']}")
-        st.markdown(f"**What you can change:** {guide['controls']}")
-
-    st.markdown("---")
-    st.markdown("#### Run the simulation")
+    st.markdown("#### Run it")
     run_tool(runner_id)
 
-    st.markdown("---")
-    st.markdown("#### How to read the result")
+    st.markdown("#### What to look for")
     st.info(guide["interpret"])
 
-    with st.expander("Show the math behind this", expanded=False):
+    with st.expander("Go deeper (optional)", expanded=False):
+        st.markdown("**Why this matters**")
+        st.markdown(guide["why"])
+        st.markdown("**What you're figuring out**")
+        st.markdown(guide["figuring_out"])
+        st.markdown("**What you can change**")
+        st.markdown(guide["controls"])
+        st.markdown("---")
+        st.markdown("**The math behind this**")
         st.markdown(guide["math_behind"])
-
-    with st.expander("Try the math yourself", expanded=False):
+        st.caption(f"Concepts used: {guide['math_used']}")
+        st.markdown("---")
+        st.markdown("**Try the math yourself**")
         practice_id = guide.get("practice_id", "")
         render_math_practice(
             practice_id,
             key_prefix=f"{runner_id}_{practice_id}",
         )
-
-    with st.expander("Portfolio / advanced project idea", expanded=False):
-        st.markdown(guide.get("portfolio_idea", "Build a Python notebook extending this simulation with real data."))
+        if guide.get("portfolio_idea"):
+            st.markdown("---")
+            st.markdown("**Project idea**")
+            st.markdown(guide["portfolio_idea"])
