@@ -16,9 +16,9 @@ def main() -> int:
 
     try:
         from content.domains import DOMAINS, DOMAIN_NAMES
-        from content.interactive_labs import INTERACTIVE_LABS, LAB_NAMES
         from content.mathematical_thinking import MATHEMATICAL_THINKING
         from content.portfolio import PORTFOLIO_PROBLEMS
+        from content.practical_labs import PRACTICAL_LABS, PRACTICAL_LAB_NAMES
         from content.themes import THEME_NAMES
         from simulations.labs import LAB_RUNNERS
         from simulations.registry import SIMULATION_RUNNERS
@@ -26,16 +26,18 @@ def main() -> int:
         print(f"IMPORT FAIL: {exc}")
         return 1
 
-    for name in LAB_NAMES:
-        lab = INTERACTIVE_LABS[name]
-        rid = lab.get("runner_id")
-        if not rid or rid not in LAB_RUNNERS:
-            errors.append(f"Missing lab runner '{rid}' for '{name}'")
-        elif not callable(LAB_RUNNERS[rid]):
-            errors.append(f"Lab runner not callable: {rid}")
+    all_runners = {**LAB_RUNNERS, **SIMULATION_RUNNERS}
+    for name in PRACTICAL_LAB_NAMES:
+        lab = PRACTICAL_LABS[name]
+        for tool in lab.get("tools", []):
+            rid = tool.get("runner_id")
+            if not rid or rid not in all_runners:
+                errors.append(f"Missing tool runner '{rid}' in lab '{name}'")
+            elif not callable(all_runners[rid]):
+                errors.append(f"Tool runner not callable: {rid}")
 
-    if len(LAB_NAMES) != 6:
-        errors.append(f"Expected 6 interactive labs, got {len(LAB_NAMES)}")
+    if len(PRACTICAL_LAB_NAMES) != 5:
+        errors.append(f"Expected 5 practical labs, got {len(PRACTICAL_LAB_NAMES)}")
 
     for name in DOMAIN_NAMES:
         sid = DOMAINS[name].get("simulation_id")
@@ -81,7 +83,7 @@ def main() -> int:
 
     cs_domains = sum(1 for d in DOMAINS.values() if d.get("case_studies"))
     print("QA PASSED")
-    print(f"  interactive labs: {len(LAB_NAMES)}")
+    print(f"  practical labs: {len(PRACTICAL_LAB_NAMES)}")
     print(f"  domains: {len(DOMAIN_NAMES)}")
     print(f"  simulations: {len(SIMULATION_RUNNERS)}")
     print(f"  domains with case studies: {cs_domains}")

@@ -4,7 +4,7 @@ import importlib
 
 import streamlit as st
 
-from components.labs import render_page_summary
+from components.practical_labs import render_page_summary
 from data.registry import describe_source
 
 
@@ -107,6 +107,7 @@ def render_domain_page(
     depth: str,
     active_lens: str,
     run_simulation,
+    skip_simulation: bool = False,
 ) -> None:
     section(domain["title"])
     st.markdown(domain["tagline"])
@@ -161,7 +162,7 @@ def render_domain_page(
     if data_key:
         _render_data_readiness(data_key)
 
-    if depth != "Portfolio / Interview Framing":
+    if depth != "Portfolio / Interview Framing" and not skip_simulation:
         st.subheader("Interactive Simulation")
         st.caption(domain.get("simulation_caption", "Explore the system dynamics below."))
         run_simulation(domain.get("simulation_id"))

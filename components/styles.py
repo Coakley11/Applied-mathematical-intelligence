@@ -231,6 +231,62 @@ def inject_platform_styles() -> None:
             color: #0f172a;
             font-size: 0.98rem;
         }
+        .ami-hero-action {
+            background: linear-gradient(135deg, #0c4a6e 0%, #1e40af 45%, #312e81 100%);
+        }
+        .ami-hero-ref {
+            background: linear-gradient(135deg, #334155 0%, #1e293b 55%, #0f172a 100%);
+        }
+        .ami-action-card {
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+            border-radius: 16px;
+            padding: 1.75rem 1.5rem;
+            height: 100%;
+            text-align: center;
+            box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
+            transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+        }
+        .ami-action-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 12px 28px rgba(14, 165, 233, 0.15);
+            border-color: #0ea5e9;
+        }
+        .ami-action-icon {
+            font-size: 2.75rem;
+            line-height: 1;
+            margin-bottom: 0.75rem;
+        }
+        .ami-action-label {
+            display: inline-block;
+            font-size: 0.72rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: #0369a1;
+            background: #e0f2fe;
+            padding: 0.3rem 0.65rem;
+            border-radius: 999px;
+            margin-bottom: 0.65rem;
+        }
+        .ami-action-card h3 {
+            margin: 0 0 0.5rem 0;
+            font-size: 1.05rem;
+            color: #0f172a;
+            line-height: 1.3;
+        }
+        .ami-action-card p {
+            margin: 0;
+            font-size: 0.88rem;
+            color: #64748b;
+            line-height: 1.5;
+        }
+        .ami-action-tools {
+            margin-top: 0.75rem;
+            font-size: 0.75rem;
+            color: #94a3b8;
+            line-height: 1.4;
+        }
         .ami-step-body p {
             margin: 0;
             color: #475569;
