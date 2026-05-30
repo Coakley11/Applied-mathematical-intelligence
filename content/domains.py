@@ -693,3 +693,7 @@ DOMAINS["Weather Forecasting"] = _domain(
 )
 
 DOMAIN_NAMES = sorted(DOMAINS.keys())
+
+from content.domain_depth import apply_domain_depth
+
+apply_domain_depth(DOMAINS)

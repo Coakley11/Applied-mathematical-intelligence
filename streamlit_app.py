@@ -5,11 +5,13 @@ import streamlit as st
 from components.home import render_home
 from components.layout import render_domain_page, render_portfolio_lab, render_theme_page
 from components.styles import inject_platform_styles
+from components.thinking import render_mathematical_thinking
 from content.domains import DOMAINS, DOMAIN_NAMES
+from content.mathematical_thinking import MATHEMATICAL_THINKING
 from content.platform_meta import VERSION
 from content.portfolio import PORTFOLIO_PROBLEMS
 from content.themes import THEMES, THEME_NAMES
-from simulations.runner import run_simulation
+from simulations.registry import run_simulation
 
 st.set_page_config(
     page_title="Applied Mathematical Intelligence",
@@ -20,7 +22,6 @@ st.set_page_config(
 
 inject_platform_styles()
 
-# Lens → domain filter keywords (substring match on primary_lenses)
 LENS_FILTER = {
     "Calculus / Accumulation": "Calculus",
     "Probability / Uncertainty": "Probability",
@@ -30,19 +31,26 @@ LENS_FILTER = {
     "AI / Learning Systems": "AI",
 }
 
-# Sidebar navigation — internal key → clear label
-NAV_OPTIONS = ["Home", "Mathematical Themes", "Applied Domains", "Portfolio Lab"]
+NAV_OPTIONS = [
+    "Home",
+    "Mathematical Thinking",
+    "Mathematical Themes",
+    "Applied Domains",
+    "Portfolio Lab",
+]
 NAV_LABELS = {
     "Home": "Home — platform overview",
+    "Mathematical Thinking": "Mathematical Thinking — how quantitative intelligence works",
     "Mathematical Themes": "Mathematical Themes — deep math systems",
     "Applied Domains": "Applied Domains — real-world professional fields",
     "Portfolio Lab": "Portfolio Lab — Excel, Python & interview projects",
 }
 NAV_HELP = {
-    "Home": "Landing page, featured domains, and how to navigate the laboratory.",
-    "Mathematical Themes": "Calculus, probability, statistics, optimization, simulation, and AI as intelligence systems.",
-    "Applied Domains": "Finance, medicine, robotics, climate, elections, cryptography, and 25+ other fields.",
-    "Portfolio Lab": "Project briefs for portfolios and quantitative interviews.",
+    "Home": "Landing page, featured domains, and orientation.",
+    "Mathematical Thinking": "Cross-domain philosophy: modeling, uncertainty, optimization, and AI.",
+    "Mathematical Themes": "Calculus, probability, statistics, optimization, simulation, and AI as systems.",
+    "Applied Domains": "Finance, medicine, robotics, climate, elections, cryptography, and more.",
+    "Portfolio Lab": "GitHub-ready project specifications with interview framing.",
 }
 
 # =====================================================
@@ -56,7 +64,7 @@ view_mode = st.sidebar.radio(
     "Section",
     NAV_OPTIONS,
     format_func=lambda x: NAV_LABELS[x],
-    help="Choose what to explore. Themes = theory; Domains = practice; Portfolio = projects.",
+    help="Themes = theory; Domains = practice; Thinking = unified framework; Portfolio = projects.",
 )
 
 st.sidebar.markdown(
@@ -80,11 +88,7 @@ selection = None
 
 if view_mode == "Mathematical Themes":
     st.sidebar.markdown("**Select a mathematical system**")
-    selection = st.sidebar.selectbox(
-        "Theme",
-        THEME_NAMES,
-        label_visibility="collapsed",
-    )
+    selection = st.sidebar.selectbox("Theme", THEME_NAMES, label_visibility="collapsed")
 elif view_mode == "Applied Domains":
     st.sidebar.markdown("**Select a professional field**")
     lens_key = LENS_FILTER[math_lens]
@@ -99,19 +103,10 @@ elif view_mode == "Applied Domains":
     domain_list = DOMAIN_NAMES if show_all else filtered
     if not show_all and len(filtered) < len(DOMAIN_NAMES):
         st.sidebar.caption(f"{len(filtered)} domains match **{math_lens}**.")
-    selection = st.sidebar.selectbox(
-        "Domain",
-        domain_list,
-        label_visibility="collapsed",
-    )
-elif view_mode == "Portfolio Lab":
-    st.sidebar.info(
-        "**Portfolio Lab** — Excel models, Python notebooks, and interview talking points. "
-        "Build these as GitHub or portfolio artifacts."
-    )
+    selection = st.sidebar.selectbox("Domain", domain_list, label_visibility="collapsed")
 
 st.sidebar.markdown("---")
-st.sidebar.caption("Cursor + Git workflow · develop on `dev`, release on `main`")
+st.sidebar.caption("Develop on `dev` · release on `main`")
 
 # =====================================================
 # MAIN CONTENT
@@ -120,34 +115,28 @@ st.sidebar.caption("Cursor + Git workflow · develop on `dev`, release on `main`
 if view_mode == "Home":
     render_home()
 
+elif view_mode == "Mathematical Thinking":
+    render_mathematical_thinking(MATHEMATICAL_THINKING)
+
 elif view_mode == "Mathematical Themes":
     st.title("Mathematical Themes")
-    st.caption("Deep mathematical intelligence systems — the theory layer of the platform.")
+    st.caption("Deep mathematical intelligence systems — the theory layer.")
     if selection:
         render_theme_page(THEMES[selection], depth)
 
 elif view_mode == "Applied Domains":
     st.title("Applied Domains")
-    st.caption("Professional real-world applications — where mathematics meets institutions and decisions.")
+    st.caption("Professional fields where mathematical systems drive predictions and decisions.")
     if selection:
-        render_domain_page(
-            DOMAINS[selection],
-            depth,
-            math_lens,
-            run_simulation,
-        )
+        render_domain_page(DOMAINS[selection], depth, math_lens, run_simulation)
 
 elif view_mode == "Portfolio Lab":
     st.title("Portfolio Lab")
-    st.caption("Excel, Python, and interview project ideas — demonstrate applied quantitative work.")
+    st.caption("Quantitative project specifications for Excel, Python, GitHub, and interviews.")
     render_portfolio_lab(PORTFOLIO_PROBLEMS)
-
-# =====================================================
-# FOOTER
-# =====================================================
 
 st.markdown("---")
 st.caption(
-    f"Applied Mathematical Intelligence v{VERSION} | Quantitative modeling laboratory — "
-    "conceptual demonstrations, not professional advice."
+    f"Applied Mathematical Intelligence v{VERSION} | Quantitative systems laboratory — "
+    "not professional advice."
 )

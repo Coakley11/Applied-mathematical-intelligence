@@ -1,6 +1,10 @@
 """Shared UI components for Applied Mathematical Intelligence."""
 
+import importlib
+
 import streamlit as st
+
+from data.registry import describe_source
 
 
 LENS_KEYS = {
@@ -127,6 +131,21 @@ def render_domain_page(
         st.markdown(f"**{item['title']}** ({item.get('era', '—')})")
         st.markdown(item["description"])
 
+    case_studies = domain.get("case_studies", [])
+    if case_studies:
+        st.subheader("Professional Case Studies")
+        for cs in case_studies:
+            with st.expander(f"**{cs['title']}** — {cs.get('setting', 'Industry')}"):
+                st.markdown(f"**Problem:** {cs['problem']}")
+                st.markdown(f"**Approach:** {cs['approach']}")
+                st.markdown("**Methods:** " + ", ".join(cs.get("methods", [])))
+                st.markdown(f"**Impact:** {cs['impact']}")
+                st.markdown(f"*Insight:* {cs['lesson']}")
+
+    data_key = domain.get("data_source")
+    if data_key:
+        _render_data_readiness(data_key)
+
     if depth != "Portfolio / Interview Framing":
         st.subheader("Interactive Simulation")
         st.caption(domain.get("simulation_caption", "Explore the system dynamics below."))
@@ -153,29 +172,64 @@ def render_domain_page(
         st.success(domain.get("portfolio_tip", domain["portfolio_ideas"][0]))
 
 
+def _render_data_readiness(source_key: str) -> None:
+    meta = describe_source(source_key)
+    if not meta:
+        return
+    st.subheader("Real Data Integration (Ready to Wire)")
+    st.caption(
+        "Placeholder loaders exist — swap in live APIs when you are ready without restructuring the app."
+    )
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown(f"**Source:** {meta['label']}")
+        st.markdown(f"**Provider:** {meta['provider']}")
+        st.markdown(f"**Install:** `{meta['install_hint']}`")
+    with c2:
+        st.markdown(f"**Module:** `{meta['module']}`")
+        st.markdown("**Functions:**")
+        bullet_block(meta["functions"])
+    try:
+        mod = importlib.import_module(meta["module"])
+        status = getattr(mod, "INTEGRATION_STATUS", "unknown")
+        st.info(f"Integration status: **{status}** — returns schema-ready empty frames until connected.")
+    except ImportError:
+        st.warning("Data module not found.")
+
+
 def render_portfolio_lab(problems: list[dict]) -> None:
     section("Portfolio & Interview Laboratory")
 
     st.markdown("""
-    Professional applied mathematics is demonstrated through **projects**, not worksheets.
-    Each problem below is designed as a portfolio artifact: a model, a simulation,
-    a forecast, or an optimization study you can discuss in interviews.
+    Build **GitHub-ready quantitative projects** — each specification below includes the business or scientific
+    question, data requirements, Excel and Python deliverables, methods, visualizations, interview narrative,
+    and a README summary suitable for recruiters and technical interviews.
     """)
 
     for problem in problems:
-        with st.expander(problem["title"]):
-            st.markdown(f"**Domain:** {problem['domain']}")
-            st.markdown(f"**Mathematical systems:** {problem['systems']}")
-            st.markdown("### Problem Statement")
-            st.write(problem["prompt"])
-            st.markdown("### Excel Deliverable")
-            st.write(problem["excel"])
-            st.markdown("### Python Deliverable")
-            st.write(problem["python"])
-            st.markdown("### Interview Talking Points")
+        with st.expander(f"**{problem['title']}**", expanded=False):
+            st.markdown(f"**Domain:** {problem['domain']} · **Systems:** {problem['systems']}")
+            st.markdown("#### Business / Scientific Question")
+            st.write(problem["question"])
+            st.markdown("#### Data Needed")
+            st.write(problem["data_needed"])
+            st.markdown("#### Statistical & Mathematical Methods")
+            bullet_block(problem["methods"])
+            st.markdown("#### Visualizations to Build")
+            bullet_block(problem["visualizations"])
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown("#### Excel Version")
+                st.write(problem["excel"])
+            with col2:
+                st.markdown("#### Python Version")
+                st.write(problem["python"])
+            st.markdown("#### Interview Talking Points")
             st.write(problem["interview"])
+            st.markdown("#### GitHub README Summary")
+            st.code(problem["github_readme"], language=None)
 
     st.success(
-        "Strong portfolios combine domain context, mathematical structure, uncertainty quantification, "
-        "and a clear decision or prediction the model supports."
+        "Ship each project as a repo with: `README.md`, `notebooks/analysis.ipynb`, `src/`, sample `data/`, "
+        "and one chart that answers the decision question in the first screen."
     )

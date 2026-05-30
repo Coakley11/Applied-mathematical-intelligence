@@ -10,11 +10,13 @@ This is **not** a textbook or worksheet app. It is a quantitative reasoning plat
 
 | Item | Count / value |
 |------|----------------|
-| **Current version** | 2.0.0 |
+| **Current version** | 2.1.0 |
 | **Mathematical themes** | 6 |
-| **Applied domains** | 32 |
-| **Interactive simulations** | 18 |
-| **Portfolio projects** | 12 |
+| **Mathematical Thinking** | Signature cross-domain framework page |
+| **Applied domains** | 32 (16 with unique simulations + case studies) |
+| **Simulation engines** | 19 (domain-specific suites + specialized tools) |
+| **Portfolio projects** | 12 (full interview/GitHub specifications) |
+| **Data modules** | 6 placeholder loaders (`data/`) |
 
 ### Roadmap
 
@@ -30,27 +32,23 @@ This is **not** a textbook or worksheet app. It is a quantitative reasoning plat
 
 | Sidebar section | What it is |
 |-----------------|------------|
+| **Mathematical Thinking** | Signature page — modeling, uncertainty, optimization, simulation, AI as one stack |
 | **Mathematical Themes** | Deep math systems — calculus, probability, statistics, optimization, simulation, AI |
-| **Applied Domains** | Professional real-world applications — finance, medicine, robotics, climate, etc. |
-| **Portfolio Lab** | Excel, Python, and interview project ideas |
+| **Applied Domains** | Professional fields with **case studies**, **unique simulations**, and **data hooks** |
+| **Portfolio Lab** | Full project specs: question, data, methods, visuals, Excel/Python, GitHub README |
 
 Use **Mathematical lens** and **Depth level** to frame how content is presented.
 
 ## Project Layout
 
 ```text
-streamlit_app.py              # Main entry point
-components/home.py            # Landing page (hero, cards, status)
-components/layout.py            # Themes, domains, portfolio rendering
-components/styles.py          # Platform CSS
-content/themes.py             # Six mathematical intelligence systems
-content/domains.py            # Applied domain content
-content/portfolio.py          # Portfolio lab problems
-content/platform_meta.py      # Version, featured domains, roadmap
-simulations/runner.py         # Interactive simulations
-scripts/push_changes.bat      # Quick commit + push (Windows)
-scripts/push_changes.ps1      # Quick commit + push (PowerShell)
-.streamlit/config.toml        # Theme and server defaults
+streamlit_app.py
+components/home.py, layout.py, thinking.py, styles.py
+content/themes.py, domains.py, domain_depth.py, case_studies.py
+content/mathematical_thinking.py, portfolio.py, platform_meta.py
+simulations/registry.py, finance_risk.py, poker_math.py, ai_learning.py, ...
+data/finance.py, sports.py, public_health.py, elections.py, weather.py, astronomy.py
+scripts/push_changes.bat
 ```
 
 ## Installation

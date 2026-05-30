@@ -1,6 +1,11 @@
 """Platform metadata for Home page and development status."""
 
-VERSION = "2.0.0"
+from content.domains import DOMAIN_NAMES
+from content.portfolio import PORTFOLIO_PROBLEMS
+from content.themes import THEME_NAMES
+from simulations.registry import SIMULATION_COUNT
+
+VERSION = "2.1.0"
 
 FEATURED_DOMAINS = [
     "Quantitative Finance",
@@ -14,13 +19,16 @@ FEATURED_DOMAINS = [
 ]
 
 ROADMAP = [
-    "Real-world datasets (sports, markets, public health)",
-    "Unique simulations per domain (reduce shared demos)",
-    "Plotly interactive charts and 3D visualizations",
-    "Bayesian inference and probabilistic programming demos",
-    "Streamlit multipage URLs for shareable deep links",
-    "Neural network and transformer training visualizations",
-    "User-saved simulation parameters and notebook exports",
+    "Wire yfinance and public CSV loaders into domain simulations",
+    "Per-domain case study PDF exports for portfolio",
+    "Plotly interactive charts replacing static matplotlib where valuable",
+    "Bayesian inference notebooks linked from Portfolio Lab",
+    "Streamlit multipage URLs for shareable domain links",
+    "Calibration dashboards for ML and forecasting projects",
 ]
 
-SIMULATION_COUNT = 18  # distinct simulation runners in simulations/runner.py
+# Re-export live counts
+NUM_DOMAINS = len(DOMAIN_NAMES)
+NUM_THEMES = len(THEME_NAMES)
+NUM_PORTFOLIO = len(PORTFOLIO_PROBLEMS)
+NUM_SIMULATIONS = SIMULATION_COUNT

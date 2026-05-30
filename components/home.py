@@ -5,7 +5,15 @@ import html
 import streamlit as st
 
 from content.domains import DOMAINS, DOMAIN_NAMES
-from content.platform_meta import FEATURED_DOMAINS, ROADMAP, SIMULATION_COUNT, VERSION
+from content.platform_meta import (
+    FEATURED_DOMAINS,
+    NUM_DOMAINS,
+    NUM_PORTFOLIO,
+    NUM_SIMULATIONS,
+    NUM_THEMES,
+    ROADMAP,
+    VERSION,
+)
 from content.portfolio import PORTFOLIO_PROBLEMS
 from content.themes import THEME_NAMES
 
@@ -45,10 +53,10 @@ def render_home() -> None:
         f"""
         <div class="ami-stat-row">
             <div class="ami-stat"><div class="ami-stat-num">v{VERSION}</div><div class="ami-stat-label">Current version</div></div>
-            <div class="ami-stat"><div class="ami-stat-num">{len(THEME_NAMES)}</div><div class="ami-stat-label">Mathematical systems</div></div>
-            <div class="ami-stat"><div class="ami-stat-num">{len(DOMAIN_NAMES)}</div><div class="ami-stat-label">Applied domains</div></div>
-            <div class="ami-stat"><div class="ami-stat-num">{SIMULATION_COUNT}</div><div class="ami-stat-label">Interactive simulations</div></div>
-            <div class="ami-stat"><div class="ami-stat-num">{len(PORTFOLIO_PROBLEMS)}</div><div class="ami-stat-label">Portfolio projects</div></div>
+            <div class="ami-stat"><div class="ami-stat-num">{NUM_THEMES}</div><div class="ami-stat-label">Mathematical systems</div></div>
+            <div class="ami-stat"><div class="ami-stat-num">{NUM_DOMAINS}</div><div class="ami-stat-label">Applied domains</div></div>
+            <div class="ami-stat"><div class="ami-stat-num">{NUM_SIMULATIONS}</div><div class="ami-stat-label">Simulation engines</div></div>
+            <div class="ami-stat"><div class="ami-stat-num">{NUM_PORTFOLIO}</div><div class="ami-stat-label">Portfolio projects</div></div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -107,6 +115,10 @@ def render_home() -> None:
     )
 
     steps = [
+        (
+            "Mathematical Thinking",
+            "Read the signature framework: modeling, uncertainty, optimization, simulation, and AI as one intelligence stack.",
+        ),
         (
             "Mathematical Themes",
             "Study the six intelligence systems: why they matter, how professionals use them, and how AI inherits them.",
@@ -187,8 +199,8 @@ def render_home() -> None:
         f"""
         <div class="ami-card ami-card-accent">
             <h4>Platform roadmap</h4>
-            <p><strong>Version {VERSION}</strong> — modular content layer, {len(DOMAIN_NAMES)} domains,
-            {SIMULATION_COUNT} simulation engines, six mathematical themes.</p>
+            <p><strong>Version {VERSION}</strong> — domain-specific simulations, professional case studies,
+            data-ready modules, {NUM_DOMAINS} domains, {NUM_SIMULATIONS} simulation engines.</p>
         </div>
         """,
         unsafe_allow_html=True,

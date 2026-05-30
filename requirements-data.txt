@@ -1,0 +1,5 @@
+# Optional — install when wiring real datasets (not required to run the app)
+yfinance
+pandas
+requests
+# astroquery  # astronomy APIs
