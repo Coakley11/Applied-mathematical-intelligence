@@ -1,201 +1,160 @@
-"""Practical labs — action-first decision and simulation workspaces."""
+"""Practical labs — seven guided decision and simulation workspaces."""
 
 PRACTICAL_LAB_NAMES = [
-    "Investing & Wealth Lab",
-    "Betting, Poker & Decision Lab",
-    "Prediction & Forecasting Lab",
-    "AI & Optimization Lab",
-    "Strategy & Simulation Lab",
+    "Betting & Poker Lab",
+    "Sports Prediction Lab",
+    "Medicine & Disease Lab",
+    "AI Learning Lab",
+    "Weather & Forecasting Lab",
+    "Space & Motion Lab",
+    "Math Behind the Systems",
 ]
 
-# Short action labels for navigation and home cards
 ACTION_LABELS = {
-    "Investing & Wealth Lab": "Invest money",
-    "Betting, Poker & Decision Lab": "Analyze a bet",
-    "Prediction & Forecasting Lab": "Forecast the future",
-    "AI & Optimization Lab": "Train an AI",
-    "Strategy & Simulation Lab": "Simulate a system",
+    "Betting & Poker Lab": "Analyze a Bet",
+    "Sports Prediction Lab": "Predict a Game",
+    "Medicine & Disease Lab": "Model a Disease",
+    "AI Learning Lab": "Train an AI",
+    "Weather & Forecasting Lab": "Forecast Weather",
+    "Space & Motion Lab": "Explore Space Motion",
+    "Math Behind the Systems": "Understand the Math",
+}
+
+# What the user can actually do — shown on home cards
+ACTION_DESCRIPTIONS = {
+    "Betting & Poker Lab": "Check if a poker call or bet is mathematically worth it using expected value and pot odds.",
+    "Sports Prediction Lab": "Compare team win probabilities to odds, adjust ratings, and forecast outcomes.",
+    "Medicine & Disease Lab": "Simulate disease spread, tumor growth, and drug concentration in the body.",
+    "AI Learning Lab": "Watch AI learn through gradient descent and train a mini neural network.",
+    "Weather & Forecasting Lab": "See why forecasts get less certain over time and fit trends with confidence bands.",
+    "Space & Motion Lab": "Predict orbits, detect planets from starlight dips, and calculate trajectories.",
+    "Math Behind the Systems": "Explore how calculus, probability, statistics, and optimization power the labs.",
 }
 
 PRACTICAL_LABS = {
-    "Investing & Wealth Lab": {
-        "icon": "📈",
-        "action": "Invest money",
-        "tagline": "Build a portfolio, stress-test risk, and compare long-term outcomes.",
-        "goal": "Decide how to allocate capital when returns are uncertain and compounding matters.",
-        "math_tools": ["Monte Carlo simulation", "Compounding", "Volatility", "Efficient frontier"],
-        "tools": [
-            {
-                "name": "Portfolio simulator",
-                "runner_id": "lab_finance",
-                "description": "Set allocation, return, and volatility — see thousands of possible futures.",
-            },
-            {
-                "name": "Risk & drawdown",
-                "runner_id": "finance_quant_suite",
-                "description": "Tail-risk distribution, efficient frontier, and drawdown paths.",
-            },
-        ],
-        "practice_challenge": (
-            "Allocate 60% stocks / 40% bonds with 9% / 4% expected returns. "
-            "Run 15-year simulation — what is P(wealth below start)?"
-        ),
-        "related_domains": [
-            "Quantitative Finance",
-            "Hedge Funds & Alternative Risk",
-            "Actuarial Science",
-            "Simulation & Monte Carlo Methods",
-        ],
-    },
-    "Betting, Poker & Decision Lab": {
+    "Betting & Poker Lab": {
         "icon": "♠",
-        "action": "Analyze a bet",
-        "tagline": "Test whether a call, fold, or wager is mathematically sound.",
-        "goal": "Make decisions under uncertainty using expected value, pot odds, and bankroll math.",
-        "math_tools": ["Expected value", "Pot odds", "Kelly criterion", "Implied probability"],
-        "tools": [
-            {
-                "name": "Poker decision simulator",
-                "runner_id": "lab_poker",
-                "description": "Call, fold, or raise — get EV feedback and Kelly sizing.",
-            },
-            {
-                "name": "Sports bet analyzer",
-                "runner_id": "lab_sports_betting",
-                "description": "Convert odds, compute edge, simulate a betting season.",
-            },
-            {
-                "name": "Casino edge explorer",
-                "runner_id": "casino_edge",
-                "description": "See how house edge grinds bankroll over many bets.",
-            },
-        ],
-        "practice_challenge": (
-            "Win probability 42%, pot $180, call $70. Calculate EV and pot odds by hand, "
-            "then verify in the poker simulator."
+        "action": "Analyze a Bet",
+        "tagline": "Is this call or wager mathematically worth it?",
+        "intro": (
+            "Use expected value and pot odds to check poker decisions and casino bets. "
+            "The math tells you what wins long-term — not what happens on one hand."
         ),
+        "tools": [
+            {"name": "Is This Call Worth It?", "runner_id": "lab_poker"},
+            {"name": "Why the House Always Wins", "runner_id": "casino_edge"},
+        ],
         "related_domains": [
             "Gambling, Poker & Decision Mathematics",
             "Casino Mathematics",
-            "Sports Analytics",
-            "Fantasy Sports",
         ],
     },
-    "Prediction & Forecasting Lab": {
-        "icon": "📊",
-        "action": "Forecast the future",
-        "tagline": "Fit trends, quantify uncertainty, and stress-test predictions.",
-        "goal": "Produce forecasts you can defend — with confidence intervals, not false precision.",
-        "math_tools": ["Regression", "Confidence intervals", "Signal vs noise", "Scenario simulation"],
-        "tools": [
-            {
-                "name": "Trend forecaster",
-                "runner_id": "lab_forecasting",
-                "description": "Generate noisy data, fit a trend, forecast with uncertainty bands.",
-            },
-            {
-                "name": "Election scenario model",
-                "runner_id": "election_forecast",
-                "description": "Simulate swing-state outcomes and electoral vote totals.",
-            },
-            {
-                "name": "Weather uncertainty cone",
-                "runner_id": "weather_uncertainty_cone",
-                "description": "Explore forecast spread as lead time increases.",
-            },
-            {
-                "name": "Sports rating shrinkage",
-                "runner_id": "sports_shrinkage",
-                "description": "Adjust team estimates toward the mean with limited data.",
-            },
-        ],
-        "practice_challenge": (
-            "In the trend forecaster, set noise σ=20 and n=50. "
-            "How wide are the 95% bands 10 steps ahead vs 30 steps?"
+    "Sports Prediction Lab": {
+        "icon": "🏈",
+        "action": "Predict a Game",
+        "tagline": "Compare probabilities, find edge, and forecast team performance.",
+        "intro": (
+            "Translate odds into probabilities, check if a bet has positive expected value, "
+            "and adjust team ratings when sample sizes are small."
         ),
+        "tools": [
+            {"name": "Is This Bet Worth It?", "runner_id": "lab_sports_betting"},
+            {"name": "Separate Signal from Noise", "runner_id": "sports_shrinkage"},
+            {"name": "Forecast a Trend", "runner_id": "lab_forecasting"},
+        ],
         "related_domains": [
-            "Election Forecasting",
-            "Weather Forecasting",
             "Sports Analytics",
+            "Fantasy Sports",
             "Statistics & Prediction Systems",
         ],
     },
-    "AI & Optimization Lab": {
+    "Medicine & Disease Lab": {
+        "icon": "🧬",
+        "action": "Model a Disease",
+        "tagline": "Simulate outbreaks, tumor growth, and drug levels in the body.",
+        "intro": (
+            "See how diseases spread through populations, whether treatment beats tumor growth, "
+            "and how drug concentration changes over time."
+        ),
+        "tools": [
+            {"name": "Disease Spread Simulator", "runner_id": "epidemic_sir"},
+            {"name": "Tumor Growth vs Treatment", "runner_id": "tumor_growth"},
+            {"name": "Drug Concentration Over Time", "runner_id": "pharmacokinetics"},
+        ],
+        "related_domains": [
+            "Epidemiology",
+            "Medicine & Biological Modeling",
+            "Drug Development & Pharmacokinetics",
+        ],
+    },
+    "AI Learning Lab": {
         "icon": "🧠",
         "action": "Train an AI",
-        "tagline": "Watch models learn, tune parameters, and optimize under constraints.",
-        "goal": "Understand what AI is optimizing — and how gradient descent finds better solutions.",
-        "math_tools": ["Gradient descent", "Loss minimization", "Constraint optimization", "Learning rate"],
-        "tools": [
-            {
-                "name": "AI training playground",
-                "runner_id": "lab_ai_training",
-                "description": "Adjust learning rate and steps — watch loss decrease on a surface.",
-            },
-            {
-                "name": "Neural network trainer",
-                "runner_id": "ai_ml_suite",
-                "description": "Toy network learning a decision boundary with backpropagation.",
-            },
-            {
-                "name": "Resource optimizer",
-                "runner_id": "lab_optimization",
-                "description": "Allocate budget across projects under a risk constraint.",
-            },
-        ],
-        "practice_challenge": (
-            "Set learning rate 0.08 and 60 steps in the AI playground. "
-            "Then try 0.25 — does the path diverge?"
+        "tagline": "Watch models learn and see what optimization actually does.",
+        "intro": (
+            "AI learns by minimizing error — gradient descent is the engine. "
+            "Adjust learning rate and training steps to see convergence in action."
         ),
+        "tools": [
+            {"name": "How AI Learns", "runner_id": "lab_ai_training"},
+            {"name": "Train a Mini Neural Network", "runner_id": "ai_ml_suite"},
+        ],
         "related_domains": [
             "Artificial Intelligence",
             "Machine Learning",
-            "Robotics",
-            "Internet Recommendation Systems",
         ],
     },
-    "Strategy & Simulation Lab": {
-        "icon": "🔬",
-        "action": "Simulate a system",
-        "tagline": "Run what-if scenarios, compare choices, and explore alternate futures.",
-        "goal": "Model complex systems when closed-form answers fail — disease, supply chains, losses.",
-        "math_tools": ["Monte Carlo", "Differential equations", "Stochastic simulation", "Scenario analysis"],
-        "tools": [
-            {
-                "name": "Disease spread (SIR)",
-                "runner_id": "epidemic_sir",
-                "description": "Adjust transmission and recovery — see epidemic curves.",
-            },
-            {
-                "name": "Supply chain stress test",
-                "runner_id": "supply_chain",
-                "description": "Stochastic demand and lead times — count stockout days.",
-            },
-            {
-                "name": "Insurance loss model",
-                "runner_id": "actuarial_losses",
-                "description": "Simulate aggregate claims and tail percentiles.",
-            },
-            {
-                "name": "Monte Carlo explorer",
-                "runner_id": "monte_carlo_pi",
-                "description": "Random sampling converging on a stable estimate.",
-            },
-        ],
-        "practice_challenge": (
-            "In the SIR model, raise β from 0.45 to 0.65. "
-            "How does peak infectious change? What policy lever is γ?"
+    "Weather & Forecasting Lab": {
+        "icon": "🌤",
+        "action": "Forecast Weather",
+        "tagline": "Explore uncertainty cones and trend forecasting.",
+        "intro": (
+            "Forecasts are probabilistic, not certain. See how uncertainty grows with lead time "
+            "and how to fit trends through noisy data."
         ),
-        "related_domains": [
-            "Epidemiology",
-            "Supply Chain Optimization",
-            "Actuarial Science",
-            "Climate Modeling",
+        "tools": [
+            {"name": "Why Forecasts Get Less Certain", "runner_id": "weather_uncertainty_cone"},
+            {"name": "Separate Signal from Noise", "runner_id": "lab_forecasting"},
         ],
+        "related_domains": [
+            "Weather Forecasting",
+            "Statistics & Prediction Systems",
+        ],
+    },
+    "Space & Motion Lab": {
+        "icon": "🚀",
+        "action": "Explore Space Motion",
+        "tagline": "Predict orbits, detect planets, and calculate trajectories.",
+        "intro": (
+            "Space missions depend on orbital mechanics and precise trajectory math. "
+            "Explore how astronomers detect planets and how objects move under gravity."
+        ),
+        "tools": [
+            {"name": "Predict an Orbit", "runner_id": "orbital_mechanics"},
+            {"name": "Detect a Planet by Its Shadow", "runner_id": "exoplanet_transit"},
+            {"name": "Calculate a Trajectory", "runner_id": "projectile"},
+        ],
+        "related_domains": [
+            "Astronomy & Astrophysics",
+            "Space Exploration",
+        ],
+    },
+    "Math Behind the Systems": {
+        "icon": "📐",
+        "action": "Understand the Math",
+        "tagline": "See how calculus, probability, statistics, and optimization connect to real problems.",
+        "intro": (
+            "Every lab uses mathematical systems — accumulation, uncertainty, pattern detection, "
+            "optimization, simulation, and learning. Explore the tools and ideas behind them."
+        ),
+        "tools": [
+            {"name": "Run Many Possible Futures", "runner_id": "monte_carlo_pi"},
+            {"name": "Find the Best Decision", "runner_id": "lab_optimization"},
+        ],
+        "is_math_hub": True,
+        "related_domains": [],
     },
 }
 
 NUM_PRACTICAL_LABS = len(PRACTICAL_LAB_NAMES)
-
-# Map action label → lab name for navigation
 ACTION_TO_LAB = {ACTION_LABELS[name]: name for name in PRACTICAL_LAB_NAMES}

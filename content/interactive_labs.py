@@ -1,4 +1,4 @@
-"""Backward-compatible re-exports — primary structure is practical_labs."""
+"""Backward-compatible re-exports."""
 
 from content.practical_labs import (
     ACTION_LABELS,
@@ -8,7 +8,6 @@ from content.practical_labs import (
     PRACTICAL_LAB_NAMES,
 )
 
-# Legacy names used by older components/tests
 LAB_NAMES = PRACTICAL_LAB_NAMES
 INTERACTIVE_LABS = PRACTICAL_LABS
 NUM_LABS = NUM_PRACTICAL_LABS

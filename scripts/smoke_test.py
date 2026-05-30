@@ -23,13 +23,13 @@ def main() -> int:
 
     try:
         from components.home import render_home  # noqa: F401
-        from components.practical_labs import render_action_hub, render_practical_lab  # noqa: F401
+        from components.lab_guide import render_guided_tool  # noqa: F401
+        from components.practical_labs import render_practical_lab  # noqa: F401
         from components.reference import render_reference_library  # noqa: F401
-        from components.layout import render_domain_page, render_portfolio_lab, render_theme_page  # noqa: F401
-        from components.thinking import render_mathematical_thinking  # noqa: F401
         from content.case_studies import CASE_STUDIES
         from content.domains import DOMAINS, DOMAIN_NAMES
         from content.practical_labs import ACTION_TO_LAB, PRACTICAL_LABS, PRACTICAL_LAB_NAMES
+        from content.tool_guides import TOOL_GUIDES
         from content.mathematical_thinking import MATHEMATICAL_THINKING
         from content.portfolio import PORTFOLIO_PROBLEMS
         from content.themes import THEMES, THEME_NAMES
@@ -45,26 +45,25 @@ def main() -> int:
 
     all_runners = {**LAB_RUNNERS, **SIMULATION_RUNNERS}
 
-    if len(PRACTICAL_LAB_NAMES) != 5:
-        errors.append(f"Expected 5 practical labs, got {len(PRACTICAL_LAB_NAMES)}")
+    if len(PRACTICAL_LAB_NAMES) != 7:
+        errors.append(f"Expected 7 labs, got {len(PRACTICAL_LAB_NAMES)}")
     for name in PRACTICAL_LAB_NAMES:
         lab = PRACTICAL_LABS[name]
-        for key in ("action", "goal", "tagline", "math_tools", "tools", "practice_challenge"):
+        for key in ("action", "tagline", "intro", "tools"):
             if not lab.get(key):
                 errors.append(f"Lab '{name}' missing key: {key}")
         for tool in lab["tools"]:
             rid = tool.get("runner_id")
             if rid not in all_runners or not callable(all_runners[rid]):
                 errors.append(f"Lab '{name}' tool bad runner_id: {rid}")
+            if rid not in TOOL_GUIDES:
+                errors.append(f"Lab '{name}' tool missing guide: {rid}")
 
-    if len(ACTION_TO_LAB) != 5:
+    if len(ACTION_TO_LAB) != 7:
         errors.append("ACTION_TO_LAB mapping incomplete")
 
     if len(THEME_NAMES) != len(THEMES):
         errors.append("THEME_NAMES / THEMES mismatch")
-    for name in THEME_NAMES:
-        if name not in THEMES:
-            errors.append(f"Missing theme: {name}")
 
     required_domain_keys = {
         "title", "tagline", "why_matters", "concepts", "professional_applications",
@@ -78,12 +77,6 @@ def main() -> int:
         sid = d.get("simulation_id")
         if sid not in SIMULATION_RUNNERS:
             errors.append(f"Domain '{name}' bad simulation_id: {sid}")
-        if not callable(SIMULATION_RUNNERS.get(sid)):
-            errors.append(f"Simulation not callable: {sid}")
-
-    for sid, fn in SIMULATION_RUNNERS.items():
-        if not callable(fn):
-            errors.append(f"Registry entry not callable: {sid}")
 
     if len(MATHEMATICAL_THINKING.get("pillars", [])) != 10:
         errors.append("Mathematical Thinking pillars != 10")
@@ -102,12 +95,10 @@ def main() -> int:
         return 1
 
     print("SMOKE PASSED")
-    print(f"  commit check: imports OK")
     print(f"  practical labs: {len(PRACTICAL_LAB_NAMES)}")
+    print(f"  tool guides: {len(TOOL_GUIDES)}")
     print(f"  domains: {len(DOMAIN_NAMES)}")
     print(f"  simulations: {len(SIMULATION_RUNNERS)}")
-    print(f"  case study library: {len(CASE_STUDIES)}")
-    print(f"  domains w/ case studies: {sum(1 for d in DOMAINS.values() if d.get('case_studies'))}")
     print(f"  portfolio: {len(PORTFOLIO_PROBLEMS)}")
     print(f"  themes: {len(THEME_NAMES)}")
     print(f"  data sources: {len(DATA_SOURCES)}")

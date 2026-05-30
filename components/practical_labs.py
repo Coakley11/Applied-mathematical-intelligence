@@ -1,58 +1,31 @@
-"""Practical lab hub and tool-first workspace renderer."""
+"""Practical lab hub and guided workspace renderer."""
 
 import html
 
 import streamlit as st
 
+from components.lab_guide import render_guided_tool
 from content.domains import DOMAINS
-from content.practical_labs import ACTION_LABELS, PRACTICAL_LABS, PRACTICAL_LAB_NAMES
-from simulations.labs import LAB_RUNNERS
-from simulations.registry import SIMULATION_RUNNERS
+from content.practical_labs import (
+    ACTION_DESCRIPTIONS,
+    ACTION_LABELS,
+    PRACTICAL_LABS,
+    PRACTICAL_LAB_NAMES,
+)
+from content.themes import THEMES, THEME_NAMES
 
 
 def _action_card(lab_name: str) -> str:
     lab = PRACTICAL_LABS[lab_name]
-    tools_preview = " · ".join(t["name"] for t in lab["tools"][:3])
+    desc = ACTION_DESCRIPTIONS.get(lab_name, lab["tagline"])
     return f"""
     <div class="ami-action-card">
         <div class="ami-action-icon">{html.escape(lab["icon"])}</div>
         <div class="ami-action-label">{html.escape(lab["action"])}</div>
         <h3>{html.escape(lab_name)}</h3>
-        <p>{html.escape(lab["tagline"])}</p>
-        <div class="ami-action-tools">{html.escape(tools_preview)}</div>
+        <p>{html.escape(desc)}</p>
     </div>
     """
-
-
-def run_tool(runner_id: str) -> None:
-    runner = LAB_RUNNERS.get(runner_id) or SIMULATION_RUNNERS.get(runner_id)
-    if runner:
-        runner()
-    else:
-        st.warning(f"Tool not available: {runner_id}")
-
-
-def render_action_hub() -> None:
-    """Home-style hub: what do you want to do?"""
-    st.markdown(
-        """
-        <div class="ami-hero ami-hero-action">
-            <h1>What do you want to do?</h1>
-            <p class="ami-tagline">Pick a goal. Use the tools. Math shows up when you need it.</p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    row1 = PRACTICAL_LAB_NAMES[:3]
-    row2 = PRACTICAL_LAB_NAMES[3:]
-    for row in (row1, row2):
-        cols = st.columns(len(row))
-        for col, name in zip(cols, row):
-            with col:
-                st.markdown(_action_card(name), unsafe_allow_html=True)
-
-    st.caption("Select an action in the sidebar to open a lab workspace.")
 
 
 def render_practical_lab(lab_name: str) -> None:
@@ -73,35 +46,54 @@ def render_practical_lab(lab_name: str) -> None:
         unsafe_allow_html=True,
     )
 
-    st.markdown(f"**Your goal:** {lab['goal']}")
+    st.markdown(lab["intro"])
 
-    tool_names = [t["name"] for t in tools]
-    tabs = st.tabs(tool_names)
+    if lab.get("is_math_hub"):
+        _render_math_systems_overview()
 
-    for tab, tool in zip(tabs, tools):
-        with tab:
-            st.caption(tool["description"])
-            run_tool(tool["runner_id"])
-
-    with st.expander("Math behind this lab", expanded=False):
-        st.markdown("These tools use:")
-        st.markdown("\n".join(f"- **{m}**" for m in lab["math_tools"]))
-        st.caption("You do not need to master the formulas first — run a scenario, then read what the numbers mean.")
-
-    with st.expander("Practice challenge", expanded=False):
-        st.markdown(lab["practice_challenge"])
+    if len(tools) == 1:
+        render_guided_tool(tools[0]["runner_id"])
+    else:
+        tool_names = [t["name"] for t in tools]
+        tabs = st.tabs(tool_names)
+        for tab, tool in zip(tabs, tools):
+            with tab:
+                render_guided_tool(tool["runner_id"])
 
     related = [d for d in lab.get("related_domains", []) if d in DOMAINS]
     if related:
-        with st.expander("Related reference topics (advanced)", expanded=False):
-            st.caption("Deep domain write-ups live in Reference Library — not required to use this lab.")
+        with st.expander("Related topics (advanced reading)", expanded=False):
+            st.caption("Optional depth — open Reference library in the sidebar for full write-ups.")
             for d in related:
-                tag = DOMAINS[d]["tagline"].replace("**", "")[:100]
+                tag = DOMAINS[d]["tagline"].replace("**", "")[:90]
                 st.markdown(f"**{d}** — {tag}…")
 
     st.warning(
-        "Educational simulation only — not financial, medical, gambling, or forecasting advice."
+        "Educational simulation only — not medical, gambling, or forecasting advice."
     )
+
+
+def _render_math_systems_overview() -> None:
+    st.markdown("#### Six systems that power these labs")
+    cols = st.columns(3)
+    systems = [
+        ("Accumulation", "Calculus", "Small rates of change compound into large outcomes — drug decay, tumor growth, trajectories."),
+        ("Uncertainty", "Probability", "Expected value and odds for decisions when outcomes are not certain."),
+        ("Pattern Detection", "Statistics", "Separate signal from noise — regression, shrinkage, forecasting."),
+        ("Optimization", "Constraints", "Find the best choice when you cannot have everything."),
+        ("Simulation", "Monte Carlo", "Run many possible futures when formulas alone are not enough."),
+        ("Learning", "AI / Gradients", "Minimize error by following the slope — how AI trains."),
+    ]
+    for i, (name, badge, desc) in enumerate(systems):
+        with cols[i % 3]:
+            st.markdown(f"**{name}** ({badge})")
+            st.caption(desc)
+
+    with st.expander("Browse all six math themes (advanced)", expanded=False):
+        choice = st.selectbox("Theme", THEME_NAMES, key="math_hub_theme")
+        theme = THEMES[choice]
+        st.markdown(theme["tagline"])
+        st.markdown(theme["why_matters"][:400] + "…")
 
 
 def render_page_summary(what: str, why: str, do_here: str, skill: str) -> None:

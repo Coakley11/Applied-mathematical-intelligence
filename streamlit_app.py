@@ -3,7 +3,7 @@
 import streamlit as st
 
 from components.home import render_home
-from components.practical_labs import render_action_hub, render_practical_lab
+from components.practical_labs import render_practical_lab
 from components.reference import render_reference_library
 from components.styles import inject_platform_styles
 from content.practical_labs import ACTION_LABELS, ACTION_TO_LAB, PRACTICAL_LAB_NAMES
@@ -19,17 +19,18 @@ st.set_page_config(
 
 inject_platform_styles()
 
-# Action-first navigation
-PRIMARY_NAV = ["Home"] + [ACTION_LABELS[name] for name in PRACTICAL_LAB_NAMES] + ["Reference library"]
+PRIMARY_NAV = ["Home"] + [ACTION_LABELS[name] for name in PRACTICAL_LAB_NAMES] + ["Advanced reference"]
 
 NAV_HELP = {
-    "Home": "What do you want to do? Pick a goal and start experimenting.",
-    "Invest money": "Portfolio simulator, Monte Carlo paths, risk and drawdown tools.",
-    "Analyze a bet": "Poker EV, sports odds, pot odds, Kelly criterion, casino edge.",
-    "Forecast the future": "Trend forecasting, elections, weather uncertainty, sports ratings.",
-    "Train an AI": "Gradient descent, neural training, resource optimization.",
-    "Simulate a system": "Epidemics, supply chains, insurance losses, Monte Carlo.",
-    "Reference library": "Optional — domain case studies, themes, portfolio specs.",
+    "Home": "Pick a real-world problem and start experimenting.",
+    "Analyze a Bet": "Expected value, pot odds, and casino edge — is the decision worth it?",
+    "Predict a Game": "Sports probabilities, odds, ratings, and trend forecasting.",
+    "Model a Disease": "Disease spread, tumor growth, and drug concentration.",
+    "Train an AI": "Gradient descent and neural network training.",
+    "Forecast Weather": "Uncertainty cones and trend forecasting.",
+    "Explore Space Motion": "Orbits, planet detection, and trajectories.",
+    "Understand the Math": "Calculus, probability, statistics, optimization, and simulation.",
+    "Advanced reference": "Optional — 32 domain case studies and portfolio specs.",
 }
 
 # =====================================================
@@ -50,12 +51,10 @@ st.sidebar.markdown(
     unsafe_allow_html=True,
 )
 
-# Reference-only controls (hidden from main lab flow)
 ref_lens = "Statistics / Pattern Detection"
 ref_depth = "Professional Overview"
-if view_mode == "Reference library":
+if view_mode == "Advanced reference":
     st.sidebar.markdown("---")
-    st.sidebar.markdown("**Reference options**")
     ref_lens = st.sidebar.selectbox(
         "Math lens",
         [
@@ -66,7 +65,6 @@ if view_mode == "Reference library":
             "Simulation / Alternate Futures",
             "AI / Learning Systems",
         ],
-        help="Highlight concepts tied to a mathematical system.",
     )
     ref_depth = st.sidebar.radio(
         "Depth",
@@ -74,7 +72,7 @@ if view_mode == "Reference library":
     )
 
 st.sidebar.markdown("---")
-st.sidebar.caption("Decision laboratory · not professional advice")
+st.sidebar.caption("Guided decision lab · not professional advice")
 
 # =====================================================
 # MAIN CONTENT
@@ -83,7 +81,7 @@ st.sidebar.caption("Decision laboratory · not professional advice")
 if view_mode == "Home":
     render_home()
 
-elif view_mode == "Reference library":
+elif view_mode == "Advanced reference":
     render_reference_library(run_simulation, ref_lens, ref_depth)
 
 elif view_mode in ACTION_TO_LAB:
@@ -92,5 +90,5 @@ elif view_mode in ACTION_TO_LAB:
 st.markdown("---")
 st.caption(
     f"Applied Mathematical Intelligence v{VERSION} | "
-    "Experiment first — read when you need depth."
+    "Choose a problem → run a simulation → read the result."
 )

@@ -18,9 +18,9 @@ def render_reference_library(
     st.markdown(
         """
         <div class="ami-hero ami-hero-ref">
-            <h1>Reference Library</h1>
+            <h1>Advanced Reference</h1>
             <p class="ami-tagline">Optional depth — case studies, domain write-ups, and portfolio specs.</p>
-            <p class="ami-purpose">The main experience is in the labs. Use this when you want background reading.</p>
+            <p class="ami-purpose">You do not need this to use the labs. Open it when you want background reading or interview project ideas.</p>
         </div>
         """,
         unsafe_allow_html=True,

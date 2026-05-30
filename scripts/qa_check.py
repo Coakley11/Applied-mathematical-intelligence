@@ -20,6 +20,7 @@ def main() -> int:
         from content.portfolio import PORTFOLIO_PROBLEMS
         from content.practical_labs import PRACTICAL_LABS, PRACTICAL_LAB_NAMES
         from content.themes import THEME_NAMES
+        from content.tool_guides import TOOL_GUIDES
         from simulations.labs import LAB_RUNNERS
         from simulations.registry import SIMULATION_RUNNERS
     except Exception as exc:
@@ -35,9 +36,19 @@ def main() -> int:
                 errors.append(f"Missing tool runner '{rid}' in lab '{name}'")
             elif not callable(all_runners[rid]):
                 errors.append(f"Tool runner not callable: {rid}")
+            if rid and rid not in TOOL_GUIDES:
+                errors.append(f"Missing tool guide for '{rid}' in lab '{name}'")
+            elif rid:
+                guide = TOOL_GUIDES[rid]
+                for key in ("what", "why", "figuring_out", "math_used", "controls", "interpret", "math_behind"):
+                    if not guide.get(key):
+                        errors.append(f"Tool guide '{rid}' missing key: {key}")
 
-    if len(PRACTICAL_LAB_NAMES) != 5:
-        errors.append(f"Expected 5 practical labs, got {len(PRACTICAL_LAB_NAMES)}")
+    if len(PRACTICAL_LAB_NAMES) != 7:
+        errors.append(f"Expected 7 practical labs, got {len(PRACTICAL_LAB_NAMES)}")
+
+    if "Investing & Wealth Lab" in PRACTICAL_LAB_NAMES:
+        errors.append("Investing lab should not be a main section")
 
     for name in DOMAIN_NAMES:
         sid = DOMAINS[name].get("simulation_id")
@@ -84,6 +95,7 @@ def main() -> int:
     cs_domains = sum(1 for d in DOMAINS.values() if d.get("case_studies"))
     print("QA PASSED")
     print(f"  practical labs: {len(PRACTICAL_LAB_NAMES)}")
+    print(f"  tool guides: {len(TOOL_GUIDES)}")
     print(f"  domains: {len(DOMAIN_NAMES)}")
     print(f"  simulations: {len(SIMULATION_RUNNERS)}")
     print(f"  domains with case studies: {cs_domains}")

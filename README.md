@@ -1,51 +1,51 @@
 # Applied Mathematical Intelligence
 
-A **decision-making and simulation laboratory** built with Streamlit.
+A **guided mathematical decision lab** built with Streamlit.
 
-> Pick a goal — invest, bet, forecast, train AI, or simulate a system. Use the tools first; math appears when it helps you decide.
+> Choose a real-world problem, change the assumptions, run simulations, and see how calculus, probability, statistics, and optimization help explain what happens.
 
-## Development Status (v2.3.0)
+## Development Status (v2.4.0)
 
 | Item | Count |
 |------|-------|
-| **Practical labs** | **5** |
-| Simulation tools | 23 |
-| Reference domains | 32 |
-| Math themes | 6 |
-| Portfolio projects | 12 |
+| **Guided labs** | **7** |
+| Tool guides (plain-language) | 16 |
+| Simulation engines | 23 |
+| Advanced reference domains | 32 |
 
-Run QA before merging: `python scripts/qa_check.py` and `python scripts/smoke_test.py`
+Run QA: `python scripts/qa_check.py` and `python scripts/smoke_test.py`
 
 ## What do you want to do?
 
 | Action | Lab |
 |--------|-----|
-| **Invest money** | Investing & Wealth Lab |
-| **Analyze a bet** | Betting, Poker & Decision Lab |
-| **Forecast the future** | Prediction & Forecasting Lab |
-| **Train an AI** | AI & Optimization Lab |
-| **Simulate a system** | Strategy & Simulation Lab |
+| **Analyze a Bet** | Betting & Poker Lab |
+| **Predict a Game** | Sports Prediction Lab |
+| **Model a Disease** | Medicine & Disease Lab |
+| **Train an AI** | AI Learning Lab |
+| **Forecast Weather** | Weather & Forecasting Lab |
+| **Explore Space Motion** | Space & Motion Lab |
+| **Understand the Math** | Math Behind the Systems |
 
-Each lab is **tool-first**: interactive simulators in tabs, math explained in expanders, not lectures upfront.
+Investing/portfolio tools are **not** a main focus — this app centers on betting, sports, medicine, AI, weather, and space.
+
+## Every tool follows this structure
+
+1. **What is this?** — plain-language explanation
+2. **Why should I care?** — real-world relevance
+3. **Run the simulation** — interactive controls
+4. **How to read the result** — interpretation guide
+5. **Show the math behind this** — optional depth
+6. **Try the math yourself** — hands-on calculators
+7. **Portfolio project idea** — optional advanced work
 
 ## Navigation
 
 | Sidebar | Purpose |
 |---------|---------|
-| **Home** | Action cards — what do you want to do? |
-| **5 practical labs** | Hands-on decision and simulation workspaces |
-| **Reference library** | Optional — domains, themes, thinking, portfolio specs |
-
-## Project Layout
-
-```text
-streamlit_app.py
-components/          home, practical_labs, reference, layout, styles
-content/             practical_labs, domains, themes, portfolio, platform_meta
-simulations/         registry + labs/ (interactive tools)
-data/                placeholder loaders
-scripts/             qa_check.py, smoke_test.py
-```
+| **Home** | Choose what you want to do |
+| **7 guided labs** | Step-by-step decision and simulation tools |
+| **Advanced reference** | Optional — 32 domains, themes, portfolio specs |
 
 ## Installation
 
@@ -56,22 +56,9 @@ pip install -r requirements.txt
 streamlit run streamlit_app.py
 ```
 
-## Development Workflow
-
-| Branch | Purpose |
-|--------|---------|
-| `main` | Stable production (Streamlit Cloud) |
-| `dev` | Active development |
-
-```bash
-git checkout dev
-python scripts/qa_check.py
-python scripts/smoke_test.py
-```
-
 ## Disclaimer
 
-Educational simulations only — not financial, medical, gambling, or forecasting advice.
+Educational simulations only — not medical, gambling, or forecasting advice.
 
 ## Author
 
