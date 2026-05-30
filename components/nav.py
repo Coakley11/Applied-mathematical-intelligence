@@ -21,9 +21,14 @@ def render_action_button(action: str, key: str) -> None:
     """Compact action card — icon, title, one short line."""
     icon = PRIMARY_ACTION_ICONS[action]
     tagline = PRIMARY_ACTION_TAGLINES[action]
+    is_flagship = action == "Solve a Problem"
+    card_class = "ami-action-card ami-action-card-compact"
+    if is_flagship:
+        card_class += " ami-action-card-flagship"
+
     st.markdown(
         f"""
-        <div class="ami-action-card ami-action-card-compact">
+        <div class="{card_class}">
             <div class="ami-action-icon">{html.escape(icon)}</div>
             <h3>{html.escape(action)}</h3>
             <p>{html.escape(tagline)}</p>
@@ -31,13 +36,19 @@ def render_action_button(action: str, key: str) -> None:
         """,
         unsafe_allow_html=True,
     )
-    if st.button("Start →", key=key, use_container_width=True, type="primary"):
+    label = "Open coach →" if is_flagship else "Start →"
+    if st.button(label, key=key, use_container_width=True, type="primary" if is_flagship else "secondary"):
         navigate_to(action)
 
 
 def render_action_grid() -> None:
-    """3+3+1 grid of primary action cards."""
-    rows = [PRIMARY_ACTIONS[:3], PRIMARY_ACTIONS[3:6], PRIMARY_ACTIONS[6:]]
+    """Flagship first, then 3+3 grid for remaining labs."""
+    flagship = PRIMARY_ACTIONS[0]
+    rest = PRIMARY_ACTIONS[1:]
+    render_action_button(flagship, key="nav_flagship")
+
+    st.markdown("")
+    rows = [rest[:3], rest[3:]]
     for row_idx, row in enumerate(rows):
         cols = st.columns(len(row))
         for col_idx, action in enumerate(row):

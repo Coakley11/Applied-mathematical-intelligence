@@ -290,6 +290,13 @@ def inject_platform_styles() -> None:
             font-size: 2.25rem;
             margin-bottom: 0.5rem;
         }
+        .ami-hero-flagship {
+            background: linear-gradient(135deg, #1e3a5f 0%, #4338ca 50%, #7c3aed 100%);
+        }
+        .ami-action-card-flagship {
+            border: 2px solid #6366f1;
+            background: linear-gradient(180deg, #ffffff 0%, #f5f3ff 100%);
+        }
         .ami-start-label {
             font-size: 0.72rem;
             font-weight: 700;

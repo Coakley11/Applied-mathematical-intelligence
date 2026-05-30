@@ -4,21 +4,21 @@ PROBLEM_SOLVING_LAB = {
     "title": "Mathematical Problem Solving Lab",
     "icon": "🧠",
     "action": "Solve a Problem",
-    "tagline": "Your mathematical thinking partner — structure any problem before reaching for formulas.",
+    "tagline": "Your mathematical thinking coach — questions first, formulas only when they matter.",
     "intro": (
-        "Describe a real problem. The app walks you through the same questions a quant, "
-        "statistician, or scientist would ask — what matters, what's uncertain, and what to model."
+        "Describe any problem. The coach adapts its questions, challenges your assumptions, "
+        "shows how different experts would think, and scores the clarity of your reasoning."
     ),
 }
 
 EXAMPLE_PROBLEMS = [
+    "I want to improve my sports betting system.",
     "I want to improve my poker strategy.",
     "I want to predict baseball performance.",
     "I want to reduce traffic congestion.",
-    "I want to design a more efficient machine.",
     "I want to understand why a cancer treatment works.",
-    "I want to create a sports betting system.",
     "I want to train an AI to recognize patterns.",
+    "I want to increase my business profits.",
     "Custom problem (describe below)",
 ]
 
@@ -168,9 +168,194 @@ MATHEMATICIAN_MODE_TOPICS = [
     },
 ]
 
+# Adaptive follow-up questions — change based on problem type
+ADAPTIVE_QUESTIONS = {
+    "betting": [
+        {
+            "id": "optimizing",
+            "question": "What are you optimizing?",
+            "options": ["Profit", "Bankroll growth", "Consistency", "Lower risk"],
+            "multi": False,
+        },
+        {
+            "id": "info_sources",
+            "question": "What information are you using?",
+            "options": ["Pot odds", "Hand history", "Opponent reads", "Intuition"],
+            "multi": True,
+        },
+        {
+            "id": "challenge",
+            "question": "What's your biggest challenge?",
+            "options": ["Calculating EV", "Bankroll management", "Reading opponents", "Handling variance"],
+            "multi": False,
+        },
+    ],
+    "sports": [
+        {
+            "id": "optimizing",
+            "question": "What are you optimizing?",
+            "options": ["Profit", "Bankroll growth", "Consistency", "Lower risk"],
+            "multi": False,
+        },
+        {
+            "id": "info_sources",
+            "question": "What information are you using?",
+            "options": ["Odds", "Team statistics", "Injuries", "Personal judgment"],
+            "multi": True,
+        },
+        {
+            "id": "challenge",
+            "question": "What's your biggest challenge?",
+            "options": ["Picking winners", "Managing bankroll", "Understanding probability", "Finding value bets"],
+            "multi": False,
+        },
+    ],
+    "medicine": [
+        {
+            "id": "optimizing",
+            "question": "What outcome matters most?",
+            "options": ["Survival time", "Tumor shrinkage", "Side-effect reduction", "Quality of life"],
+            "multi": False,
+        },
+        {
+            "id": "info_sources",
+            "question": "What evidence do you have?",
+            "options": ["Clinical trial data", "Patient biomarkers", "Expert opinion", "Case reports"],
+            "multi": True,
+        },
+        {
+            "id": "challenge",
+            "question": "What's hardest to account for?",
+            "options": ["Individual variation", "Long-term effects", "Ethical constraints", "Small sample sizes"],
+            "multi": False,
+        },
+    ],
+    "traffic": [
+        {
+            "id": "optimizing",
+            "question": "What are you optimizing?",
+            "options": ["Travel time", "Throughput", "Cost", "Safety"],
+            "multi": False,
+        },
+        {
+            "id": "info_sources",
+            "question": "What data do you have?",
+            "options": ["Traffic sensors", "Commute surveys", "GPS traces", "Estimates only"],
+            "multi": True,
+        },
+        {
+            "id": "challenge",
+            "question": "What's the main bottleneck?",
+            "options": ["Capacity limits", "Demand peaks", "Routing choices", "Unpredictable incidents"],
+            "multi": False,
+        },
+    ],
+    "ai": [
+        {
+            "id": "optimizing",
+            "question": "What are you optimizing?",
+            "options": ["Accuracy", "Speed", "Interpretability", "Robustness on new data"],
+            "multi": False,
+        },
+        {
+            "id": "info_sources",
+            "question": "What data do you have?",
+            "options": ["Labeled training set", "Unlabeled data", "Expert rules", "Simulated data"],
+            "multi": True,
+        },
+        {
+            "id": "challenge",
+            "question": "What's your biggest challenge?",
+            "options": ["Overfitting", "Not enough data", "Biased data", "Choosing the right model"],
+            "multi": False,
+        },
+    ],
+    "business": [
+        {
+            "id": "optimizing",
+            "question": "What are you optimizing?",
+            "options": ["Profit", "Growth", "Customer retention", "Market share"],
+            "multi": False,
+        },
+        {
+            "id": "info_sources",
+            "question": "What information are you using?",
+            "options": ["Sales data", "Customer feedback", "Market research", "Gut feeling"],
+            "multi": True,
+        },
+        {
+            "id": "challenge",
+            "question": "What's your biggest uncertainty?",
+            "options": ["Customer demand", "Competition", "Pricing", "Execution capacity"],
+            "multi": False,
+        },
+    ],
+    "engineering": [
+        {
+            "id": "optimizing",
+            "question": "What are you optimizing?",
+            "options": ["Efficiency", "Cost", "Reliability", "Speed of development"],
+            "multi": False,
+        },
+        {
+            "id": "info_sources",
+            "question": "What do you know so far?",
+            "options": ["Prototype tests", "Physics equations", "Material specs", "Rough estimates"],
+            "multi": True,
+        },
+        {
+            "id": "challenge",
+            "question": "What's the hardest constraint?",
+            "options": ["Physical limits", "Budget", "Safety standards", "Manufacturing feasibility"],
+            "multi": False,
+        },
+    ],
+    "weather": [
+        {
+            "id": "optimizing",
+            "question": "What are you trying to improve?",
+            "options": ["Accuracy", "Lead time", "Uncertainty communication", "Regional precision"],
+            "multi": False,
+        },
+        {
+            "id": "info_sources",
+            "question": "What inputs does your forecast use?",
+            "options": ["Satellite data", "Historical records", "Multiple models", "Single app output"],
+            "multi": True,
+        },
+        {
+            "id": "challenge",
+            "question": "What's hardest about this problem?",
+            "options": ["Chaos / sensitivity", "Limited observations", "Communicating uncertainty", "Extreme events"],
+            "multi": False,
+        },
+    ],
+    "default": [
+        {
+            "id": "optimizing",
+            "question": "What are you trying to achieve?",
+            "options": ["Predict an outcome", "Optimize a decision", "Explain a phenomenon", "Estimate a quantity"],
+            "multi": False,
+        },
+        {
+            "id": "info_sources",
+            "question": "What information do you have?",
+            "options": ["Hard data", "Expert opinion", "Past experience", "Mostly guesses"],
+            "multi": True,
+        },
+        {
+            "id": "challenge",
+            "question": "What's your biggest obstacle?",
+            "options": ["Not enough data", "Too much uncertainty", "Unclear objective", "Too many variables"],
+            "multi": False,
+        },
+    ],
+}
+
 # Keyword patterns → tailored coaching (no external API)
 PROBLEM_PATTERNS = {
-    r"poker|bet|gambl|wager|casino|odds": {
+    r"poker|gambl|wager|casino|pot odds|blackjack": {
+        "id": "betting",
         "intents": ["optimize", "estimate"],
         "categories": ["probability", "decision"],
         "variables": "Win probability, pot size, bet size, bankroll, opponent behavior",
@@ -183,6 +368,7 @@ PROBLEM_PATTERNS = {
         "tradeoff": "Aggressive play increases EV but also variance — survival matters long-term.",
     },
     r"sport|baseball|game|team|forecast|predict|betting system": {
+        "id": "sports",
         "intents": ["predict", "estimate"],
         "categories": ["forecasting", "pattern", "probability"],
         "variables": "Team strength, sample size, injuries, home advantage, schedule",
@@ -195,6 +381,7 @@ PROBLEM_PATTERNS = {
         "tradeoff": "Complex models fit history better but may not generalize to new seasons.",
     },
     r"cancer|tumor|treatment|drug|disease|medic|health|clinical": {
+        "id": "medicine",
         "intents": ["explain", "predict", "optimize"],
         "categories": ["growth", "simulation", "optimization"],
         "variables": "Tumor growth rate, treatment efficacy, drug concentration, side effects",
@@ -207,6 +394,7 @@ PROBLEM_PATTERNS = {
         "tradeoff": "Higher dose may kill more tumor cells but increases side-effect risk.",
     },
     r"traffic|transport|congest|route|commute|logistic": {
+        "id": "traffic",
         "intents": ["optimize", "predict"],
         "categories": ["simulation", "optimization"],
         "variables": "Flow rate, capacity, signal timing, demand patterns, routes",
@@ -219,6 +407,7 @@ PROBLEM_PATTERNS = {
         "tradeoff": "Optimizing one corridor may shift congestion elsewhere.",
     },
     r"machine|design|engineer|device|invent|hardware|efficien": {
+        "id": "engineering",
         "intents": ["optimize", "explain"],
         "categories": ["optimization", "simulation"],
         "variables": "Efficiency, materials, dimensions, operating speed, cost",
@@ -231,6 +420,7 @@ PROBLEM_PATTERNS = {
         "tradeoff": "Lighter design saves cost but may reduce durability.",
     },
     r"ai|machine learning|neural|train|model learn|algorithm": {
+        "id": "ai",
         "intents": ["predict", "classify", "optimize"],
         "categories": ["pattern", "optimization"],
         "variables": "Training data, model parameters, loss, learning rate, validation accuracy",
@@ -242,7 +432,8 @@ PROBLEM_PATTERNS = {
         "suggested_lab": "Train an AI",
         "tradeoff": "More complex models fit training data better but may fail on new examples.",
     },
-    r"business|startup|idea|strategy|revenue|market": {
+    r"business|startup|idea|strategy|revenue|market|profit": {
+        "id": "business",
         "intents": ["optimize", "predict", "estimate"],
         "categories": ["decision", "forecasting"],
         "variables": "Conversion rate, cost, demand, pricing, customer lifetime value",
@@ -254,9 +445,23 @@ PROBLEM_PATTERNS = {
         "suggested_lab": "Analyze an Idea",
         "tradeoff": "Growth speed vs. burn rate — faster scaling costs more upfront.",
     },
+    r"weather|forecast|rain|storm|climate|temperature": {
+        "id": "weather",
+        "intents": ["predict", "estimate"],
+        "categories": ["forecasting", "probability"],
+        "variables": "Initial conditions, model ensemble, lead time, regional factors",
+        "constraints": "Observation density, compute limits, communication clarity",
+        "uncertainty": "Chaos sensitivity, model disagreement, extreme events",
+        "data": "Historical observations, satellite data, ensemble model outputs",
+        "tools": ["Statistics", "Probability", "Simulation"],
+        "simple_model": "Weighted ensemble of models with widening uncertainty over lead time.",
+        "suggested_lab": "Advanced reference",
+        "tradeoff": "Longer lead times increase usefulness but also uncertainty.",
+    },
 }
 
 DEFAULT_PATTERN = {
+    "id": "default",
     "intents": ["predict", "optimize"],
     "categories": ["decision"],
     "variables": "Outcome you care about, inputs you control, external factors",

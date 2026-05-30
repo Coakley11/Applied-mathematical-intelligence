@@ -19,7 +19,13 @@ def main() -> int:
         from content.idea_analysis import IDEA_ANALYSIS, ANALYSIS_DIMENSIONS
         from content.mathematical_thinking import MATHEMATICAL_THINKING
         from content.navigation import PRIMARY_ACTIONS as NAV_PRIMARY_ACTIONS
+        from content.problem_coach import (
+            CHALLENGE_QUESTIONS,
+            EXPERT_PERSPECTIVES,
+            PROBLEM_LIBRARY,
+        )
         from content.problem_solving import (
+            ADAPTIVE_QUESTIONS,
             LAB_THINKING_PROMPTS,
             MATHEMATICIAN_MODE_TOPICS,
             PROBLEM_BREAKDOWN_STEPS,
@@ -95,6 +101,18 @@ def main() -> int:
 
     if len(ANALYSIS_DIMENSIONS) != 5:
         errors.append(f"Expected 5 idea analysis dimensions, got {len(ANALYSIS_DIMENSIONS)}")
+
+    if len(PROBLEM_LIBRARY) != 7:
+        errors.append(f"Expected 7 problem library entries, got {len(PROBLEM_LIBRARY)}")
+
+    if len(EXPERT_PERSPECTIVES) != 5:
+        errors.append(f"Expected 5 expert perspectives, got {len(EXPERT_PERSPECTIVES)}")
+
+    if len(CHALLENGE_QUESTIONS) != 5:
+        errors.append(f"Expected 5 challenge questions, got {len(CHALLENGE_QUESTIONS)}")
+
+    if len(ADAPTIVE_QUESTIONS) < 8:
+        errors.append(f"Expected at least 8 adaptive question sets, got {len(ADAPTIVE_QUESTIONS)}")
 
     if len(PROBLEM_BREAKDOWN_STEPS) != 8:
         errors.append(f"Expected 8 problem breakdown steps, got {len(PROBLEM_BREAKDOWN_STEPS)}")

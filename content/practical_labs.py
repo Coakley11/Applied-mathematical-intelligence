@@ -204,7 +204,7 @@ PRIMARY_ACTIONS = [
 ]
 
 PRIMARY_ACTION_TAGLINES = {
-    "Solve a Problem": "Structure any problem before formulas.",
+    "Solve a Problem": "Your thinking coach — start here.",
     "Analyze a Bet": "Is this call or wager worth it?",
     "Predict a Game": "Find edge in odds and forecasts.",
     "Model a Disease": "Simulate spread, growth, and treatment.",
@@ -255,7 +255,7 @@ ACTION_SECTION_TYPES = {
 
 NAV_HELP = {
     "Home": "Pick a problem and jump in.",
-    "Solve a Problem": "Your thinking partner — structure problems step by step.",
+    "Solve a Problem": "Adaptive coaching — questions change for your problem.",
     "Analyze a Bet": "Check expected value and pot odds.",
     "Predict a Game": "Compare probabilities to betting odds.",
     "Model a Disease": "Simulate spread, tumors, and drug levels.",
