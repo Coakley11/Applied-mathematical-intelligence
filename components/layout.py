@@ -153,59 +153,6 @@ def render_domain_page(
         st.success(domain.get("portfolio_tip", domain["portfolio_ideas"][0]))
 
 
-def render_home() -> None:
-    section("Applied Mathematical Intelligence Laboratory")
-
-    st.markdown("""
-    This platform is **not** a textbook, worksheet app, or procedural problem bank.
-
-    It is an **applied mathematics laboratory** for exploring how calculus, probability,
-    statistics, optimization, simulation, and learning systems are used to understand,
-    predict, and improve real-world systems.
-    """)
-
-    st.subheader("The Questions This Lab Explores")
-    bullet_block([
-        "Why does this mathematical idea matter?",
-        "What real-world systems depend on it?",
-        "How do professionals actually use it?",
-        "What discoveries, predictions, or decisions become possible because of it?",
-        "How do modern AI systems inherit these same mathematical structures?",
-    ])
-
-    st.subheader("Six Mathematical Intelligence Systems")
-    cols = st.columns(3)
-    systems = [
-        ("Accumulation Systems", "Calculus", "Continuous change, rates, integrals, compounding effects over time"),
-        ("Uncertainty Systems", "Probability", "Risk, Bayes, expected value, decisions under randomness"),
-        ("Pattern Detection Systems", "Statistics", "Signal vs noise, regression, inference, forecasting"),
-        ("Optimization Systems", "Optimization", "Constraints, tradeoffs, best decisions, resource allocation"),
-        ("Simulation Systems", "Monte Carlo", "Alternate futures, stress tests, scenario distributions"),
-        ("AI & Learning Systems", "Machine Learning", "Gradients, pattern recognition, probabilistic prediction"),
-    ]
-    for i, (name, short, desc) in enumerate(systems):
-        with cols[i % 3]:
-            st.markdown(f"**{name}**")
-            st.caption(short)
-            st.markdown(desc)
-
-    st.subheader("How to Navigate")
-    st.markdown("""
-    1. **Mathematical Themes** — deep dives into the six intelligence systems and why they power modern technology.
-    2. **Applied Domains** — professional fields where these systems converge (finance, epidemiology, robotics, cryptography, and more).
-    3. **Portfolio Lab** — Excel and Python project scaffolds for interviews and quantitative portfolios.
-
-    Use the sidebar **mathematical lens** to frame content through calculus, probability, statistics,
-    optimization, simulation, or AI. Use **depth** to shift between executive overview, technical
-    explanation, and portfolio framing.
-    """)
-
-    st.success(
-        "Goal: feel like a quantitative reasoning platform and modeling explorer — "
-        "not a high school math lesson."
-    )
-
-
 def render_portfolio_lab(problems: list[dict]) -> None:
     section("Portfolio & Interview Laboratory")
 
