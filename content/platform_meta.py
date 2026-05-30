@@ -4,11 +4,12 @@ from content.case_studies import CASE_STUDIES
 from content.domains import DOMAINS, DOMAIN_NAMES
 from content.portfolio import PORTFOLIO_PROBLEMS
 from content.practical_labs import NUM_PRACTICAL_LABS
+from content.navigation import PRIMARY_ACTIONS
 from content.themes import THEME_NAMES
 from content.tool_guides import TOOL_GUIDES
 from simulations.registry import SIMULATION_COUNT
 
-VERSION = "2.4.0"
+VERSION = "2.5.0"
 
 FEATURED_DOMAINS = [
     "Quantitative Finance",
@@ -26,6 +27,8 @@ ROADMAP = [
     "Plotly interactive charts for lab visualizations",
     "Shareable lab URLs via Streamlit multipage",
 ]
+
+NUM_PRIMARY_ACTIONS = len(PRIMARY_ACTIONS)
 
 NUM_THEMES = len(THEME_NAMES)
 NUM_DOMAINS = len(DOMAIN_NAMES)

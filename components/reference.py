@@ -1,12 +1,14 @@
-"""Reference library — domains, themes, thinking, and portfolio (advanced, optional)."""
+"""Reference library — domains, themes, secondary labs, and portfolio (advanced, optional)."""
 
 import streamlit as st
 
 from components.layout import render_domain_page, render_portfolio_lab, render_theme_page
+from components.practical_labs import render_practical_lab
 from components.thinking import render_mathematical_thinking
 from content.domains import DOMAINS, DOMAIN_NAMES
 from content.mathematical_thinking import MATHEMATICAL_THINKING
 from content.portfolio import PORTFOLIO_PROBLEMS
+from content.practical_labs import SECONDARY_LAB_NAMES
 from content.themes import THEMES, THEME_NAMES
 
 
@@ -19,8 +21,8 @@ def render_reference_library(
         """
         <div class="ami-hero ami-hero-ref">
             <h1>Advanced Reference</h1>
-            <p class="ami-tagline">Optional depth — case studies, domain write-ups, and portfolio specs.</p>
-            <p class="ami-purpose">You do not need this to use the labs. Open it when you want background reading or interview project ideas.</p>
+            <p class="ami-tagline">Optional depth — extra labs, case studies, domain write-ups, and portfolio specs.</p>
+            <p class="ami-purpose">You do not need this for the main experience. Open it when you want background reading, additional simulation labs, or interview project ideas.</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -28,19 +30,37 @@ def render_reference_library(
 
     section = st.radio(
         "Browse",
-        ["Domain case studies", "Math themes", "Mathematical thinking", "Portfolio projects"],
+        [
+            "Extra simulation labs",
+            "Domain case studies",
+            "Math themes",
+            "Mathematical thinking (full)",
+            "Portfolio projects",
+        ],
         horizontal=True,
         label_visibility="collapsed",
     )
 
-    if section == "Domain case studies":
+    if section == "Extra simulation labs":
+        _render_secondary_labs()
+    elif section == "Domain case studies":
         _render_domains_reference(run_simulation, math_lens, depth)
     elif section == "Math themes":
         _render_themes_reference(depth)
-    elif section == "Mathematical thinking":
+    elif section == "Mathematical thinking (full)":
+        st.caption(
+            "The full cross-domain thinking framework. For interactive topic-by-topic exploration, "
+            "use **Explore Mathematical Thinking** in the main sidebar."
+        )
         render_mathematical_thinking(MATHEMATICAL_THINKING)
     else:
         render_portfolio_lab(PORTFOLIO_PROBLEMS)
+
+
+def _render_secondary_labs() -> None:
+    st.caption("Additional simulation labs — weather, space, and core math systems.")
+    choice = st.selectbox("Lab", SECONDARY_LAB_NAMES)
+    render_practical_lab(choice)
 
 
 def _render_domains_reference(run_simulation, math_lens: str, depth: str) -> None:

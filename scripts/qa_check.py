@@ -16,9 +16,17 @@ def main() -> int:
 
     try:
         from content.domains import DOMAINS, DOMAIN_NAMES
+        from content.idea_analysis import IDEA_ANALYSIS, ANALYSIS_DIMENSIONS
         from content.mathematical_thinking import MATHEMATICAL_THINKING
+        from content.navigation import (
+            ACTION_SECTION_TYPES,
+            ACTION_TO_LAB,
+            PRIMARY_ACTIONS,
+        )
+        from content.optimization_workshop import OPTIMIZATION_WORKSHOP, WORKSHOP_STEPS
         from content.portfolio import PORTFOLIO_PROBLEMS
-        from content.practical_labs import PRACTICAL_LABS, PRACTICAL_LAB_NAMES
+        from content.practical_labs import PRACTICAL_LABS, PRACTICAL_LAB_NAMES, SECONDARY_LAB_NAMES
+        from content.thinking_lab import THINKING_LAB, THINKING_TOPICS
         from content.themes import THEME_NAMES
         from content.tool_guides import TOOL_GUIDES
         from simulations.labs import LAB_RUNNERS
@@ -46,6 +54,41 @@ def main() -> int:
 
     if len(PRACTICAL_LAB_NAMES) != 7:
         errors.append(f"Expected 7 practical labs, got {len(PRACTICAL_LAB_NAMES)}")
+
+    if len(SECONDARY_LAB_NAMES) != 3:
+        errors.append(f"Expected 3 secondary labs, got {len(SECONDARY_LAB_NAMES)}")
+
+    if len(PRIMARY_ACTIONS) != 7:
+        errors.append(f"Expected 7 primary actions, got {len(PRIMARY_ACTIONS)}")
+
+    for action in PRIMARY_ACTIONS:
+        if action not in ACTION_SECTION_TYPES:
+            errors.append(f"Primary action missing section type: {action}")
+
+    lab_actions = [a for a, t in ACTION_SECTION_TYPES.items() if t == "lab"]
+    if len(lab_actions) != 4:
+        errors.append(f"Expected 4 primary lab actions, got {len(lab_actions)}")
+
+    for action in lab_actions:
+        if action not in ACTION_TO_LAB:
+            errors.append(f"Lab action missing ACTION_TO_LAB mapping: {action}")
+
+    if len(THINKING_TOPICS) != 11:
+        errors.append(f"Expected 11 thinking topics, got {len(THINKING_TOPICS)}")
+
+    if len(WORKSHOP_STEPS) != 8:
+        errors.append(f"Expected 8 workshop steps, got {len(WORKSHOP_STEPS)}")
+
+    if len(ANALYSIS_DIMENSIONS) != 5:
+        errors.append(f"Expected 5 idea analysis dimensions, got {len(ANALYSIS_DIMENSIONS)}")
+
+    for key in ("title", "action", "tagline", "intro"):
+        if not THINKING_LAB.get(key):
+            errors.append(f"THINKING_LAB missing key: {key}")
+        if not OPTIMIZATION_WORKSHOP.get(key):
+            errors.append(f"OPTIMIZATION_WORKSHOP missing key: {key}")
+        if not IDEA_ANALYSIS.get(key):
+            errors.append(f"IDEA_ANALYSIS missing key: {key}")
 
     if "Investing & Wealth Lab" in PRACTICAL_LAB_NAMES:
         errors.append("Investing lab should not be a main section")
@@ -94,7 +137,9 @@ def main() -> int:
 
     cs_domains = sum(1 for d in DOMAINS.values() if d.get("case_studies"))
     print("QA PASSED")
-    print(f"  practical labs: {len(PRACTICAL_LAB_NAMES)}")
+    print(f"  primary actions: {len(PRIMARY_ACTIONS)}")
+    print(f"  practical labs: {len(PRACTICAL_LAB_NAMES)} (secondary: {len(SECONDARY_LAB_NAMES)})")
+    print(f"  thinking topics: {len(THINKING_TOPICS)}")
     print(f"  tool guides: {len(TOOL_GUIDES)}")
     print(f"  domains: {len(DOMAIN_NAMES)}")
     print(f"  simulations: {len(SIMULATION_RUNNERS)}")

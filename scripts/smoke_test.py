@@ -23,12 +23,18 @@ def main() -> int:
 
     try:
         from components.home import render_home  # noqa: F401
+        from components.idea_analysis import render_idea_analysis  # noqa: F401
         from components.lab_guide import render_guided_tool  # noqa: F401
+        from components.nav import navigate_to, render_action_grid  # noqa: F401
+        from components.optimization_workshop import render_optimization_workshop  # noqa: F401
         from components.practical_labs import render_practical_lab  # noqa: F401
         from components.reference import render_reference_library  # noqa: F401
+        from components.thinking_lab import render_thinking_lab  # noqa: F401
         from content.case_studies import CASE_STUDIES
         from content.domains import DOMAINS, DOMAIN_NAMES
-        from content.practical_labs import ACTION_TO_LAB, PRACTICAL_LABS, PRACTICAL_LAB_NAMES
+        from content.navigation import ACTION_SECTION_TYPES, PRIMARY_ACTIONS
+        from content.practical_labs import PRACTICAL_LABS, PRACTICAL_LAB_NAMES, SECONDARY_LAB_NAMES
+        from content.thinking_lab import THINKING_TOPICS
         from content.tool_guides import TOOL_GUIDES
         from content.mathematical_thinking import MATHEMATICAL_THINKING
         from content.portfolio import PORTFOLIO_PROBLEMS
@@ -47,6 +53,13 @@ def main() -> int:
 
     if len(PRACTICAL_LAB_NAMES) != 7:
         errors.append(f"Expected 7 labs, got {len(PRACTICAL_LAB_NAMES)}")
+    if len(SECONDARY_LAB_NAMES) != 3:
+        errors.append(f"Expected 3 secondary labs, got {len(SECONDARY_LAB_NAMES)}")
+    if len(PRIMARY_ACTIONS) != 7:
+        errors.append(f"Expected 7 primary actions, got {len(PRIMARY_ACTIONS)}")
+    if len(ACTION_SECTION_TYPES) != 7:
+        errors.append("ACTION_SECTION_TYPES incomplete")
+
     for name in PRACTICAL_LAB_NAMES:
         lab = PRACTICAL_LABS[name]
         for key in ("action", "tagline", "intro", "tools"):
@@ -58,9 +71,6 @@ def main() -> int:
                 errors.append(f"Lab '{name}' tool bad runner_id: {rid}")
             if rid not in TOOL_GUIDES:
                 errors.append(f"Lab '{name}' tool missing guide: {rid}")
-
-    if len(ACTION_TO_LAB) != 7:
-        errors.append("ACTION_TO_LAB mapping incomplete")
 
     if len(THEME_NAMES) != len(THEMES):
         errors.append("THEME_NAMES / THEMES mismatch")
@@ -81,6 +91,9 @@ def main() -> int:
     if len(MATHEMATICAL_THINKING.get("pillars", [])) != 10:
         errors.append("Mathematical Thinking pillars != 10")
 
+    if len(THINKING_TOPICS) != 11:
+        errors.append("Thinking Lab topics != 11")
+
     for i, p in enumerate(PORTFOLIO_PROBLEMS):
         if not p.get("question"):
             errors.append(f"Portfolio {i} missing question")
@@ -95,7 +108,9 @@ def main() -> int:
         return 1
 
     print("SMOKE PASSED")
+    print(f"  primary actions: {len(PRIMARY_ACTIONS)}")
     print(f"  practical labs: {len(PRACTICAL_LAB_NAMES)}")
+    print(f"  thinking topics: {len(THINKING_TOPICS)}")
     print(f"  tool guides: {len(TOOL_GUIDES)}")
     print(f"  domains: {len(DOMAIN_NAMES)}")
     print(f"  simulations: {len(SIMULATION_RUNNERS)}")

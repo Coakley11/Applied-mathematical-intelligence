@@ -1,14 +1,16 @@
 # Applied Mathematical Intelligence
 
-A **guided mathematical decision lab** built with Streamlit.
+A **Mathematical Thinking Lab** built with Streamlit — not a textbook, not a course.
 
-> Choose a real-world problem, change the assumptions, run simulations, and see how calculus, probability, statistics, and optimization help explain what happens.
+> Bring a problem, decision, prediction, strategy, or idea. The app helps you think about it mathematically.
 
-## Development Status (v2.4.0)
+## Development Status (v2.5.0)
 
 | Item | Count |
 |------|-------|
-| **Guided labs** | **7** |
+| **Primary action labs** | **7** |
+| Simulation labs (4 primary + 3 in advanced) | 7 |
+| Mathematical Thinking topics | 11 |
 | Tool guides (plain-language) | 16 |
 | Simulation engines | 23 |
 | Advanced reference domains | 32 |
@@ -17,19 +19,19 @@ Run QA: `python scripts/qa_check.py` and `python scripts/smoke_test.py`
 
 ## What do you want to do?
 
-| Action | Lab |
-|--------|-----|
+| Action | Section |
+|--------|---------|
 | **Analyze a Bet** | Betting & Poker Lab |
 | **Predict a Game** | Sports Prediction Lab |
 | **Model a Disease** | Medicine & Disease Lab |
 | **Train an AI** | AI Learning Lab |
-| **Forecast Weather** | Weather & Forecasting Lab |
-| **Explore Space Motion** | Space & Motion Lab |
-| **Understand the Math** | Math Behind the Systems |
+| **Optimize a Decision** | Optimization Workshop |
+| **Analyze an Idea** | Idea & Invention Analysis |
+| **Explore Mathematical Thinking** | Mathematical Thinking Lab |
 
-Investing/portfolio tools are **not** a main focus — this app centers on betting, sports, medicine, AI, weather, and space.
+Additional labs (Weather, Space, Math Systems) and 32 domain case studies live under **Advanced reference**.
 
-## Every tool follows this structure
+## Every simulation tool follows this structure
 
 1. **What is this?** — plain-language explanation
 2. **Why should I care?** — real-world relevance
@@ -43,9 +45,9 @@ Investing/portfolio tools are **not** a main focus — this app centers on betti
 
 | Sidebar | Purpose |
 |---------|---------|
-| **Home** | Choose what you want to do |
-| **7 guided labs** | Step-by-step decision and simulation tools |
-| **Advanced reference** | Optional — 32 domains, themes, portfolio specs |
+| **Home** | Large action cards — click to navigate |
+| **7 action sections** | Labs, optimization workshop, idea analysis, thinking frameworks |
+| **Advanced reference** | Extra labs, 32 domains, themes, portfolio specs |
 
 ## Installation
 

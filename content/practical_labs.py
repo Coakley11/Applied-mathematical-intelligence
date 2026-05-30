@@ -1,14 +1,21 @@
-"""Practical labs — seven guided decision and simulation workspaces."""
+"""Practical labs — guided decision and simulation workspaces."""
 
-PRACTICAL_LAB_NAMES = [
+# Primary simulation labs (featured in main navigation)
+PRIMARY_LAB_NAMES = [
     "Betting & Poker Lab",
     "Sports Prediction Lab",
     "Medicine & Disease Lab",
     "AI Learning Lab",
+]
+
+# Additional labs — accessible via Advanced reference
+SECONDARY_LAB_NAMES = [
     "Weather & Forecasting Lab",
     "Space & Motion Lab",
     "Math Behind the Systems",
 ]
+
+PRACTICAL_LAB_NAMES = PRIMARY_LAB_NAMES + SECONDARY_LAB_NAMES
 
 ACTION_LABELS = {
     "Betting & Poker Lab": "Analyze a Bet",
