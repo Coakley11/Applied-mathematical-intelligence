@@ -1,227 +1,100 @@
-# Applied-mathematical-intelligence
-An advanced applied mathematics Streamlit app showing how calculus, probability, statistics, optimization, simulation, and AI are used in finance, medicine, sports analytics, engineering, and prediction systems.
-
 # Applied Mathematical Intelligence
 
-## Overview
+An advanced **applied mathematics laboratory** built with Streamlit. The platform explores how calculus, probability, statistics, optimization, simulation, and AI are used to understand, predict, and improve real-world systems — not as textbook exercises, but as professional quantitative reasoning.
 
-Applied Mathematical Intelligence is an advanced interactive Streamlit application that demonstrates how higher mathematics is used to model, predict, optimize, and analyze real-world systems.
+## Philosophy
 
-Rather than functioning like a traditional textbook or procedural math app, this platform explores how concepts from:
+This is **not** a traditional math education app, worksheet bank, or procedural problem solver.
 
-- Calculus
-- Probability
-- Statistics
-- Optimization
-- Simulation
-- Artificial Intelligence
-- Predictive Modeling
+It is designed to answer:
 
-are used in domains such as:
+- Why does this mathematical idea matter?
+- What real-world systems depend on it?
+- How do professionals use it?
+- What discoveries, predictions, or decisions become possible because of it?
+- How does modern AI inherit the same mathematical structures?
 
-- Artificial Intelligence & Machine Learning
-- Finance & Risk Modeling
-- Medicine & Biological Systems
-- Sports Analytics
-- Engineering & Optimization
-- Monte Carlo Simulation
-- Forecasting & Prediction Systems
+## Platform Structure
 
-The app is designed for users who already have a working understanding of mathematics and want to explore how mathematical thinking is applied in modern analytical systems.
+### Six Mathematical Intelligence Systems
 
----
+1. **Accumulation Systems (Calculus)** — continuous change, rates, integrals  
+2. **Uncertainty Systems (Probability)** — risk, Bayes, expected value  
+3. **Pattern Detection Systems (Statistics)** — signal vs noise, inference  
+4. **Optimization Systems** — constraints, tradeoffs, best decisions  
+5. **Simulation Systems** — Monte Carlo, alternate futures  
+6. **AI & Learning Systems** — gradients, prediction, pattern recognition  
 
-# Main Philosophy
+### Applied Domains (32+)
 
-The app treats mathematics as:
+Professional fields including quantitative finance, epidemiology, drug development, genetics, climate modeling, sports analytics, election forecasting, robotics, autonomous vehicles, supply chain optimization, cybersecurity, cryptography, search engines, computer graphics, audio/music signal processing, and more.
 
-- a prediction engine
-- a modeling framework
-- a strategic decision system
-- a simulation language
-- an optimization tool
-- a scientific framework for understanding reality
+Each domain page includes:
 
-Instead of emphasizing repetitive procedural calculations, the app focuses on:
+- Why This Matters  
+- Mathematical Concepts Used  
+- Real Professional Applications  
+- Historical Breakthroughs  
+- Interactive Simulation  
+- How Modern AI Uses This  
+- Example Excel Projects  
+- Example Python Projects  
+- Interview / Portfolio Project Ideas  
 
-- systems thinking
-- uncertainty
-- accumulation
-- continuous change
-- pattern detection
-- simulation
-- optimization
-- predictive reasoning
+### Portfolio Lab
 
----
+Interview-ready project briefs spanning finance, epidemiology, actuarial science, sports, ML, supply chain, elections, pharmacokinetics, autonomous systems, climate, and recommendations.
 
-# Current Features
+## Navigation
 
-## AI + Machine Learning Systems
-- Gradient descent simulations
-- Loss minimization visualization
-- AI optimization explanations
-- Applied machine learning examples
+Use the sidebar to switch between:
 
-## Finance + Risk Modeling
-- Monte Carlo portfolio simulations
-- Volatility and uncertainty modeling
-- Probability of gains/losses
-- Risk distribution analysis
+- **Home** — platform philosophy and orientation  
+- **Mathematical Themes** — deep dives into the six intelligence systems  
+- **Applied Domains** — field-specific professional content  
+- **Portfolio Lab** — Excel / Python / interview scaffolds  
 
-## Medicine + Biological Modeling
-- Tumor growth simulations
-- Treatment-effect modeling
-- Competing growth-rate systems
-- Mathematical biology concepts
+**Mathematical lens** filters domains by primary mathematical system. **Depth level** shifts between professional overview, technical explanation, and portfolio/interview framing.
 
-## Sports Analytics
-- Aging curve simulations
-- Regression-to-the-mean examples
-- True talent vs observed performance
-- Predictive player modeling
+## Project Layout
 
-## Engineering + Optimization
-- Projectile trajectory simulations
-- Optimization demonstrations
-- Physics-based modeling
-- Multi-variable system analysis
+```text
+streamlit_app.py          # Main entry point
+components/layout.py      # UI rendering (themes, domains, portfolio)
+content/themes.py         # Six mathematical intelligence systems
+content/domains.py        # Applied domain content
+content/portfolio.py      # Portfolio lab problems
+simulations/runner.py     # Interactive simulations
+requirements.txt
+```
 
-## Simulation Theory + Monte Carlo
-- Monte Carlo estimation systems
-- Randomized simulation models
-- Alternate future generation
-- Probability-based forecasting
-
-## Statistics + Prediction Systems
-- Regression visualizations
-- Noise vs signal demonstrations
-- Correlation analysis
-- Predictive modeling systems
-
-## Excel / Portfolio Practice Problems
-- Applied analytics problems
-- Excel-based modeling exercises
-- Python portfolio project ideas
-- Interview-style analytical scenarios
-
----
-
-# Technologies Used
-
-- Python
-- Streamlit
-- NumPy
-- Pandas
-- Matplotlib
-
----
-
-# Installation
-
-## Clone the repository
+## Installation
 
 ```bash
 git clone https://github.com/YOUR_USERNAME/applied-mathematical-intelligence.git
-```
-
----
-
-## Navigate into the folder
-
-```bash
 cd applied-mathematical-intelligence
-```
-
----
-
-## Install dependencies
-
-```bash
 pip install -r requirements.txt
-```
-
----
-
-## Run the Streamlit app
-
-```bash
 streamlit run streamlit_app.py
 ```
 
----
+## Technologies
 
-# Deployment
+- Python  
+- Streamlit  
+- NumPy  
+- Matplotlib  
 
-This app is designed for deployment on Streamlit Cloud.
-
-Main deployment settings:
+## Deployment (Streamlit Cloud)
 
 ```text
 Main file path: streamlit_app.py
 Branch: main
 ```
 
----
+## Disclaimer
 
-# Future Development Ideas
+Conceptual and educational demonstrations only — not financial, medical, engineering, or forecasting advice.
 
-Planned future directions include:
-
-- Real-world datasets
-- Advanced AI visualizations
-- Neural network demos
-- Bayesian inference systems
-- Real sports databases
-- Financial APIs
-- Interactive optimization engines
-- Differential equation modeling
-- Fourier analysis tools
-- Advanced actuarial simulations
-- Interactive dashboards
-- AI-generated analytical explanations
-- Dynamic statistical modeling
-- User-generated simulations
-
----
-
-# Educational Vision
-
-This project is designed to help users explore how advanced mathematical systems power modern technologies and decision-making systems.
-
-The goal is not simply to solve equations, but to understand:
-
-- how mathematical structures model reality
-- how uncertainty can be quantified
-- how predictions are generated
-- how optimization improves systems
-- how simulations explore possible futures
-- how AI systems learn from mathematical feedback
-
----
-
-# Author
+## Author
 
 Daniel Cohen
-
-Background in:
-- Mathematics
-- Statistics
-- Finance
-- Applied Analytics
-- AI-Oriented Modeling
-- Educational Systems
-
----
-
-# Disclaimer
-
-This application is educational and conceptual in nature.
-
-It is not intended to provide:
-- financial advice
-- medical advice
-- engineering certification
-- professional forecasting recommendations
-
-The simulations and models are simplified demonstrations of broader mathematical ideas.
