@@ -7,7 +7,9 @@ import streamlit as st
 from content.domains import DOMAINS, DOMAIN_NAMES
 from content.platform_meta import (
     FEATURED_DOMAINS,
+    NUM_CASE_STUDY_LIBRARY,
     NUM_DOMAINS,
+    NUM_DOMAINS_WITH_CASE_STUDIES,
     NUM_PORTFOLIO,
     NUM_SIMULATIONS,
     NUM_THEMES,
@@ -15,7 +17,6 @@ from content.platform_meta import (
     VERSION,
 )
 from content.portfolio import PORTFOLIO_PROBLEMS
-from content.themes import THEME_NAMES
 
 
 def _card(title: str, badge: str, body: str, accent: str = "ami-card-accent") -> str:
@@ -52,12 +53,13 @@ def render_home() -> None:
     st.markdown(
         f"""
         <div class="ami-stat-row">
-            <div class="ami-stat"><div class="ami-stat-num">v{VERSION}</div><div class="ami-stat-label">Current version</div></div>
-            <div class="ami-stat"><div class="ami-stat-num">{NUM_THEMES}</div><div class="ami-stat-label">Mathematical systems</div></div>
+            <div class="ami-stat"><div class="ami-stat-num">{NUM_THEMES}</div><div class="ami-stat-label">Mathematical themes</div></div>
             <div class="ami-stat"><div class="ami-stat-num">{NUM_DOMAINS}</div><div class="ami-stat-label">Applied domains</div></div>
             <div class="ami-stat"><div class="ami-stat-num">{NUM_SIMULATIONS}</div><div class="ami-stat-label">Simulation engines</div></div>
+            <div class="ami-stat"><div class="ami-stat-num">{NUM_DOMAINS_WITH_CASE_STUDIES}</div><div class="ami-stat-label">Domains w/ case studies</div></div>
             <div class="ami-stat"><div class="ami-stat-num">{NUM_PORTFOLIO}</div><div class="ami-stat-label">Portfolio projects</div></div>
         </div>
+        <p style="text-align:center;color:#64748b;font-size:0.85rem;margin-top:-0.5rem;">Platform version {VERSION} · {NUM_CASE_STUDY_LIBRARY} professional case studies in library</p>
         """,
         unsafe_allow_html=True,
     )
@@ -185,7 +187,7 @@ def render_home() -> None:
                 _card(
                     proj["title"],
                     proj["domain"],
-                    proj["prompt"][:120] + ("…" if len(proj["prompt"]) > 120 else ""),
+                    proj["question"][:120] + ("…" if len(proj["question"]) > 120 else ""),
                     "ami-card-portfolio",
                 ),
                 unsafe_allow_html=True,
@@ -199,8 +201,8 @@ def render_home() -> None:
         f"""
         <div class="ami-card ami-card-accent">
             <h4>Platform roadmap</h4>
-            <p><strong>Version {VERSION}</strong> — domain-specific simulations, professional case studies,
-            data-ready modules, {NUM_DOMAINS} domains, {NUM_SIMULATIONS} simulation engines.</p>
+            <p><strong>Version {VERSION}</strong> — {NUM_DOMAINS} domains, {NUM_SIMULATIONS} simulation engines,
+            {NUM_DOMAINS_WITH_CASE_STUDIES} domains with professional case studies, {NUM_PORTFOLIO} portfolio specs.</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -210,6 +212,6 @@ def render_home() -> None:
         st.markdown(f"- {item}")
 
     st.info(
-        "Use the sidebar **Navigate** section to begin. Start with a **Mathematical Theme** for foundations, "
-        "then an **Applied Domain** that matches your career interest."
+        "Start with **Mathematical Thinking** for the unified framework, then **Applied Domains** "
+        "for field-specific case studies and simulations."
     )

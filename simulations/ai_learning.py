@@ -96,7 +96,14 @@ def _neural_training():
     plot_line(range(len(train_loss)), train_loss, "Cross-Entropy Loss (training)", "Epoch", "Loss")
     if val_loss:
         ve, vl = zip(*val_loss)
-        st.line_chart({"validation_loss": vl}, x=ve)
+        fig, ax = plt.subplots()
+        ax.plot(ve, vl, marker="o", color="#6366f1")
+        ax.set_xlabel("Epoch")
+        ax.set_ylabel("Validation loss")
+        ax.set_title("Validation Loss (subsampled)")
+        ax.grid(True)
+        st.pyplot(fig)
+        plt.close(fig)
 
     h = np.maximum(0, X @ W1 + b1)
     pred = 1 / (1 + np.exp(-(h @ W2 + b2)))

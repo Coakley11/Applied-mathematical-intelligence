@@ -11,8 +11,8 @@ from simulations.poker_math import poker_quant_suite
 from simulations.sports_proj import sports_shrinkage
 from simulations.weather_climate import climate_scenario_ensemble, weather_uncertainty_cone
 
-# Domain-specific suites
 SIMULATION_RUNNERS = {
+    # Domain-specific suites
     "finance_quant_suite": finance_quant_suite,
     "poker_quant_suite": poker_quant_suite,
     "ai_ml_suite": ai_ml_suite,
@@ -22,18 +22,21 @@ SIMULATION_RUNNERS = {
     "sports_shrinkage": sports_shrinkage,
     "weather_uncertainty_cone": weather_uncertainty_cone,
     "climate_scenario_ensemble": climate_scenario_ensemble,
-    # Legacy / specialized
+    # Specialized tools
     "pharmacokinetics": legacy.pharmacokinetics,
     "tumor_growth": legacy.tumor_growth,
     "epidemic_sir": legacy.epidemic_sir,
     "election_forecast": legacy.election_forecast,
     "actuarial_losses": legacy.actuarial_losses,
-    "election_forecast": legacy.election_forecast,
     "genetic_drift": legacy.genetic_drift,
     "supply_chain": legacy.supply_chain,
     "casino_edge": legacy.casino_edge,
     "recommendation": legacy.recommendation,
     "signal_wave": legacy.signal_wave,
+    "regression_noise": legacy.regression_noise,
+    "projectile": legacy.projectile,
+    "monte_carlo_pi": legacy.monte_carlo_pi,
+    "kalman_tracking": legacy.kalman_tracking,
 }
 
 SIMULATION_COUNT = len(SIMULATION_RUNNERS)

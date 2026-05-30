@@ -106,14 +106,107 @@ DOMAIN_DEPTH: dict[str, dict] = {
         "case_study_ids": ["finance_2008_crisis"],
         "data_source": "finance",
     },
+    "Engineering & Optimization": {
+        "simulation_id": "projectile",
+        "simulation_caption": "Projectile trajectory — calculus of motion for design and launch optimization.",
+        "case_study_ids": [],
+        "data_source": None,
+    },
+    "Robotics": {
+        "simulation_id": "projectile",
+        "simulation_caption": "Planar motion model — foundation for trajectory and path planning in configuration space.",
+        "case_study_ids": [],
+        "data_source": None,
+    },
+    "Autonomous Vehicles": {
+        "simulation_id": "kalman_tracking",
+        "simulation_caption": "Kalman sensor fusion — predict/update cycle for position tracking under noise.",
+        "case_study_ids": [],
+        "data_source": None,
+    },
+    "Simulation & Monte Carlo Methods": {
+        "simulation_id": "monte_carlo_pi",
+        "simulation_caption": "Monte Carlo integration — estimate π by random sampling.",
+        "case_study_ids": [],
+        "data_source": None,
+    },
+    "Military Simulations & Wargaming": {
+        "simulation_id": "monte_carlo_pi",
+        "simulation_caption": "Monte Carlo scenario engine — same sampling logic scales to attrition and logistics stress tests.",
+        "case_study_ids": [],
+        "data_source": None,
+    },
+    "Statistics & Prediction Systems": {
+        "simulation_id": "regression_noise",
+        "simulation_caption": "Noisy regression — estimate hidden linear structure from observational data.",
+        "case_study_ids": ["sports_moneyball"],
+        "data_source": None,
+    },
+    "Genetics": {
+        "simulation_id": "genetic_drift",
+        "simulation_caption": "Wright–Fisher drift — allele frequency paths under demographic randomness.",
+        "case_study_ids": [],
+        "data_source": None,
+    },
+    "Supply Chain Optimization": {
+        "simulation_id": "supply_chain",
+        "simulation_caption": "Stochastic lead times and inventory balance — stockout risk under demand volatility.",
+        "case_study_ids": [],
+        "data_source": None,
+    },
+    "Internet Recommendation Systems": {
+        "simulation_id": "recommendation",
+        "simulation_caption": "Latent structure in user–item ratings — collaborative filtering geometry.",
+        "case_study_ids": [],
+        "data_source": None,
+    },
+    "Social Network Analysis": {
+        "simulation_id": "epidemic_sir",
+        "simulation_caption": "Contagion on a network — SIR dynamics as a model of diffusion and influence.",
+        "case_study_ids": [],
+        "data_source": None,
+    },
+    "Search Engines": {
+        "simulation_id": "recommendation",
+        "simulation_caption": "Low-rank preference structure — analogous to latent ranking and relevance signals.",
+        "case_study_ids": [],
+        "data_source": None,
+    },
+    "Cybersecurity": {
+        "simulation_id": "actuarial_losses",
+        "simulation_caption": "Compound cyber-loss model — incident frequency × severity for capital planning.",
+        "case_study_ids": [],
+        "data_source": None,
+    },
+    "Casino Mathematics": {
+        "simulation_id": "casino_edge",
+        "simulation_caption": "House-edge accumulation over thousands of wagers — law of large numbers in practice.",
+        "case_study_ids": [],
+        "data_source": None,
+    },
+    "Computer Graphics": {
+        "simulation_id": "signal_wave",
+        "simulation_caption": "Time-domain signal and FFT spectrum — basis of shading, audio, and image processing pipelines.",
+        "case_study_ids": [],
+        "data_source": None,
+    },
+    "Audio Processing & Music": {
+        "simulation_id": "signal_wave",
+        "simulation_caption": "Fourier decomposition of composite tones — core DSP for compression and synthesis.",
+        "case_study_ids": [],
+        "data_source": None,
+    },
 }
 
 
 def apply_domain_depth(domains: dict[str, dict]) -> None:
+    for domain in domains.values():
+        domain.setdefault("case_studies", [])
     for name, domain in domains.items():
         depth = DOMAIN_DEPTH.get(name)
         if not depth:
             continue
         domain.update({k: v for k, v in depth.items() if k != "case_study_ids"})
         ids = depth.get("case_study_ids", [])
-        domain["case_studies"] = [CASE_STUDIES[i] for i in ids if i in CASE_STUDIES]
+        if ids:
+            domain["case_studies"] = [CASE_STUDIES[i] for i in ids if i in CASE_STUDIES]

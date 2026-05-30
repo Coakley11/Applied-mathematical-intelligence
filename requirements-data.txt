@@ -1,5 +1,4 @@
 # Optional — install when wiring real datasets (not required to run the app)
+# Core app already includes pandas, numpy, matplotlib, streamlit.
 yfinance
-pandas
 requests
-# astroquery  # astronomy APIs

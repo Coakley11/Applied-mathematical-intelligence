@@ -208,26 +208,26 @@ def render_portfolio_lab(problems: list[dict]) -> None:
 
     for problem in problems:
         with st.expander(f"**{problem['title']}**", expanded=False):
-            st.markdown(f"**Domain:** {problem['domain']} · **Systems:** {problem['systems']}")
-            st.markdown("#### Business / Scientific Question")
+            st.markdown(f"**Domain:** {problem['domain']}  ·  **Systems:** {problem['systems']}")
+            st.markdown("##### Business / Scientific Question")
             st.write(problem["question"])
-            st.markdown("#### Data Needed")
+            st.markdown("##### Data Needed")
             st.write(problem["data_needed"])
-            st.markdown("#### Statistical & Mathematical Methods")
+            st.markdown("##### Statistical & Mathematical Methods")
             bullet_block(problem["methods"])
-            st.markdown("#### Visualizations to Build")
+            st.markdown("##### Visualizations to Build")
             bullet_block(problem["visualizations"])
-            col1, col2 = st.columns(2)
-            with col1:
-                st.markdown("#### Excel Version")
+            c1, c2 = st.columns(2)
+            with c1:
+                st.markdown("##### Excel Deliverable")
                 st.write(problem["excel"])
-            with col2:
-                st.markdown("#### Python Version")
+            with c2:
+                st.markdown("##### Python Deliverable")
                 st.write(problem["python"])
-            st.markdown("#### Interview Talking Points")
+            st.markdown("##### Interview Talking Points")
             st.write(problem["interview"])
-            st.markdown("#### GitHub README Summary")
-            st.code(problem["github_readme"], language=None)
+            st.markdown("##### GitHub README Summary")
+            st.info(problem["github_readme"])
 
     st.success(
         "Ship each project as a repo with: `README.md`, `notebooks/analysis.ipynb`, `src/`, sample `data/`, "

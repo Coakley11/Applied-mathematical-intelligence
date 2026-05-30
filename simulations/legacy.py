@@ -80,17 +80,6 @@ def election_forecast():
         if 230 + sum(np.random.rand(states) < win_prob) * (538 - 230) // states >= 270
     )
     st.metric("Win probability", f"{wins / sims:.1%}")
-
-
-def election_forecast():
-    states = st.slider("Number of swing states", 3, 12, 5)
-    win_prob = st.slider("Per-state win probability", 0.35, 0.65, 0.52)
-    sims = st.slider("Simulations", 500, 5000, 2000)
-    wins = sum(
-        1 for _ in range(sims)
-        if 230 + sum(np.random.rand(states) < win_prob) * (538 - 230) // states >= 270
-    )
-    st.metric("Win probability", f"{wins / sims:.1%}")
     st.caption("Toy electoral model — illustrates probabilistic forecasting discipline.")
 
 
@@ -147,6 +136,83 @@ def recommendation():
     im = ax.imshow(ratings, aspect="auto", cmap="RdYlBu_r")
     plt.colorbar(im, ax=ax)
     ax.set_title("Latent Structure in User–Item Matrix")
+    st.pyplot(fig)
+    plt.close(fig)
+
+
+def regression_noise():
+    slope = st.slider("True slope", -5.0, 5.0, 2.0, key="reg_slope")
+    noise = st.slider("Noise σ", 0.0, 30.0, 10.0, key="reg_noise")
+    n = st.slider("Sample size", 20, 500, 120, key="reg_n")
+    x = np.random.uniform(0, 100, n)
+    y = 25 + slope * x + np.random.normal(0, noise, n)
+    coeffs = np.polyfit(x, y, 1)
+    corr = np.corrcoef(x, y)[0, 1]
+    fig, ax = plt.subplots()
+    ax.scatter(x, y, alpha=0.6)
+    xs = np.sort(x)
+    ax.plot(xs, coeffs[0] * xs + coeffs[1], color="crimson")
+    ax.set_title("Noisy Linear Relationship — Inference Under Uncertainty")
+    ax.grid(True)
+    st.pyplot(fig)
+    plt.close(fig)
+    c1, c2 = st.columns(2)
+    c1.metric("Estimated slope", f"{coeffs[0]:.3f}")
+    c2.metric("Correlation", f"{corr:.3f}")
+
+
+def projectile():
+    velocity = st.slider("Initial velocity (m/s)", 10, 200, 90, key="proj_v")
+    angle = st.slider("Launch angle (°)", 10, 80, 45, key="proj_a")
+    g = 9.8
+    rad = np.radians(angle)
+    t_flight = 2 * velocity * np.sin(rad) / g
+    t = np.linspace(0, t_flight, 200)
+    x = velocity * np.cos(rad) * t
+    y = velocity * np.sin(rad) * t - 0.5 * g * t ** 2
+    plot_line(x, y, "Trajectory Under Gravity", "Distance (m)", "Height (m)")
+    st.metric("Range", f"{max(x):.1f} m")
+    st.metric("Max height", f"{max(y):.1f} m")
+
+
+def monte_carlo_pi():
+    n = st.slider("Random points", 100, 8000, 2000, key="pi_n")
+    x = np.random.uniform(-1, 1, n)
+    y = np.random.uniform(-1, 1, n)
+    inside = x ** 2 + y ** 2 <= 1
+    pi_est = 4 * np.mean(inside)
+    fig, ax = plt.subplots()
+    ax.scatter(x[inside], y[inside], s=4, alpha=0.5)
+    ax.scatter(x[~inside], y[~inside], s=4, alpha=0.5)
+    ax.set_aspect("equal")
+    ax.set_title("Monte Carlo π — Integration by Sampling")
+    st.pyplot(fig)
+    plt.close(fig)
+    st.metric("π estimate", f"{pi_est:.5f}")
+
+
+def kalman_tracking():
+    st.markdown("**1D Kalman filter** — fuse noisy position measurements into a smooth state estimate.")
+    steps = st.slider("Time steps", 20, 200, 80, key="kf_steps")
+    rng = np.random.default_rng(42)
+    true_pos = np.cumsum(rng.normal(0, 1, steps))
+    measured = true_pos + rng.normal(0, 2.5, steps)
+    x_est, p = 0.0, 1.0
+    q, r = 0.1, 4.0
+    estimates = []
+    for z in measured:
+        x_pred, p_pred = x_est, p + q
+        k = p_pred / (p_pred + r)
+        x_est = x_pred + k * (z - x_pred)
+        p = (1 - k) * p_pred
+        estimates.append(x_est)
+    fig, ax = plt.subplots()
+    ax.plot(true_pos, label="True position", linewidth=2)
+    ax.scatter(range(steps), measured, s=12, alpha=0.5, label="Noisy GPS")
+    ax.plot(estimates, label="Kalman estimate", linewidth=2)
+    ax.set_title("Sensor Fusion — Predict / Update Cycle")
+    ax.legend()
+    ax.grid(True)
     st.pyplot(fig)
     plt.close(fig)
 
