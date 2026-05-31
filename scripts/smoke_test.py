@@ -148,7 +148,7 @@ def main() -> int:
     ):
         errors.append("get_worked_example failed")
 
-    if len(MATH_CONCEPTS) < 10:
+    if len(MATH_CONCEPTS) < 14:
         errors.append("Math concepts < 10")
 
     if detect_concept("expected value").get("id") != "expected_value":

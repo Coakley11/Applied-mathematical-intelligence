@@ -170,8 +170,11 @@ def main() -> int:
     if not ABSTRACT_PROBLEM_SOLVING.get("translations"):
         errors.append("Missing abstract problem solving translations")
 
-    if len(MATH_CONCEPTS) < 10:
-        errors.append(f"Expected at least 10 math concepts, got {len(MATH_CONCEPTS)}")
+    if len(MATH_CONCEPTS) < 14:
+        errors.append(f"Expected at least 14 math concepts, got {len(MATH_CONCEPTS)}")
+
+    if detect_concept("gradient descent").get("id") != "gradient_descent":
+        errors.append("detect_concept failed for gradient descent")
 
     if detect_concept("derivative").get("id") != "derivative":
         errors.append("detect_concept failed for derivative")

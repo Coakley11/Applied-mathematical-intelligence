@@ -55,40 +55,45 @@ QUANT_AREAS: list[dict] = [
     },
     {
         "id": "abstract",
-        "name": "Abstract Mathematical Problem Solving",
+        "name": "Modeling Real Systems",
         "icon": "📐",
         "pattern_id": "abstract",
         "suggested_lab": "Solve a Problem",
-        "tagline": "Structure before formulas.",
+        "tagline": "Variables, assumptions, constraints, uncertainty — before formulas.",
     },
 ]
 
 QUANT_AREA_BY_ID = {a["id"]: a for a in QUANT_AREAS}
 
-# Attach example question lists from worked_examples
 for _a in QUANT_AREAS:
     _a["example_questions"] = get_example_questions(_a["id"])
 
-ABSTRACT_PROBLEM_SOLVING = {
-    "title": "Abstract Mathematical Problem Solving",
+MODELING_REAL_SYSTEMS = {
+    "title": "Modeling Real Systems",
     "purpose": (
-        "See the **structure** before the procedure: what are you predicting, comparing, "
-        "optimizing, or explaining? Then pick probability, statistics, calculus, optimization, or simulation."
+        "Turn a real situation into **variables**, choose a **model**, state **assumptions** and "
+        "**constraints**, quantify **uncertainty**, then use probability, optimization, calculus, or "
+        "**simulation**. This thread connects betting, sports, medicine, AI, space, and forecasting."
     ),
     "steps": [
-        ("Real structure", "What is optimized, estimated, predicted, or compared?"),
-        ("Variables", "Decisions vs. measurements vs. unknowns."),
-        ("Constraints", "Budget, physics, time, rules."),
+        ("Real structure", "What is predicted, compared, optimized, or explained?"),
+        ("Variables", "Decisions you control vs. measurements vs. unknowns."),
+        ("Choose a model", "Simplest relationship that answers the question."),
         ("Assumptions", "What must hold for the model to apply?"),
-        ("Tool choice", "Probability, statistics, calculus, optimization, simulation."),
-        ("Simplify", "Smallest model that still answers the question."),
+        ("Constraints", "Budget, physics, time, rules, safety."),
+        ("Uncertainty", "Ranges, distributions, scenarios — not false precision."),
+        ("Compute & test", "Calculate, simulate, compare to data; falsify one claim."),
     ],
     "translations": [
-        ("Betting", "→ Expected value vs. implied probability."),
-        ("Sports", "→ Probability forecast + uncertainty."),
-        ("Medicine", "→ Treatment vs. control inference."),
-        ("Rocket motion", "→ ODEs / energy / optimization."),
-        ("AI", "→ Loss minimization on new data."),
-        ("Weather", "→ Probabilistic forecasts widening over time."),
+        ("Betting", "→ EV vs. implied probability; bankroll under variance."),
+        ("Sports", "→ Forecast P(win) + injury adjustments vs. market."),
+        ("Medicine", "→ Growth/treatment rates; trials vs. control."),
+        ("AI", "→ Loss minimization + generalization gap."),
+        ("Rocket / motion", "→ ODEs, trajectories, fuel optimization."),
+        ("Weather", "→ Ensemble spread widening with lead time."),
+        ("General", "→ Same skeleton: objective, inputs, constraints, noise."),
     ],
 }
+
+# Backward-compatible alias for imports
+ABSTRACT_PROBLEM_SOLVING = MODELING_REAL_SYSTEMS

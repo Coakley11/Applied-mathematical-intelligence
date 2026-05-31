@@ -20,8 +20,10 @@ def _ex(
     interpretation: str = "",
     recommendation: str = "",
     interactive_defaults: dict | None = None,
+    math_translation: str = "",
+    abstract_structure: dict | None = None,
 ) -> dict:
-    return {
+    out = {
         "area_id": area_id,
         "pattern_id": pattern_id,
         "question": question,
@@ -37,6 +39,11 @@ def _ex(
         "interpretation": interpretation,
         "recommendation": recommendation,
     }
+    if math_translation:
+        out["math_translation"] = math_translation
+    if abstract_structure:
+        out["abstract_structure"] = abstract_structure
+    return out
 
 
 WORKED_EXAMPLES: list[dict] = [
@@ -142,6 +149,40 @@ WORKED_EXAMPLES: list[dict] = [
         "Favorable vs. fair odds — still validate your probability.",
         {"p": 25, "odds": "+400", "stake": 100},
     ),
+    _ex(
+        "betting", "betting",
+        "I want to bet $200 that Aaron Judge hits 30 home runs. Is it a good bet?",
+        "You are risking **$200** on a **season prop** — compare your P(Judge ≥ 30 HR) to what the payout implies.",
+        "**Expected value on a binary prop** — same logic as a moneyline, different story.",
+        ["Stake ($200)", "Profit if prop hits", "Your P(30+ HR)", "Break-even P", "EV ($)"],
+        ["Playing time and health folded into your probability", "Payout fixed at bet time", "No push on season totals"],
+        "Break-even P = stake/(stake+profit). EV = P×profit − (1−P)×stake. Build P(30+) from rate × opportunities.",
+        (
+            "Example: risk **$200** to win **$180** (total return $380).\n\n"
+            "Break-even P = 200/380 ≈ **52.6%**.\n\n"
+            "If your model says **38%** for 30+ HR ⇒ **−EV**.\n\n"
+            "If your model says **55%** ⇒ EV = 0.55×180 − 0.45×200 = **+$9**.\n\n"
+            "Shrink hot starts toward career norms before trusting a high P."
+        ),
+        "ev_prop",
+        {
+            "Count models": "HR ≈ rate × plate appearances; uncertainty widens the distribution.",
+            "Market": "Books aggregate many models — beating them needs edge, not narrative.",
+        },
+        "The bet is good only if your P(30+) clears break-even with margin for error.",
+        "Build P(30+) from projected rate and games; compare to implied odds.",
+        {"stake": 200, "profit": 180, "p": 38},
+        math_translation=(
+            "This is an **expected value** problem: compare payout to the probability the prop cashes."
+        ),
+        abstract_structure={
+            "kind": "Decision under uncertainty — binary outcome (prop hits or not).",
+            "comparing": "Your P(30+ HR) vs. break-even probability from the price.",
+            "unknown": "True chance Judge reaches 30 HR this season.",
+            "needs_estimate": "HR rate, playing time, park factors, injury risk.",
+            "structure": "EV = P(win)×profit − P(lose)×stake.",
+        },
+    ),
     # --- Sports Prediction ---
     _ex(
         "sports", "sports",
@@ -157,14 +198,14 @@ WORKED_EXAMPLES: list[dict] = [
             "If the book implies **25%** for 30+ but your model says **40%**, there may be edge.\n\n"
             "Shrink extreme early-season rates toward career norms."
         ),
-        "ev_bet",
+        "ev_prop",
         {
             "Regression to mean": "Hot starts overstate true talent in small samples.",
             "Count models": "HR totals often modeled as rate × opportunities.",
         },
         "Prop bets are EV problems dressed as player narratives.",
         "Build P(30+) from rate × playing time; compare to implied odds.",
-        {"p": 38, "odds": "+150", "stake": 100},
+        {"stake": 200, "profit": 180, "p": 38},
     ),
     _ex(
         "sports", "sports",
@@ -219,11 +260,11 @@ WORKED_EXAMPLES: list[dict] = [
             "On −110, EV per $100 risked ≈ 0.58×91 − 0.42×100 (adjust for exact odds).\n\n"
             "Ask: has your model been **calibrated** out-of-sample?"
         ),
-        "ev_bet",
+        "sports_edge",
         {"Closing line value": "Pros track whether their picks beat the closing line."},
         "Apparent edge ≠ guaranteed profit — validate model calibration.",
         "Possible edge — track bets and compare to closing odds.",
-        {"p": 58, "odds": "-110", "stake": 100},
+        {"model": 58, "market": 52, "injury": 0},
     ),
     _ex(
         "sports", "sports",
@@ -450,11 +491,11 @@ WORKED_EXAMPLES: list[dict] = [
             "θ < 45° ⇒ lower apex, flatter arc.\n\n"
             "Orbits need horizontal speed, not just upward launch."
         ),
-        "motion",
+        "projectile",
         {"Components": "vx = v cos θ, vy = v sin θ.", "Orbits": "Need sufficient horizontal v for closed orbit."},
         "Angle trades height for distance.",
         "Pick θ for mission: range vs. altitude vs. orbit insertion.",
-        {"v": 800, "r": 6371},
+        {"v0": 800, "angle": 45, "g": 9.81},
     ),
     _ex(
         "space", "space",
@@ -510,7 +551,7 @@ WORKED_EXAMPLES: list[dict] = [
             "30% rain ⇒ about **3 in 10** similar days rain — not 'light rain for sure'.\n\n"
             "Trust **calibrated** probabilities, not single deterministic icons."
         ),
-        "forecast",
+        "forecast_range",
         {
             "Calibration": "Predicted 30% should rain ~30% of the time.",
             "Chaos": "Small errors grow — limits long-range detail.",
@@ -532,7 +573,7 @@ WORKED_EXAMPLES: list[dict] = [
             "Use **ensembles** (many model runs) to see range of futures.\n\n"
             "Point forecasts hide this — prefer intervals."
         ),
-        "forecast",
+        "forecast_range",
         {"Ensembles": "Perturb initial conditions; cloud of outcomes.", "Lorenz": "Sensitive dependence."},
         "Never treat day-7 like day-1 precision.",
         "Report wider bands at longer leads.",
@@ -552,7 +593,7 @@ WORKED_EXAMPLES: list[dict] = [
             "3. **Spread** of runs = uncertainty.\n\n"
             "Same idea in finance (scenario paths) and epidemics (SIR Monte Carlo)."
         ),
-        "forecast",
+        "forecast_range",
         {"Monte Carlo": "Sample inputs → distribution of outputs.", "SIR": "Epidemic sims use same ensemble idea."},
         "One run is one possible future; many runs show risk.",
         "Use ensembles when a point forecast is misleading.",
@@ -572,7 +613,7 @@ WORKED_EXAMPLES: list[dict] = [
             "- Cost(plan outdoor | no rain) × 0.70\n\n"
             "**30%** can still justify backup if downside is large."
         ),
-        "forecast",
+        "forecast_range",
         {"Expected cost": "Choose action minimizing expected loss."},
         "30% is material when stakes are asymmetric.",
         "Decide with expected cost — not gut feel on %. ",

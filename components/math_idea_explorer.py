@@ -2,6 +2,7 @@
 
 import streamlit as st
 
+from components.idea_interactives import render_idea_play
 from components.nav import navigate_to
 from content.math_idea_explorer import (
     DOMAIN_LABELS,
@@ -22,14 +23,14 @@ def render_math_idea_explorer() -> None:
     st.caption(MATH_IDEA_EXPLORER["intro"])
 
     st.markdown("#### Enter a math idea")
-    st.caption("Equation, concept, or phrase — we map structure to real-world uses.")
+    st.caption("Equation, concept, or phrase — structure first, not just an answer.")
 
     example = st.selectbox("Examples", EXAMPLE_INPUTS, key="mie_example")
     custom = ""
     if example == "Custom input (type below)":
         custom = st.text_input(
             "Your math idea",
-            placeholder="e.g. derivative, (x+3)^2 = 7, Bayes theorem…",
+            placeholder="e.g. derivative, gradient descent, (x+3)^2 = 7…",
             key="mie_custom",
         )
 
@@ -65,10 +66,15 @@ def _render_concept_exploration(user_input: str, concept: dict) -> None:
     st.markdown("#### 1. What is this mathematically?")
     st.markdown(concept["mathematical_description"])
 
-    st.markdown("#### 2. What is the deeper abstract idea?")
+    st.markdown("#### 2. What does it mean abstractly?")
     st.markdown(concept["abstract_idea"])
 
-    st.markdown("#### 3. Where does this show up in real life?")
+    representation = concept.get("representation")
+    if representation:
+        st.markdown("#### 3. How could it be represented?")
+        st.markdown(representation)
+
+    st.markdown("#### 4. Where does it apply in real life?")
     apps = concept.get("real_world_applications", {})
     cols = st.columns(2)
     items = list(apps.items())
@@ -78,10 +84,16 @@ def _render_concept_exploration(user_input: str, concept: dict) -> None:
             st.markdown(f"**{label}**")
             st.caption(text)
 
-    st.markdown("#### 4. Why does this matter?")
+    specific = concept.get("specific_examples", [])
+    if specific:
+        st.markdown("#### 5. Specific application examples")
+        for ex in specific:
+            st.markdown(f"- {ex}")
+
+    st.markdown("#### 6. Why does this matter?")
     st.markdown(concept["why_it_matters"])
 
-    st.markdown("#### 5. Try a real-world version")
+    st.markdown("#### 7. Try a real-world version")
     st.info(concept["mini_example"])
 
     if concept.get("id") == "general" and concept.get("interpretation_questions"):
@@ -89,13 +101,24 @@ def _render_concept_exploration(user_input: str, concept: dict) -> None:
         for q in concept["interpretation_questions"]:
             st.markdown(f"- {q}")
 
+    interactive = concept.get("interactive")
+    if interactive:
+        st.markdown("#### 8. Play with numbers")
+        render_idea_play(interactive, f"mie_{concept.get('id', 'x')}", concept.get("interactive_defaults", {}))
+
     _render_go_deeper(concept)
+
+    closing = concept.get("real_world_closing")
+    if closing:
+        st.markdown("---")
+        st.markdown("#### How this helps you solve real problems")
+        st.success(closing)
 
     _render_related_labs(concept)
 
 
 def _render_go_deeper(concept: dict) -> None:
-    with st.expander("#### 6. Go deeper (optional)", expanded=False):
+    with st.expander("Go deeper — formula, symbols, worked sketch", expanded=False):
         st.markdown(concept.get("deeper_math", ""))
         if concept.get("user_input"):
             st.caption(f"Your input: {concept['user_input']}")

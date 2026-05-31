@@ -37,7 +37,7 @@ ANALYST_BRIEFS: dict[str, dict] = {
             "Probability": "Implied probability from odds: for +150, implied ≈ 100/(150+100) = 40%.",
             "Expected value": "EV = p×(profit if win) − (1−p)×(stake if lose).",
         },
-        "interactive": "ev_bet",
+        "interactive": "sports_edge",
     },
     "medicine": {
         "type_label": "Treatment / disease modeling",
@@ -151,7 +151,7 @@ ANALYST_BRIEFS: dict[str, dict] = {
             "Statistics": "Brier score measures calibration of probabilistic forecasts.",
             "Simulation": "Numerical weather models integrate fluid dynamics forward in time.",
         },
-        "interactive": "forecast",
+        "interactive": "forecast_range",
     },
     "default": {
         "type_label": "Quantitative decision / prediction",
@@ -192,7 +192,7 @@ ANALYST_BRIEFS: dict[str, dict] = {
         "interactive": "motion",
     },
     "abstract": {
-        "type_label": "Abstract structure (before formulas)",
+        "type_label": "Modeling real systems (structure before formulas)",
         "what_is_asked": "What **type** of mathematical question is this — compare, estimate, optimize, or model change?",
         "variables": "Objective, decisions, measurements, unknown parameters, constraints",
         "math_useful": "Map structure first — then probability, statistics, calculus, optimization, or simulation",
@@ -225,7 +225,8 @@ FLOW_EXTENSIONS: dict[str, dict] = {
             "problem_kind": "Decision under uncertainty — compare your belief to the market price.",
             "structure": "EV = P(win)×gain − P(lose)×loss; positive EV means profitable long-term.",
             "comparing": "Your probability vs. break-even probability from the odds.",
-            "matters": "Long-run edge and bet sizing — not whether you win once.",
+            "unknown": "True win probability of this specific wager.",
+            "needs_estimate": "P(win) from data or model; long-run edge and bet sizing.",
             "assumptions": "Your probability estimate is calibrated; odds won't move before you bet.",
         },
         "solution": {
@@ -250,7 +251,8 @@ FLOW_EXTENSIONS: dict[str, dict] = {
             "problem_kind": "Forecast + decision — is the market price wrong?",
             "structure": "True talent + context → P(outcome); compare to implied odds.",
             "comparing": "Your forecast vs. market; signal vs. noise in past stats.",
-            "matters": "Calibration over many predictions — not one hot streak.",
+            "unknown": "True chance of the outcome tonight or this season.",
+            "needs_estimate": "Team strength, injuries, sample size; calibration over many games.",
             "assumptions": "Past data informs future; injuries and role changes are modeled.",
         },
         "solution": {

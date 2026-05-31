@@ -6,8 +6,8 @@ PROBLEM_SOLVING_LAB = {
     "action": "Solve a Problem",
     "tagline": "Pick an area, ask a quantitative question, see how analysts think — then try the math.",
     "intro": (
-        "Seven real-world areas — betting, sports, medicine, AI, space, forecasting, and abstract structure. "
-        "Short framing, variables, applied math, and hands-on tools. No long questionnaires."
+        "Seven real-world areas — betting, sports, medicine, AI, space, forecasting, and modeling real systems. "
+        "Interpret → variables → structure → compute → meaning. No long questionnaires."
     ),
 }
 

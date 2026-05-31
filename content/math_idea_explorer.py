@@ -20,14 +20,14 @@ EXAMPLE_INPUTS = [
     "derivative",
     "integral",
     "expected value",
-    "standard deviation",
     "confidence interval",
     "Bayes theorem",
-    "quadratic equation",
-    "exponential growth",
-    "optimization",
     "probability distribution",
-    "area under a curve",
+    "exponential growth",
+    "optimization with constraints",
+    "gradient descent",
+    "differential equation",
+    "multivariable integral",
     "Custom input (type below)",
 ]
 
@@ -78,6 +78,20 @@ _FALLBACK = {
         "Is it describing uncertainty or randomness?",
         "Is it finding the best choice subject to limits?",
     ],
+    "representation": (
+        "Unknowns **x**, relationships **f(x) = …**, constraints **g(x) ≤ 0**, "
+        "or objectives to maximize/minimize — pick the closest skeleton."
+    ),
+    "specific_examples": [
+        "Break-even probability from odds: solve stake/(stake+profit) for fair P.",
+        "Compare two cancer arms: difference in response rates with confidence intervals.",
+        "Rocket height: position as a function of time under gravity.",
+    ],
+    "real_world_closing": (
+        "Naming the structure tells you which lab to open: EV for bets, growth models for medicine, "
+        "optimization for AI training — same logic, different quantities."
+    ),
+    "interactive": "optimization",
 }
 
 _CONCEPTS: list[dict] = [
@@ -113,6 +127,14 @@ _CONCEPTS: list[dict] = [
         ),
         "deeper_math": "f′(x) = lim(h→0) [f(x+h)−f(x)]/h; chain rule links composed systems.",
         "related_labs": ["Model a Disease", "Train an AI"],
+        "representation": "Function **f(x)**; sensitivity **f′(a)** at a point **a**; linear approximation f(a)+f′(a)(x−a).",
+        "specific_examples": [
+            "Odds move after injury news — how fast does implied probability change?",
+            "Tumor volume: dV/dt proportional to V gives exponential-looking growth early on.",
+            "Neural net training: gradient of loss w.r.t. each weight updates the model.",
+        ],
+        "real_world_closing": "Derivatives answer 'how sensitive is the outcome?' — critical for risk, dosing, and learning rates.",
+        "interactive": "derivative",
     },
     {
         "id": "integral",
@@ -145,6 +167,14 @@ _CONCEPTS: list[dict] = [
         ),
         "deeper_math": "Fundamental theorem links integrals and derivatives; numerical quadrature on computers.",
         "related_labs": ["Model a Disease", "Advanced reference"],
+        "representation": "∫ f(x) dx over an interval; region sums for multivariable ∫∫ f(x,y) dA.",
+        "specific_examples": [
+            "Total drug exposure (AUC) integrates concentration over hours in the body.",
+            "Season bankroll path integrates many +EV and −EV bets over time.",
+            "Work done moving an object integrates force along the path.",
+        ],
+        "real_world_closing": "When the question is 'how much total?' — integrate rate, risk, or exposure over time or space.",
+        "interactive": "integral",
     },
     {
         "id": "quadratic",
@@ -213,6 +243,14 @@ _CONCEPTS: list[dict] = [
         ),
         "deeper_math": "Linearity of expectation; variance measures spread around the mean.",
         "related_labs": ["Analyze a Bet", "Predict a Game"],
+        "representation": "Outcomes **xᵢ** with probabilities **pᵢ**; EV = Σ pᵢ xᵢ.",
+        "specific_examples": [
+            "Risk $200 on Judge 30+ HR: EV = P(hit)×profit − P(miss)×stake.",
+            "Insurer pricing: expected claim cost vs. premium collected.",
+            "Clinical trial: expected survival months under treatment vs. control.",
+        ],
+        "real_world_closing": "EV separates one lucky outcome from a repeatable decision — use it before sizing any bet or policy.",
+        "interactive": "ev_bet",
     },
     {
         "id": "standard_deviation",
@@ -273,6 +311,14 @@ _CONCEPTS: list[dict] = [
         ),
         "deeper_math": "Often mean ± 1.96×SE for large samples; bootstrap for complex stats.",
         "related_labs": ["Model a Disease", "Predict a Game"],
+        "representation": "Estimate **θ̂** ± margin from sample mean, SD, and n.",
+        "specific_examples": [
+            "Trial reports 40% response, 95% CI [32%, 48%] — honest uncertainty.",
+            "Poll: candidate 52% ± 3% — true support plausibly 49–55%.",
+            "Model accuracy on n=50 test points — wide CI, don't overtrust.",
+        ],
+        "real_world_closing": "CIs stop you from pretending precision you don't have — essential for medicine, polls, and ML metrics.",
+        "interactive": "confidence_interval",
     },
     {
         "id": "bayes_theorem",
@@ -426,6 +472,149 @@ _CONCEPTS: list[dict] = [
         "related_labs": ["Optimize a Decision"],
         "equation_pattern": re.compile(r"=\s*[^=]+$|ax\s*\+|linear", re.I),
     },
+    {
+        "id": "gradient_descent",
+        "aliases": ["gradient descent", "grad descent", "sgd", "stochastic gradient", "backprop"],
+        "plain_name": "Gradient descent",
+        "mathematical_description": (
+            "**Gradient descent** updates parameters in the direction that **reduces loss** — "
+            "each step uses the gradient (vector of partial derivatives)."
+        ),
+        "abstract_idea": (
+            "When you can't solve for weights in closed form, **walk downhill** on the loss surface "
+            "using local slope information."
+        ),
+        "representation": "Parameters **w**; loss **L(w)**; update **w ← w − η∇L(w)** with learning rate **η**.",
+        "real_world_applications": {
+            "betting": "Fit a model to historical outcomes by minimizing prediction error.",
+            "sports": "Train rating systems from game results.",
+            "medicine": "Fit dose–response curves to trial data.",
+            "ai": "Standard training for neural nets and large linear models.",
+            "engineering": "Calibrate simulation parameters to match flight data.",
+            "forecasting": "Estimate trend coefficients from past series.",
+            "science": "Nonlinear least squares in physics and chemistry.",
+        },
+        "specific_examples": [
+            "Train/val gap 14 pts: lower learning rate or add regularization — same gradient idea.",
+            "Spam filter: adjust weights until misclassification loss drops on new emails.",
+            "Weather bias correction: nudge model weights so ensemble mean matches observations.",
+        ],
+        "why_it_matters": "Most modern AI is gradient descent (or variants) on a loss you define.",
+        "mini_example": "Loss high, gradient points uphill → step opposite gradient; repeat until validation loss plateaus.",
+        "deeper_math": "η too large diverges; momentum and Adam adapt step sizes; convex losses have one minimum.",
+        "related_labs": ["Train an AI", "Solve a Problem"],
+        "real_world_closing": "Gradient descent is how models **learn from data** — tie every training knob to validation loss.",
+        "interactive": "ml_split",
+    },
+    {
+        "id": "differential_equation",
+        "aliases": [
+            "differential equation", "differential equations", "ode", "odes",
+            "rate equation", "dV/dt", "dy/dx =",
+        ],
+        "plain_name": "Differential equation",
+        "mathematical_description": (
+            "A **differential equation** relates a quantity to its **rates of change** — "
+            "how the system evolves over time or space."
+        ),
+        "abstract_idea": (
+            "Instead of 'what is V at t=10?' you specify **how V changes moment by moment**, then integrate forward."
+        ),
+        "representation": "Unknown function **x(t)**; equation like **dx/dt = f(x,t)**; initial condition **x(0)**.",
+        "real_world_applications": {
+            "betting": "Bankroll dynamics under repeated proportional betting (stochastic DEs).",
+            "sports": "Fatigue and recovery models over a season.",
+            "medicine": "Tumor growth dV/dt = rV − k·dose; pharmacokinetics dC/dt = in − out.",
+            "ai": "Continuous-time neural ODEs (research); training dynamics approximated as DEs.",
+            "engineering": "Rocket F=ma; orbital motion; heat flow.",
+            "forecasting": "SIR epidemic models; weather fluid dynamics.",
+            "science": "Population ecology, chemical kinetics, neuron models.",
+        },
+        "specific_examples": [
+            "Exponential tumor growth: dV/dt = 0.08V until treatment adds a kill term.",
+            "Cooling coffee: dT/dt = −k(T − T_room).",
+            "Rocket coast phase: dv/dt = −g after engines cut off.",
+        ],
+        "why_it_matters": "Dynamics questions — growth, decay, motion — are DEs whether you write them or not.",
+        "mini_example": "dV/dt = 0.1V ⇒ V(t) = V₀e^{0.1t} — doubling time from the rate constant.",
+        "deeper_math": "Order, linearity, stability; numerical solvers (Euler, Runge–Kutta) on computers.",
+        "related_labs": ["Model a Disease", "Advanced reference"],
+        "real_world_closing": "If the question is 'how does it evolve?' — write a rate equation, then simulate or solve.",
+        "interactive": "exponential",
+    },
+    {
+        "id": "constrained_optimization",
+        "aliases": [
+            "constrained optimization", "optimization with constraints", "lagrange",
+            "linear programming", "maximize subject to", "minimize subject to",
+        ],
+        "plain_name": "Constrained optimization",
+        "mathematical_description": (
+            "**Constrained optimization** maximizes or minimizes an **objective** while satisfying "
+            "**constraints** (budgets, laws of physics, safety limits)."
+        ),
+        "abstract_idea": (
+            "The best feasible choice often sits **on a constraint boundary** — not in the interior."
+        ),
+        "representation": "Maximize **f(x)** subject to **gᵢ(x) ≤ 0**, **hⱼ(x) = 0**.",
+        "real_world_applications": {
+            "betting": "Kelly bet sizing under bankroll and risk caps.",
+            "sports": "Lineup selection under salary cap.",
+            "medicine": "Maximize tumor kill subject to toxicity limits.",
+            "ai": "Train with GPU memory and latency constraints; constrained fairness metrics.",
+            "engineering": "Min fuel to orbit subject to thrust and heat limits.",
+            "forecasting": "Best ensemble weights with weights summing to 1.",
+            "science": "Portfolio risk/return, supply chain, energy dispatch.",
+        },
+        "specific_examples": [
+            "Factory: max profit = price×units − cost×units s.t. units ≤ 1000/day.",
+            "Rocket: min fuel s.t. final velocity = orbital speed.",
+            "ML: max accuracy s.t. model size < 10 MB for deployment.",
+        ],
+        "why_it_matters": "Real decisions always have limits — unconstrained 'optima' are often infeasible.",
+        "mini_example": "If profit per unit is flat, optimum is at the **capacity** constraint — not 'infinite production'.",
+        "deeper_math": "Lagrange multipliers; KKT conditions; convex problems easier than general nonconvex.",
+        "related_labs": ["Optimize a Decision", "Train an AI"],
+        "real_world_closing": "List objective + constraints before any formula — that's how engineers and quants actually decide.",
+        "interactive": "optimization",
+    },
+    {
+        "id": "multivariable_integral",
+        "aliases": [
+            "multivariable integral", "multiple integral", "double integral", "triple integral",
+            "four-dimensional integral", "∫∫", "volume integral", "integral with constraints",
+        ],
+        "plain_name": "Multivariable integral",
+        "mathematical_description": (
+            "A **multivariable integral** adds up a quantity over a **region** in 2D, 3D, or higher dimensions — "
+            "often with **constraints** defining the region."
+        ),
+        "abstract_idea": (
+            "When outcomes depend on **several variables at once**, total exposure or probability is an integral "
+            "over the allowed region."
+        ),
+        "representation": "∫∫_R f(x,y) dA or ∫∫∫_V f(x,y,z,t) dV; region **R** from constraints.",
+        "real_world_applications": {
+            "betting": "Joint distribution of correlated bets — risk over a region of outcomes.",
+            "sports": "Expected points over joint player-performance regions.",
+            "medicine": "Tumor dose integrated over 3D space and time; total drug in organ.",
+            "ai": "Expected loss over high-dimensional parameter neighborhoods; Bayesian integrals.",
+            "engineering": "Mass, center of mass, and stress integrated over volumes.",
+            "forecasting": "Probability of rain summed over a geographic grid.",
+            "science": "Physics expectations over state space; statistical mechanics.",
+        },
+        "specific_examples": [
+            "Total radiation dose = ∫∫∫ dose(x,y,z) dV through the tumor volume.",
+            "Probability both stocks drop: integrate joint density over the loss region.",
+            "Expected cost under uncertain demand and supply: integral over constraint set.",
+        ],
+        "why_it_matters": "High-dimensional integrals appear wherever **several uncertainties combine**.",
+        "mini_example": "Mass of a non-uniform object = ∫∫∫ density(x,y,z) dV — same idea as probability over a region.",
+        "deeper_math": "Fubini's theorem; change of variables; Monte Carlo when analytic integrals are hard.",
+        "related_labs": ["Model a Disease", "Advanced reference"],
+        "real_world_closing": "If risk or exposure lives in several dimensions, you're integrating — simulate when pen-and-paper fails.",
+        "interactive": "integral",
+    },
 ]
 
 MATH_CONCEPTS: dict[str, dict] = {c["id"]: c for c in _CONCEPTS}
@@ -438,6 +627,19 @@ def detect_concept(text: str) -> dict:
         return dict(_FALLBACK)
 
     lower = raw.lower()
+
+    if re.search(r"gradient\s*descent|backprop|sgd", lower):
+        return dict(MATH_CONCEPTS["gradient_descent"])
+    if re.search(r"differential\s*equat|rate\s*equation|\bdv/dt\b|\bode\b", lower):
+        return dict(MATH_CONCEPTS["differential_equation"])
+    if re.search(r"constrained\s*optim|lagrange|subject\s*to|with\s*constraints", lower):
+        return dict(MATH_CONCEPTS["constrained_optimization"])
+    if re.search(
+        r"multivariable\s*integral|multiple\s*integral|double\s*integral|"
+        r"four[- ]dimensional\s*integral|∫∫",
+        lower,
+    ):
+        return dict(MATH_CONCEPTS["multivariable_integral"])
 
     # Equation: squared term
     if re.search(r"\([^)]+\)\s*\^\s*2|\([^)]+\)\s*²|\)\s*2\s*=", lower) or "x^2" in lower or "x²" in lower:
