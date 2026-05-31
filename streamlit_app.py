@@ -8,6 +8,7 @@ from components.optimization_workshop import render_optimization_workshop
 from components.practical_labs import render_practical_lab
 from components.reference import render_reference_library
 from components.styles import inject_platform_styles
+from components.math_idea_explorer import render_math_idea_explorer
 from components.problem_solving import render_problem_solving_lab
 from content.practical_labs import (
     ACTION_SECTION_TYPES,
@@ -108,9 +109,11 @@ elif view_mode in ACTION_SECTION_TYPES:
         render_idea_analysis()
     elif section_type == "problem_solving":
         render_problem_solving_lab()
+    elif section_type == "math_idea_explorer":
+        render_math_idea_explorer()
 
 st.markdown("---")
 st.caption(
     f"Applied Mathematical Intelligence v{VERSION} | "
-    "Enter a quantitative question → analyze → try a lab."
+    "Enter a quantitative question → analyze → explore a math idea → try a lab."
 )

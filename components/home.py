@@ -10,11 +10,11 @@ def render_home() -> None:
     st.markdown(
         """
         <div class="ami-hero ami-hero-action ami-hero-flagship">
-            <h1>What's your problem?</h1>
-            <p class="ami-tagline">Quantitative questions in seven real-world areas.</p>
+            <h1>Applied mathematical intelligence</h1>
+            <p class="ami-tagline">Two directions: real-world questions ↔ math ideas.</p>
             <p class="ami-purpose">
-                Betting, sports, medicine, AI, space, forecasting — plus abstract structure.
-                Short analyst framing, then hands-on math and labs.
+                <strong>Solve a Problem</strong> — betting, sports, medicine, AI, and more.
+                <strong>Explore a Math Idea</strong> — derivative, expected value, quadratics — see where they live in reality.
             </p>
         </div>
         """,
@@ -29,8 +29,8 @@ def render_home() -> None:
     with st.expander("How this works", expanded=False):
         st.markdown(
             """
-            1. **Solve a Problem** — pick an area, ask a quantitative question, work the math.
-            2. **Open a lab** — simulate, predict, or train hands-on.
-            3. **Mathematical thinking** — abstraction and modeling (separate tab).
+            1. **Solve a Problem** — real-world question → math tools.
+            2. **Explore a Math Idea** — math concept → real-world applications.
+            3. **Labs** — simulate, predict, train hands-on.
             """
         )

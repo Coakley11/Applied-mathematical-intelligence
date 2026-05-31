@@ -36,10 +36,17 @@ def render_problem_solving_lab() -> None:
         PROBLEM_SOLVING_LAB["tagline"],
     )
 
-    tab_areas, tab_thinking = st.tabs(["Quantitative areas", "Mathematical thinking"])
+    tab_areas, tab_ideas, tab_thinking = st.tabs(
+        ["Quantitative areas", "Explore a math idea", "Mathematical thinking"]
+    )
 
     with tab_areas:
         _render_area_hub()
+
+    with tab_ideas:
+        from components.math_idea_explorer import render_math_idea_explorer_embedded
+
+        render_math_idea_explorer_embedded()
 
     with tab_thinking:
         _render_mathematical_thinking()

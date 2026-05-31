@@ -195,6 +195,7 @@ NUM_PRACTICAL_LABS = len(PRACTICAL_LAB_NAMES)
 
 PRIMARY_ACTIONS = [
     "Solve a Problem",
+    "Explore a Math Idea",
     "Analyze a Bet",
     "Predict a Game",
     "Model a Disease",
@@ -204,7 +205,8 @@ PRIMARY_ACTIONS = [
 ]
 
 PRIMARY_ACTION_TAGLINES = {
-    "Solve a Problem": "Seven areas — betting, sports, medicine, AI, space, forecasting, abstract.",
+    "Solve a Problem": "Real-world question → mathematical tools.",
+    "Explore a Math Idea": "Math idea → real-world applications.",
     "Analyze a Bet": "Is this call or wager worth it?",
     "Predict a Game": "Find edge in odds and forecasts.",
     "Model a Disease": "Simulate spread, growth, and treatment.",
@@ -214,7 +216,8 @@ PRIMARY_ACTION_TAGLINES = {
 }
 
 PRIMARY_ACTION_DESCRIPTIONS = {
-    "Solve a Problem": "Describe your problem — get guided questions, not instant answers.",
+    "Solve a Problem": "Pick an area, ask a quantitative question, work through the math.",
+    "Explore a Math Idea": "Enter derivative, EV, quadratic, Bayes — see where the structure appears.",
     "Analyze a Bet": "Run expected-value checks on poker calls and casino bets.",
     "Predict a Game": "Compare win probabilities to the odds on the board.",
     "Model a Disease": "Explore outbreaks, tumor growth, and drug levels.",
@@ -225,6 +228,7 @@ PRIMARY_ACTION_DESCRIPTIONS = {
 
 PRIMARY_ACTION_ICONS = {
     "Solve a Problem": "🧠",
+    "Explore a Math Idea": "🔍",
     "Analyze a Bet": PRACTICAL_LABS["Betting & Poker Lab"]["icon"],
     "Predict a Game": PRACTICAL_LABS["Sports Prediction Lab"]["icon"],
     "Model a Disease": PRACTICAL_LABS["Medicine & Disease Lab"]["icon"],
@@ -235,6 +239,7 @@ PRIMARY_ACTION_ICONS = {
 
 PRIMARY_ACTION_LABELS = {
     "Solve a Problem": "Mathematical Problem Solving Lab",
+    "Explore a Math Idea": "Mathematical Idea Explorer",
     "Analyze a Bet": "Betting & Poker Lab",
     "Predict a Game": "Sports Prediction Lab",
     "Model a Disease": "Medicine & Disease Lab",
@@ -245,6 +250,7 @@ PRIMARY_ACTION_LABELS = {
 
 ACTION_SECTION_TYPES = {
     "Solve a Problem": "problem_solving",
+    "Explore a Math Idea": "math_idea_explorer",
     "Analyze a Bet": "lab",
     "Predict a Game": "lab",
     "Model a Disease": "lab",
@@ -256,6 +262,7 @@ ACTION_SECTION_TYPES = {
 NAV_HELP = {
     "Home": "Pick a problem and jump in.",
     "Solve a Problem": "Pick an area → ask a quantitative question → work the math.",
+    "Explore a Math Idea": "Enter a concept or equation → see real-world structure.",
     "Analyze a Bet": "Check expected value and pot odds.",
     "Predict a Game": "Compare probabilities to betting odds.",
     "Model a Disease": "Simulate spread, tumors, and drug levels.",

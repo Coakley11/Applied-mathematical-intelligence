@@ -32,7 +32,8 @@ def main() -> int:
         from components.problem_solving import render_problem_solving_lab  # noqa: F401
         from components.problem_thinking import render_lab_thinking_gate  # noqa: F401
         from components.thinking_lab import render_thinking_topics_panel  # noqa: F401
-        from components.problem_analyst import render_quantitative_flow  # noqa: F401
+        from components.math_idea_explorer import render_math_idea_explorer  # noqa: F401
+        from content.math_idea_explorer import MATH_CONCEPTS, detect_concept
         from content.analyst_briefs import ANALYST_BRIEFS, get_analyst_brief
         from content.worked_examples import WORKED_EXAMPLES, get_worked_example
         from content.quant_areas import QUANT_AREAS
@@ -79,9 +80,9 @@ def main() -> int:
         errors.append(f"Expected 7 labs, got {len(PRACTICAL_LAB_NAMES)}")
     if len(SECONDARY_LAB_NAMES) != 3:
         errors.append(f"Expected 3 secondary labs, got {len(SECONDARY_LAB_NAMES)}")
-    if len(PRIMARY_ACTIONS) != 7:
-        errors.append(f"Expected 7 primary actions, got {len(PRIMARY_ACTIONS)}")
-    if len(ACTION_SECTION_TYPES) != 7:
+    if len(PRIMARY_ACTIONS) != 8:
+        errors.append(f"Expected 8 primary actions, got {len(PRIMARY_ACTIONS)}")
+    if len(ACTION_SECTION_TYPES) != 8:
         errors.append("ACTION_SECTION_TYPES incomplete")
 
     for name in PRACTICAL_LAB_NAMES:
@@ -146,6 +147,12 @@ def main() -> int:
         "Is this +150 bet worth it if I think the true win probability is 45%?", "betting"
     ):
         errors.append("get_worked_example failed")
+
+    if len(MATH_CONCEPTS) < 10:
+        errors.append("Math concepts < 10")
+
+    if detect_concept("expected value").get("id") != "expected_value":
+        errors.append("detect_concept failed")
 
     if not ANALYST_BRIEFS.get("default", {}).get("analyst_steps"):
         errors.append("default analyst brief invalid")
