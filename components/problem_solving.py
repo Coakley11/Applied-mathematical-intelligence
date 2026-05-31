@@ -72,7 +72,7 @@ def _render_area_hub() -> None:
 
     library_problem = st.session_state.get("ps_library_problem", "")
     examples = area["example_questions"]
-    example = st.selectbox("Example question", examples, key=f"ps_ex_{area['id']}")
+    example = st.selectbox("Pick an example question", examples, key=f"ps_ex_{area['id']}")
 
     custom = ""
     if example.endswith("Custom question (type below)"):
@@ -85,7 +85,7 @@ def _render_area_hub() -> None:
 
     problem = custom.strip() if custom.strip() else example
     if problem.endswith("Custom question (type below)") and not custom.strip():
-        st.info("Choose an example or type your own quantitative question.")
+        st.info("Pick a worked example above, or type your own quantitative question.")
         return
 
     pattern_id = area["pattern_id"]
@@ -96,11 +96,6 @@ def _render_area_hub() -> None:
     key_prefix = f"ps_{area['id']}_{pattern_id}"
     st.markdown("---")
     render_quantitative_flow(problem, pattern, pattern_id, area, key_prefix)
-
-    with st.expander("More example questions in this area", expanded=False):
-        for q in examples:
-            if "Custom" not in q:
-                st.caption(f"• {q}")
 
 
 def _render_mathematical_thinking() -> None:

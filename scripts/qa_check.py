@@ -20,6 +20,7 @@ def main() -> int:
         from content.mathematical_thinking import MATHEMATICAL_THINKING
         from content.navigation import PRIMARY_ACTIONS as NAV_PRIMARY_ACTIONS
         from content.analyst_briefs import ANALYST_BRIEFS, get_analyst_brief
+        from content.worked_examples import WORKED_EXAMPLES, get_worked_example, get_example_questions
         from content.quant_areas import QUANT_AREAS, ABSTRACT_PROBLEM_SOLVING
         from content.consultant import (
             ALTERNATIVE_MODELS,
@@ -143,6 +144,23 @@ def main() -> int:
 
     if len(QUANT_AREAS) != 7:
         errors.append(f"Expected 7 quant areas, got {len(QUANT_AREAS)}")
+
+    if len(WORKED_EXAMPLES) < 28:
+        errors.append(f"Expected at least 28 worked examples, got {len(WORKED_EXAMPLES)}")
+
+    for aid in ("betting", "sports", "medicine", "ai", "space", "forecasting", "abstract"):
+        n = sum(1 for ex in WORKED_EXAMPLES if ex["area_id"] == aid)
+        if n < 3:
+            errors.append(f"Area {aid} has only {n} worked examples (need ≥3)")
+        qs = get_example_questions(aid)
+        if len(qs) < 4:
+            errors.append(f"Area {aid} example list too short")
+
+    sample = get_worked_example(
+        "Is this +150 bet worth it if I think the true win probability is 45%?", "betting"
+    )
+    if not sample or not sample.get("worked_simple"):
+        errors.append("get_worked_example failed for sample betting question")
 
     brief = get_analyst_brief("sports")
     if not brief.get("mathematical_form") or not brief.get("abstract_thinking"):

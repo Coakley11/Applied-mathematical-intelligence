@@ -34,6 +34,7 @@ def main() -> int:
         from components.thinking_lab import render_thinking_topics_panel  # noqa: F401
         from components.problem_analyst import render_quantitative_flow  # noqa: F401
         from content.analyst_briefs import ANALYST_BRIEFS, get_analyst_brief
+        from content.worked_examples import WORKED_EXAMPLES, get_worked_example
         from content.quant_areas import QUANT_AREAS
         from content.consultant import (
             ALTERNATIVE_MODELS,
@@ -138,8 +139,13 @@ def main() -> int:
     if len(QUANT_AREAS) != 7:
         errors.append("Quant areas != 7")
 
-    if not get_analyst_brief("sports").get("mathematical_form"):
-        errors.append("get_analyst_brief failed")
+    if len(WORKED_EXAMPLES) < 28:
+        errors.append("Worked examples < 28")
+
+    if not get_worked_example(
+        "Is this +150 bet worth it if I think the true win probability is 45%?", "betting"
+    ):
+        errors.append("get_worked_example failed")
 
     if not ANALYST_BRIEFS.get("default", {}).get("analyst_steps"):
         errors.append("default analyst brief invalid")
