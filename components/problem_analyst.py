@@ -1,43 +1,100 @@
-"""Quantitative analyst UI — brief analysis, interactive tools, math, labs."""
+"""Quantitative analyst UI — 7-step area flow."""
 
 import streamlit as st
 
 from components.nav import navigate_to
-from content.analyst_briefs import ANALYST_BRIEFS
+from content.analyst_briefs import ANALYST_BRIEFS, get_analyst_brief
 
 
-def render_analyst_brief(pattern: dict, problem: str, pattern_id: str) -> dict:
-    """Steps 2–3: problem type and analyst framing."""
-    brief = ANALYST_BRIEFS.get(pattern_id, ANALYST_BRIEFS["default"])
-    type_label = brief["type_label"]
-    categories = ", ".join(pattern.get("categories", ["quantitative"]))
-
-    st.markdown(f"#### Problem type: **{type_label}**")
-    st.caption(f"Categories: {categories}")
+def render_quantitative_flow(
+    problem: str,
+    pattern: dict,
+    pattern_id: str,
+    area: dict,
+    key_prefix: str,
+) -> None:
+    """Full area flow: framing → variables → abstract → math → solve → deeper."""
+    brief = get_analyst_brief(pattern_id)
 
     with st.container(border=True):
         st.markdown(f"**Your question:** *{problem}*")
+        st.caption(f"Area: {area['icon']} {area['name']}")
 
-    c1, c2 = st.columns(2)
-    with c1:
-        st.markdown("**What is being asked?**")
-        st.markdown(brief["what_is_asked"])
-        st.markdown("**What variables matter?**")
-        st.markdown(brief["variables"])
-    with c2:
-        st.markdown("**What math is useful?**")
-        st.markdown(brief["math_useful"])
-        st.markdown("**How an analyst approaches this**")
-        for i, step in enumerate(brief["analyst_steps"], 1):
+    # 2 — Mathematical form
+    st.markdown("#### 1. What is being asked?")
+    st.markdown(brief.get("mathematical_form", brief["what_is_asked"]))
+    st.caption(brief["what_is_asked"])
+
+    # 3 — Variables
+    st.markdown("#### 2. Variables that matter")
+    for v in brief.get("variables_list", []):
+        st.markdown(f"- {v}")
+    st.caption(brief["variables"])
+
+    # 4 — Abstract thinking
+    st.markdown("#### 3. How to think about it abstractly")
+    abs_t = brief.get("abstract_thinking", {})
+    if abs_t:
+        st.markdown(f"**Kind of problem:** {abs_t.get('problem_kind', '')}")
+        st.markdown(f"**Structure:** {abs_t.get('structure', '')}")
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown(f"**Comparing:** {abs_t.get('comparing', '')}")
+            st.markdown(f"**What matters:** {abs_t.get('matters', '')}")
+        with c2:
+            st.markdown(f"**Assumptions:** {abs_t.get('assumptions', '')}")
+
+    # 5 — Math that applies
+    st.markdown("#### 4. Math that applies (in context)")
+    st.markdown(f"**Tools:** {brief['math_useful']}")
+    math_behind = brief.get("math_behind", {})
+    for topic, explanation in math_behind.items():
+        with st.container(border=True):
+            st.markdown(f"**{topic}** — {explanation}")
+
+    # 6 — Help solve
+    st.markdown("#### 5. Work the problem")
+    st.caption("Adjust numbers — see how an analyst reasons.")
+    render_interactive_analysis(pattern_id, key_prefix)
+
+    sol = brief.get("solution", {})
+    if sol:
+        st.markdown("**Interpretation**")
+        st.markdown(sol.get("interpretation", ""))
+        st.markdown("**Recommendation**")
+        st.info(sol.get("recommendation", ""))
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown(f"**Data that would sharpen this:** {sol.get('data_needed', '')}")
+        with c2:
+            st.markdown(f"**Uncertainty remaining:** {sol.get('uncertainty', '')}")
+
+    st.caption(f"*Caveat:* {brief['limitations']}")
+
+    # 7 — Go deeper
+    render_go_deeper(brief, pattern, area)
+
+    render_try_yourself(pattern, area)
+
+
+def render_go_deeper(brief: dict, pattern: dict, area: dict) -> None:
+    """Optional depth — simulation, analyst lens, practice."""
+    deeper = brief.get("go_deeper", {})
+    with st.expander("#### Go deeper (optional)", expanded=False):
+        if deeper.get("simulation"):
+            st.markdown(f"**Simulation:** {deeper['simulation']}")
+        if deeper.get("analyst"):
+            st.markdown(f"**Analyst lens:** {deeper['analyst']}")
+        if deeper.get("practice"):
+            st.markdown(f"**Practice:** {deeper['practice']}")
+        st.markdown("**Analyst approach (step-by-step)**")
+        for i, step in enumerate(brief.get("analyst_steps", []), 1):
             st.markdown(f"{i}. {step}")
-
-    st.caption(f"*Limitations:* {brief['limitations']}")
-    return brief
+        if area.get("lab_hint"):
+            st.caption(area["lab_hint"])
 
 
 def _render_ev_analysis(key_prefix: str) -> None:
-    """Interactive EV for sports/betting questions."""
-    st.markdown("**Quick EV check** — adjust inputs and see if the bet is +EV.")
     p_pct = st.slider("Your estimated win probability (%)", 5, 95, 45, key=f"{key_prefix}_p")
     odds_choice = st.selectbox(
         "Market odds (American)",
@@ -59,141 +116,115 @@ def _render_ev_analysis(key_prefix: str) -> None:
 
     ev = p * profit_if_win - (1 - p) * stake
     edge = p - implied
-
     c1, c2, c3 = st.columns(3)
     c1.metric("Implied probability", f"{implied:.1%}")
     c2.metric("Your edge", f"{edge:+.1%}")
     c3.metric("Expected value", f"${ev:+.2f}")
-
     if ev > 0:
-        st.success(f"**+EV** at your estimates — but verify probability and track results over many bets.")
+        st.success("At these inputs, the bet is **+EV** long-term — verify your probability estimate.")
     else:
-        st.warning(f"**−EV** at your estimates — the market price may be fair or better than your edge.")
+        st.warning("At these inputs, the bet is **−EV** — the price may already reflect fair odds.")
 
 
 def _render_growth_analysis(key_prefix: str) -> None:
-    """Simple treatment vs. growth comparison."""
-    st.markdown("**Growth vs. treatment** — compare rates over time.")
     growth = st.slider("Untreated growth rate (% per month)", 1, 30, 10, key=f"{key_prefix}_g")
     kill = st.slider("Treatment kill rate (% per month)", 0, 30, 8, key=f"{key_prefix}_k")
-    months = st.slider("Months", 1, 24, 6, key=f"{key_prefix}_m")
-
     net = (growth - kill) / 100.0
     if net > 0:
-        st.warning(f"Net growth **+{net*100:.0f}%/month** — tumor still growing; treatment may be insufficient.")
+        st.warning(f"Net growth **+{net*100:.0f}%/month** — still growing; need stronger effect or control comparison.")
     elif net < 0:
-        st.success(f"Net shrinkage **{net*100:.0f}%/month** — model favors treatment effect (still need control arm).")
+        st.success(f"Net shrinkage **{net*100:.0f}%/month** — favorable direction (confirm with control data).")
     else:
-        st.info("Net rate ≈ 0 — stable volume; watch measurement error and patient variation.")
+        st.info("Net rate ≈ 0 — stable; check measurement noise.")
 
 
 def _render_ml_analysis(key_prefix: str) -> None:
-    """Train/val/test split intuition."""
-    st.markdown("**Train / validation / test** — why analysts split data.")
     train_acc = st.slider("Training accuracy (%)", 50, 100, 92, key=f"{key_prefix}_tr")
     val_acc = st.slider("Validation accuracy (%)", 50, 100, 78, key=f"{key_prefix}_va")
     gap = train_acc - val_acc
-
     st.metric("Train − validation gap", f"{gap} pts")
     if gap > 15:
-        st.warning("Large gap → likely **overfitting**. Simplify model, regularize, or get more data.")
+        st.warning("Likely **overfitting** — simplify, regularize, or add data.")
     elif val_acc < 60:
-        st.warning("Low validation score → model may be **underfitting** or features are weak.")
+        st.warning("Likely **underfitting** or weak features.")
     else:
-        st.success("Gap is moderate — continue tuning on validation only; report test set once at the end.")
+        st.success("Reasonable gap — keep tuning on validation only.")
 
 
-def _render_unit_econ(key_prefix: str) -> None:
-    """Simple unit economics."""
-    st.markdown("**Unit economics** — profit per customer.")
-    price = st.number_input("Price per unit ($)", 1.0, 10000.0, 50.0, key=f"{key_prefix}_price")
-    cost = st.number_input("Variable cost per unit ($)", 0.0, 10000.0, 30.0, key=f"{key_prefix}_cost")
-    conv = st.slider("Conversion rate (%)", 0.1, 50.0, 2.0, key=f"{key_prefix}_conv") / 100
-    spend = st.number_input("Marketing spend ($)", 0.0, 1_000_000.0, 1000.0, key=f"{key_prefix}_spend")
-
-    margin = price - cost
-    customers = spend * conv if spend > 0 else 0
-    profit = customers * margin - spend
-    st.metric("Margin per unit", f"${margin:.2f}")
-    st.metric("Estimated profit", f"${profit:+.2f}")
-
-
-def _render_queue_analysis(key_prefix: str) -> None:
-    """Simple capacity vs. demand."""
-    demand = st.slider("Demand (vehicles/hour)", 100, 5000, 1200, key=f"{key_prefix}_d")
-    capacity = st.slider("Capacity (vehicles/hour)", 100, 5000, 1000, key=f"{key_prefix}_c")
-    if demand > capacity:
-        st.warning(f"Demand exceeds capacity by **{demand - capacity}**/hr — expect queues and delay.")
+def _render_motion_analysis(key_prefix: str) -> None:
+    velocity = st.slider("Velocity (m/s)", 100, 12000, 7800, step=100, key=f"{key_prefix}_v")
+    radius_km = st.slider("Orbital radius (km)", 6371, 50000, 6771, key=f"{key_prefix}_r")
+    g = 3.986e14 / (radius_km * 1000) ** 2
+    circular_v = (g * radius_km * 1000) ** 0.5
+    st.metric("Circular orbital speed (approx.)", f"{circular_v:.0f} m/s")
+    if abs(velocity - circular_v) / circular_v < 0.05:
+        st.success("Velocity is near circular-orbit speed for this radius.")
+    elif velocity < circular_v:
+        st.info("Below circular speed — sub-orbital or transfer orbit unless thrust continues.")
     else:
-        st.success(f"Spare capacity **{capacity - demand}**/hr — system not saturated (under typical conditions).")
+        st.warning("Above circular speed — escape or higher orbit unless constrained.")
 
 
 def _render_forecast_analysis(key_prefix: str) -> None:
-    """Lead time vs. uncertainty."""
     lead = st.slider("Forecast lead time (days)", 1, 14, 3, key=f"{key_prefix}_lead")
     spread = min(45, 5 + lead * 3)
-    st.metric("Typical uncertainty band (illustrative)", f"±{spread}%")
-    st.caption("Uncertainty usually grows with lead time — prefer probabilistic forecasts.")
+    st.metric("Illustrative uncertainty band", f"±{spread}%")
+    st.caption("Uncertainty typically grows with lead time — use probabilistic forecasts.")
 
 
-def _render_tradeoff_analysis(key_prefix: str) -> None:
-    """Performance vs. cost tradeoff."""
-    perf = st.slider("Performance index", 1, 100, 70, key=f"{key_prefix}_perf")
-    cost = st.slider("Cost index", 1, 100, 50, key=f"{key_prefix}_cost")
-    ratio = perf / max(cost, 1)
-    st.metric("Performance / cost", f"{ratio:.2f}")
-    st.caption("Analysts maximize this ratio subject to safety and feasibility constraints.")
+def _render_structure_analysis(key_prefix: str) -> None:
+    goal = st.radio(
+        "Primary goal",
+        ["Predict an outcome", "Compare options", "Optimize a choice", "Explain a mechanism"],
+        key=f"{key_prefix}_goal",
+    )
+    tool_map = {
+        "Predict an outcome": "Probability + statistics (distributions, confidence)",
+        "Compare options": "Expected value or hypothesis testing",
+        "Optimize a choice": "Optimization subject to constraints",
+        "Explain a mechanism": "Calculus or differential equations (rates of change)",
+    }
+    st.info(f"**Likely tools:** {tool_map[goal]}")
 
 
 def render_interactive_analysis(pattern_id: str, key_prefix: str) -> None:
-    """Step 4: hands-on analysis — pattern-specific mini tools."""
-    brief = ANALYST_BRIEFS.get(pattern_id, ANALYST_BRIEFS["default"])
+    brief = get_analyst_brief(pattern_id)
     kind = brief.get("interactive", "ev_bet")
-
-    st.markdown("#### Interactive analysis")
-    st.caption("Adjust inputs — see how a quantitative analyst reasons numerically.")
-
-    if kind == "ev_bet":
-        _render_ev_analysis(key_prefix)
-    elif kind == "growth":
-        _render_growth_analysis(key_prefix)
-    elif kind == "ml_split":
-        _render_ml_analysis(key_prefix)
-    elif kind == "unit_econ":
-        _render_unit_econ(key_prefix)
-    elif kind == "queue":
-        _render_queue_analysis(key_prefix)
-    elif kind == "forecast":
-        _render_forecast_analysis(key_prefix)
-    elif kind == "tradeoff":
-        _render_tradeoff_analysis(key_prefix)
-    else:
-        _render_ev_analysis(key_prefix)
+    handlers = {
+        "ev_bet": _render_ev_analysis,
+        "growth": _render_growth_analysis,
+        "ml_split": _render_ml_analysis,
+        "motion": _render_motion_analysis,
+        "forecast": _render_forecast_analysis,
+        "structure": _render_structure_analysis,
+        "tradeoff": lambda k: _render_motion_analysis(k),
+        "queue": _render_forecast_analysis,
+        "unit_econ": _render_ev_analysis,
+    }
+    handlers.get(kind, _render_ev_analysis)(key_prefix)
 
 
-def render_show_math(pattern_id: str) -> None:
-    """Step 5: math behind this problem."""
-    brief = ANALYST_BRIEFS.get(pattern_id, ANALYST_BRIEFS["default"])
-    math_behind = brief.get("math_behind", {})
-
-    with st.expander("#### Show the math behind this", expanded=False):
-        st.caption("Learn the tools in context — not as a formula sheet.")
-        for topic, explanation in math_behind.items():
-            with st.container(border=True):
-                st.markdown(f"**{topic}**")
-                st.markdown(explanation)
-
-
-def render_try_yourself(pattern: dict) -> None:
-    """Step 6: jump to connected lab."""
-    lab = pattern.get("suggested_lab", "Solve a Problem")
-    st.markdown("#### Try it yourself")
-    st.caption("Run a simulation or tool connected to this type of problem.")
-
+def render_try_yourself(pattern: dict, area: dict) -> None:
+    lab = area.get("suggested_lab") or pattern.get("suggested_lab", "Solve a Problem")
+    st.markdown("#### 6. Try it yourself")
+    if area.get("lab_hint"):
+        st.info(area["lab_hint"])
     if lab == "Advanced reference":
-        st.info("Open **Advanced reference** in the sidebar for background on this topic.")
+        st.caption("Use sidebar → **Advanced reference** for Space & Motion or Weather labs.")
         return
-
-    st.markdown(f"**Recommended:** {lab}")
-    if st.button(f"Open {lab} →", type="primary", key=f"ps_go_{pattern.get('id', 'default')}"):
+    if st.button(f"Open **{lab}** →", type="primary", key=f"ps_go_{area['id']}"):
         navigate_to(lab)
+
+
+def render_abstract_section() -> None:
+    """Standalone abstract mathematical problem solving."""
+    from content.quant_areas import ABSTRACT_PROBLEM_SOLVING
+
+    st.markdown(f"#### {ABSTRACT_PROBLEM_SOLVING['title']}")
+    st.markdown(ABSTRACT_PROBLEM_SOLVING["purpose"])
+    for title, desc in ABSTRACT_PROBLEM_SOLVING["steps"]:
+        with st.container(border=True):
+            st.markdown(f"**{title}** — {desc}")
+    st.markdown("**How questions translate**")
+    for src, dst in ABSTRACT_PROBLEM_SOLVING["translations"]:
+        st.markdown(f"- *{src}* {dst}")

@@ -19,7 +19,8 @@ def main() -> int:
         from content.idea_analysis import IDEA_ANALYSIS, ANALYSIS_DIMENSIONS
         from content.mathematical_thinking import MATHEMATICAL_THINKING
         from content.navigation import PRIMARY_ACTIONS as NAV_PRIMARY_ACTIONS
-        from content.analyst_briefs import ANALYST_BRIEFS
+        from content.analyst_briefs import ANALYST_BRIEFS, get_analyst_brief
+        from content.quant_areas import QUANT_AREAS, ABSTRACT_PROBLEM_SOLVING
         from content.consultant import (
             ALTERNATIVE_MODELS,
             BRANCHING_FOLLOWUPS,
@@ -140,8 +141,15 @@ def main() -> int:
     if "default" not in MODEL_FAILURE_MODES:
         errors.append("Missing default model failure modes")
 
-    if "default" not in ANALYST_BRIEFS:
-        errors.append("Missing default analyst brief")
+    if len(QUANT_AREAS) != 7:
+        errors.append(f"Expected 7 quant areas, got {len(QUANT_AREAS)}")
+
+    brief = get_analyst_brief("sports")
+    if not brief.get("mathematical_form") or not brief.get("abstract_thinking"):
+        errors.append("get_analyst_brief missing flow fields")
+
+    if not ABSTRACT_PROBLEM_SOLVING.get("translations"):
+        errors.append("Missing abstract problem solving translations")
 
     for pid in ("sports", "betting", "medicine", "business", "ai"):
         if pid not in ANALYST_BRIEFS:

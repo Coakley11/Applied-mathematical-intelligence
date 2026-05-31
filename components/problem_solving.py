@@ -1,39 +1,32 @@
-"""Solve a Problem — quantitative analyst flow (hands-on, not interview)."""
+"""Solve a Problem — seven quantitative areas, analyst flow."""
 
 import re
 
 import streamlit as st
 
-from components.problem_analyst import (
-    render_analyst_brief,
-    render_interactive_analysis,
-    render_show_math,
-    render_try_yourself,
-)
-from components.problem_coach import render_problem_library
+from components.problem_analyst import render_abstract_section, render_quantitative_flow
 from components.section_intro import render_section_header
 from components.thinking_lab import render_thinking_topics_panel
 from content.problem_solving import (
     DEFAULT_PATTERN,
-    EXAMPLE_PROBLEMS,
     MATHEMATICIAN_MODE_TOPICS,
     PROBLEM_PATTERNS,
     PROBLEM_SOLVING_LAB,
 )
+from content.quant_areas import QUANT_AREAS, QUANT_AREA_BY_ID
 
 
-def _match_pattern(text: str) -> dict:
+def _match_pattern(text: str, area_pattern_id: str) -> dict:
     lower = text.lower()
     for pattern, data in PROBLEM_PATTERNS.items():
         if re.search(pattern, lower):
-            return data
-    return DEFAULT_PATTERN
-
-
-def _load_library_problem(problem: str) -> None:
-    st.session_state.ps_library_problem = problem
-    st.session_state.ps_example = "Custom question (describe below)"
-    st.rerun()
+            matched = dict(data)
+            if area_pattern_id == "abstract":
+                matched["id"] = "abstract"
+            return matched
+    result = dict(DEFAULT_PATTERN)
+    result["id"] = area_pattern_id if area_pattern_id != "default" else "default"
+    return result
 
 
 def render_problem_solving_lab() -> None:
@@ -43,82 +36,86 @@ def render_problem_solving_lab() -> None:
         PROBLEM_SOLVING_LAB["tagline"],
     )
 
-    tab_solve, tab_examples, tab_thinking = st.tabs(
-        ["Solve a problem", "Example questions", "Mathematical thinking"]
-    )
+    tab_areas, tab_thinking = st.tabs(["Quantitative areas", "Mathematical thinking"])
 
-    with tab_solve:
-        _render_solve_flow()
-
-    with tab_examples:
-        render_problem_library(_load_library_problem)
+    with tab_areas:
+        _render_area_hub()
 
     with tab_thinking:
         _render_mathematical_thinking()
 
 
-def _render_solve_flow() -> None:
-    st.markdown("#### Enter a quantitative question")
-    st.caption(
-        "Bring a specific question — odds, predictions, models, strategies — not general life advice."
+def _render_area_hub() -> None:
+    st.markdown("#### Choose a real-world area")
+    st.caption("Pick where your question lives — then ask something specific and quantitative.")
+
+    area_ids = [a["id"] for a in QUANT_AREAS]
+    default_id = st.session_state.get("ps_area_id", area_ids[0])
+    if default_id not in area_ids:
+        default_id = area_ids[0]
+
+    area_id = st.selectbox(
+        "Area",
+        area_ids,
+        index=area_ids.index(default_id),
+        format_func=lambda aid: f"{QUANT_AREA_BY_ID[aid]['icon']} {QUANT_AREA_BY_ID[aid]['name']}",
+        key="ps_area_select",
     )
+    area = QUANT_AREA_BY_ID[area_id]
+    st.session_state.ps_area_id = area_id
+
+    st.markdown(f"*{area['tagline']}*")
+
+    if area["id"] == "abstract":
+        render_abstract_section()
+        st.markdown("---")
 
     library_problem = st.session_state.get("ps_library_problem", "")
-    example = st.selectbox("Example question", EXAMPLE_PROBLEMS, key="ps_example")
+    examples = area["example_questions"]
+    example = st.selectbox("Example question", examples, key=f"ps_ex_{area['id']}")
+
     custom = ""
-    if example == "Custom question (describe below)":
+    if example.endswith("Custom question (type below)"):
         custom = st.text_area(
             "Your question",
-            value=library_problem,
-            placeholder="e.g. Is this bet at +150 worth it if I estimate a 45% win chance?",
-            key="ps_custom",
+            value=library_problem if st.session_state.get("ps_area_id") == area["id"] else "",
+            placeholder="Type a specific quantitative question…",
+            key=f"ps_custom_{area['id']}",
         )
 
     problem = custom.strip() if custom.strip() else example
-    if problem == "Custom question (describe below)":
-        st.info("Type a specific quantitative question above.")
+    if problem.endswith("Custom question (type below)") and not custom.strip():
+        st.info("Choose an example or type your own quantitative question.")
         return
 
-    pattern = _match_pattern(problem)
-    pattern_id = pattern.get("id", "default")
-    key_prefix = f"ps_{pattern_id}"
+    pattern_id = area["pattern_id"]
+    pattern = _match_pattern(problem, pattern_id)
+    if pattern.get("id") not in (pattern_id, "abstract"):
+        pattern_id = pattern.get("id", pattern_id)
 
+    key_prefix = f"ps_{area['id']}_{pattern_id}"
     st.markdown("---")
-    render_analyst_brief(pattern, problem, pattern_id)
+    render_quantitative_flow(problem, pattern, pattern_id, area, key_prefix)
 
-    st.markdown("---")
-    render_interactive_analysis(pattern_id, key_prefix)
-
-    st.markdown("---")
-    render_show_math(pattern_id)
-
-    st.markdown("---")
-    render_try_yourself(pattern)
+    with st.expander("More example questions in this area", expanded=False):
+        for q in examples:
+            if "Custom" not in q:
+                st.caption(f"• {q}")
 
 
 def _render_mathematical_thinking() -> None:
-    """Separate from solve flow — how mathematicians think."""
     st.markdown("#### How do mathematicians think?")
-    st.caption("Habits of mind for quantitative problems — study separately from solving.")
+    st.caption("Separate from solving — abstraction, modeling, assumptions, simplification, uncertainty, optimization.")
 
-    sub_habits, sub_topics = st.tabs(["Core ideas", "Topic library"])
+    sub_core, sub_topics = st.tabs(["Core ideas", "Topic library"])
 
-    with sub_habits:
-        topic_names = [t["name"] for t in MATHEMATICIAN_MODE_TOPICS]
-        choice = st.selectbox("Concept", topic_names, key="ps_math_mode_topic")
+    with sub_core:
+        names = [t["name"] for t in MATHEMATICIAN_MODE_TOPICS]
+        choice = st.selectbox("Concept", names, key="ps_math_mode_topic")
         topic = next(t for t in MATHEMATICIAN_MODE_TOPICS if t["name"] == choice)
-
         with st.container(border=True):
-            st.markdown(f"**{topic['name']}**")
-            st.markdown(topic["idea"])
+            st.markdown(f"**{topic['name']}** — {topic['idea']}")
             st.info(f"Example: {topic['example']}")
-
-        st.text_area(
-            topic["prompt"],
-            placeholder="Apply this to a quantitative question you're working on…",
-            key=f"ps_mode_{topic['id']}",
-            height=80,
-        )
 
     with sub_topics:
         render_thinking_topics_panel()

@@ -32,13 +32,13 @@ def main() -> int:
         from components.problem_solving import render_problem_solving_lab  # noqa: F401
         from components.problem_thinking import render_lab_thinking_gate  # noqa: F401
         from components.thinking_lab import render_thinking_topics_panel  # noqa: F401
-        from components.problem_analyst import render_analyst_brief  # noqa: F401
-        from components.problem_coach import compute_thinking_score  # noqa: F401
-        from content.analyst_briefs import ANALYST_BRIEFS
+        from components.problem_analyst import render_quantitative_flow  # noqa: F401
+        from content.analyst_briefs import ANALYST_BRIEFS, get_analyst_brief
+        from content.quant_areas import QUANT_AREAS
         from content.consultant import (
             ALTERNATIVE_MODELS,
-            MODEL_TEMPLATES,
             BRANCHING_FOLLOWUPS,
+            MODEL_TEMPLATES,
             SIMILAR_PROBLEMS,
             critique_model,
         )
@@ -134,6 +134,12 @@ def main() -> int:
 
     if len(ANALYST_BRIEFS) < 5:
         errors.append("Analyst briefs < 5")
+
+    if len(QUANT_AREAS) != 7:
+        errors.append("Quant areas != 7")
+
+    if not get_analyst_brief("sports").get("mathematical_form"):
+        errors.append("get_analyst_brief failed")
 
     if not ANALYST_BRIEFS.get("default", {}).get("analyst_steps"):
         errors.append("default analyst brief invalid")

@@ -4,11 +4,10 @@ PROBLEM_SOLVING_LAB = {
     "title": "Mathematical Problem Solving Lab",
     "icon": "🧠",
     "action": "Solve a Problem",
-    "tagline": "Quantitative questions — analyst framing, interactive math, then try it in a lab.",
+    "tagline": "Pick an area, ask a quantitative question, see how analysts think — then try the math.",
     "intro": (
-        "Ask a specific question (odds, predictions, models, strategies). "
-        "See what is being asked, which variables matter, useful math, and how an analyst would approach it — "
-        "then run numbers and open a connected lab."
+        "Seven real-world areas — betting, sports, medicine, AI, space, forecasting, and abstract structure. "
+        "Short framing, variables, applied math, and hands-on tools. No long questionnaires."
     ),
 }
 
@@ -407,6 +406,19 @@ PROBLEM_PATTERNS = {
         "simple_model": "Minimize average travel time by adjusting flow controls subject to capacity.",
         "suggested_lab": "Optimize a Decision",
         "tradeoff": "Optimizing one corridor may shift congestion elsewhere.",
+    },
+    r"rocket|orbit|trajectory|space|launch|satellite|velocity|fuel": {
+        "id": "space",
+        "intents": ["predict", "optimize"],
+        "categories": ["simulation", "optimization", "growth"],
+        "variables": "Position, velocity, acceleration, mass, thrust, fuel, orbital radius",
+        "constraints": "Fuel capacity, thrust limits, structural stress, mission timeline",
+        "uncertainty": "Atmosphere, perturbations, measurement error in state",
+        "data": "Telemetry, thrust curves, gravitational parameters",
+        "tools": ["Calculus", "Differential equations", "Optimization", "Simulation"],
+        "simple_model": "Integrate F = ma along the path; minimize fuel subject to reaching target state.",
+        "suggested_lab": "Advanced reference",
+        "tradeoff": "Faster trajectories often cost more fuel and stress.",
     },
     r"machine|design|engineer|device|invent|hardware|efficien": {
         "id": "engineering",

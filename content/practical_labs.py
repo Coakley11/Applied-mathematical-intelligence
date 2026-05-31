@@ -204,7 +204,7 @@ PRIMARY_ACTIONS = [
 ]
 
 PRIMARY_ACTION_TAGLINES = {
-    "Solve a Problem": "Quantitative questions — analyze, then try a lab.",
+    "Solve a Problem": "Seven areas — betting, sports, medicine, AI, space, forecasting, abstract.",
     "Analyze a Bet": "Is this call or wager worth it?",
     "Predict a Game": "Find edge in odds and forecasts.",
     "Model a Disease": "Simulate spread, growth, and treatment.",
@@ -255,7 +255,7 @@ ACTION_SECTION_TYPES = {
 
 NAV_HELP = {
     "Home": "Pick a problem and jump in.",
-    "Solve a Problem": "Analyst framing and interactive math — no long questionnaires.",
+    "Solve a Problem": "Pick an area → ask a quantitative question → work the math.",
     "Analyze a Bet": "Check expected value and pot odds.",
     "Predict a Game": "Compare probabilities to betting odds.",
     "Model a Disease": "Simulate spread, tumors, and drug levels.",
