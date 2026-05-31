@@ -8,7 +8,7 @@ from content.themes import THEME_NAMES
 from content.tool_guides import TOOL_GUIDES
 from simulations.registry import SIMULATION_COUNT
 
-VERSION = "2.9.0"
+VERSION = "3.0.0"
 
 FEATURED_DOMAINS = [
     "Quantitative Finance",

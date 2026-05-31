@@ -32,7 +32,9 @@ def main() -> int:
         from components.problem_solving import render_problem_solving_lab  # noqa: F401
         from components.problem_thinking import render_lab_thinking_gate  # noqa: F401
         from components.thinking_lab import render_thinking_topics_panel  # noqa: F401
+        from components.problem_analyst import render_analyst_brief  # noqa: F401
         from components.problem_coach import compute_thinking_score  # noqa: F401
+        from content.analyst_briefs import ANALYST_BRIEFS
         from content.consultant import (
             ALTERNATIVE_MODELS,
             MODEL_TEMPLATES,
@@ -130,8 +132,11 @@ def main() -> int:
     if len(ALTERNATIVE_MODELS) < 5:
         errors.append("Alternative models < 5")
 
-    if not critique_model({}, {}, {}, "default").get("strengths"):
-        errors.append("critique_model failed")
+    if len(ANALYST_BRIEFS) < 5:
+        errors.append("Analyst briefs < 5")
+
+    if not ANALYST_BRIEFS.get("default", {}).get("analyst_steps"):
+        errors.append("default analyst brief invalid")
 
     if len(ADAPTIVE_QUESTIONS) < 8:
         errors.append("Adaptive question sets < 8")

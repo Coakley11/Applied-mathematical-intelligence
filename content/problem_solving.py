@@ -4,22 +4,24 @@ PROBLEM_SOLVING_LAB = {
     "title": "Mathematical Problem Solving Lab",
     "icon": "🧠",
     "action": "Solve a Problem",
-    "tagline": "Your quantitative consultant — critique models, stress-test assumptions, decide with clarity.",
+    "tagline": "Quantitative questions — analyst framing, interactive math, then try it in a lab.",
     "intro": (
-        "Describe any problem. The consultant reframes it, shows similar problems and real-world examples, "
-        "helps you build and critique a model, identifies what could break it, and assesses confidence honestly."
+        "Ask a specific question (odds, predictions, models, strategies). "
+        "See what is being asked, which variables matter, useful math, and how an analyst would approach it — "
+        "then run numbers and open a connected lab."
     ),
 }
 
 EXAMPLE_PROBLEMS = [
-    "I want to improve my sports betting system.",
-    "I want to improve my poker strategy.",
-    "I want to predict baseball performance.",
-    "I want to reduce traffic congestion.",
-    "I want to understand why a cancer treatment works.",
-    "I want to train an AI to recognize patterns.",
-    "I want to increase my business profits.",
-    "Custom problem (describe below)",
+    "Is this bet at +150 worth making if I think my team has a 45% chance to win?",
+    "Who is more likely to win this game?",
+    "Should I call with these pot odds and my estimated equity?",
+    "Is this prediction reasonable given the data?",
+    "How should I evaluate whether this cancer treatment works?",
+    "How should I think about overfitting in this AI model?",
+    "Which strategy has better expected value?",
+    "What are the odds of this outcome?",
+    "Custom question (describe below)",
 ]
 
 QUESTION_INTENTS = [

@@ -19,6 +19,7 @@ def main() -> int:
         from content.idea_analysis import IDEA_ANALYSIS, ANALYSIS_DIMENSIONS
         from content.mathematical_thinking import MATHEMATICAL_THINKING
         from content.navigation import PRIMARY_ACTIONS as NAV_PRIMARY_ACTIONS
+        from content.analyst_briefs import ANALYST_BRIEFS
         from content.consultant import (
             ALTERNATIVE_MODELS,
             BRANCHING_FOLLOWUPS,
@@ -139,8 +140,17 @@ def main() -> int:
     if "default" not in MODEL_FAILURE_MODES:
         errors.append("Missing default model failure modes")
 
-    if "default" not in ALTERNATIVE_MODELS:
-        errors.append("Missing default alternative models")
+    if "default" not in ANALYST_BRIEFS:
+        errors.append("Missing default analyst brief")
+
+    for pid in ("sports", "betting", "medicine", "business", "ai"):
+        if pid not in ANALYST_BRIEFS:
+            errors.append(f"Missing analyst brief for: {pid}")
+
+    for pid, brief in ANALYST_BRIEFS.items():
+        for key in ("what_is_asked", "variables", "math_useful", "analyst_steps", "math_behind"):
+            if not brief.get(key):
+                errors.append(f"Analyst brief '{pid}' missing key: {key}")
 
     for pid in ("sports", "betting", "medicine", "business", "ai"):
         if pid not in REAL_WORLD_EXAMPLES:
