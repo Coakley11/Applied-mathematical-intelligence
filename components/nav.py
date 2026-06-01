@@ -14,6 +14,21 @@ from content.practical_labs import (
 def navigate_to(action: str) -> None:
     """Set sidebar navigation target and rerun."""
     st.session_state.view_mode = action
+    try:
+        from suite_activity_client import record_activity
+
+        record_activity(
+            "applied_intelligence",
+            "page_view",
+            page=action,
+            metrics={"lesson": action},
+            summary=f"Applied Intelligence: {action}",
+            resume_key=f"section:{action}",
+            resume_title=f"Continue: {action}",
+            local_state={"page": action, "lesson": action},
+        )
+    except Exception:
+        pass
     st.rerun()
 
 
