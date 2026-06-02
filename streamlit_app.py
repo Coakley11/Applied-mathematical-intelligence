@@ -27,6 +27,13 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+try:
+    from suite_resume_launch import apply_suite_resume_launch
+
+    apply_suite_resume_launch(st, "applied_intelligence")
+except Exception:
+    pass
+
 inject_platform_styles()
 
 PRIMARY_NAV = ["Home"] + PRIMARY_ACTIONS + ["Advanced reference"]
