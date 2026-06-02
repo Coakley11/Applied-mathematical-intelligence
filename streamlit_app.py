@@ -18,10 +18,11 @@ from content.practical_labs import (
 )
 from content.platform_meta import VERSION
 from simulations.registry import run_simulation
+from suite_branding import PAGE_ICON
 
 st.set_page_config(
     page_title="Applied Mathematical Intelligence",
-    page_icon="📐",
+    page_icon=PAGE_ICON,
     layout="wide",
     initial_sidebar_state="expanded",
 )

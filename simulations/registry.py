@@ -49,5 +49,14 @@ def run_simulation(simulation_id: str | None) -> None:
     runner = SIMULATION_RUNNERS.get(simulation_id)
     if runner:
         runner()
+        try:
+            from applied_intelligence_activity import log_lesson_completed
+
+            label = str(simulation_id or "").replace("_", " ").strip().title()
+            if label and st.session_state.get("_cc_ai_lesson_sig") != simulation_id:
+                st.session_state["_cc_ai_lesson_sig"] = simulation_id
+                log_lesson_completed(lesson=label)
+        except Exception:
+            pass
     else:
         st.warning(f"Unknown simulation: {simulation_id}")
