@@ -12,10 +12,11 @@ WORKSHOP_INTRO = (
 
 WORKSHOP_EXAMPLE_PROMPTS = [
     "I want to know if this sports bet is worth making.",
-    "Should we increase the chemo dose for this tumor?",
-    "Is my AI model overfitting on this dataset?",
-    "How far ahead can we forecast sales with this trend?",
-    "What is the best way to split our budget across three projects?",
+    "Is an Aaron Judge 30+ home run prop worth $200?",
+    "What are the Mets' chances to make the playoffs?",
+    "Treatment A vs Treatment B — which slows the tumor more?",
+    "Why is training accuracy 92% but validation only 78%?",
+    "How confident should we be in a 7-day weather forecast?",
     "Custom (type below)",
 ]
 

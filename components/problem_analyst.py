@@ -74,50 +74,15 @@ def render_quantitative_flow(
     area: dict,
     key_prefix: str,
 ) -> None:
-    """Applied-math lab flow: interpret → structure → compute → interpret → deepen."""
+    """Lab flow: experiment first, then meaning — reading is optional."""
     worked = get_worked_example(problem, area["id"])
     flow = _merge_worked_with_brief(worked, pattern_id)
 
     with st.container(border=True):
         st.markdown(f"**Your question:** *{problem}*")
-        st.caption(f"{area['icon']} {area['name']}")
+        st.caption(f"{area['icon']} {area['name']} — adjust sliders and compare scenarios below.")
 
-    st.markdown("#### 1. What is being asked?")
-    st.markdown(flow["asked"])
-
-    st.markdown("#### 2. Translate into math")
-    st.markdown(flow.get("math_translation") or flow["problem_kind"])
-
-    st.markdown("#### 3. What variables matter?")
-    for v in flow["variables"]:
-        st.markdown(f"- {v}")
-
-    st.markdown("#### 4. Abstract structure")
-    st.caption("What kind of problem is this — before formulas.")
-    abs_s = flow.get("abstract_structure", {})
-    if abs_s.get("kind"):
-        st.markdown(f"**Kind of problem:** {abs_s['kind']}")
-    if abs_s.get("structure"):
-        st.markdown(f"**Structure:** {abs_s['structure']}")
-    if abs_s.get("comparing"):
-        st.markdown(f"**What we're comparing:** {abs_s['comparing']}")
-    if abs_s.get("unknown"):
-        st.markdown(f"**What is unknown:** {abs_s['unknown']}")
-    if abs_s.get("needs_estimate"):
-        st.markdown(f"**What needs estimating:** {abs_s['needs_estimate']}")
-
-    st.markdown("#### 5. Assumptions")
-    for a in flow["assumptions"]:
-        if a:
-            st.markdown(f"- {a}")
-
-    st.markdown("#### 6. Useful math (connected to this question)")
-    st.markdown(flow["math_helps"])
-
-    st.markdown("#### 7. Work through a simple version")
-    st.markdown(flow["worked_simple"])
-
-    st.markdown("#### 8. Compute — change assumptions and see results")
+    st.markdown("#### Experiment — change assumptions, watch the answer move")
     live_note = render_interactive_analysis(
         flow["interactive"],
         key_prefix,
@@ -138,15 +103,33 @@ def render_quantitative_flow(
         except Exception:
             pass
 
-    st.markdown("#### 9. What does this mean?")
+    st.markdown("#### What does this mean?")
     if live_note:
         st.markdown(live_note)
     if flow.get("interpretation"):
         st.markdown(flow["interpretation"])
     if flow.get("recommendation"):
-        st.info(f"**Lab take:** {flow['recommendation']}")
+        st.info(f"**Takeaway:** {flow['recommendation']}")
     if flow.get("limitations"):
         st.caption(f"*Caveat:* {flow['limitations']}")
+
+    with st.expander("Quick worked example (numbers)", expanded=False):
+        st.markdown(flow["worked_simple"])
+
+    with st.expander("How an analyst thinks through this (optional)", expanded=False):
+        st.markdown(f"**Asked:** {flow['asked']}")
+        st.markdown(f"**Math lens:** {flow.get('math_translation') or flow['problem_kind']}")
+        st.markdown("**Variables**")
+        for v in flow["variables"]:
+            st.markdown(f"- {v}")
+        abs_s = flow.get("abstract_structure", {})
+        if abs_s.get("kind"):
+            st.markdown(f"**Structure:** {abs_s.get('structure') or abs_s['kind']}")
+        st.markdown("**Assumptions**")
+        for a in flow["assumptions"]:
+            if a:
+                st.markdown(f"- {a}")
+        st.markdown(flow["math_helps"])
 
     render_deeper_math(flow, area)
     render_try_yourself(pattern, area)
@@ -227,6 +210,12 @@ def _render_ev_prop_analysis(key_prefix: str, defaults: dict) -> str:
         st.info("**Marginal +EV** — small estimation errors flip the sign.")
     else:
         st.warning("**Unfavorable** — market price likely fair or better than your estimate.")
+
+    from simulations.thinking_plots import plot_ev_bars, plot_probability_tree
+
+    plot_probability_tree(p, profit, stake)
+    plot_ev_bars(p, profit, stake)
+
     return (
         f"Risking **${stake:.0f}** to win **${profit:.0f}** needs about **{break_even:.0%}** to break even. "
         f"At **{p_pct}%**, EV is **${ev:+.2f}** — the hard part is whether **{p_pct}%** is defensible."
@@ -249,6 +238,11 @@ def _render_sports_edge_analysis(key_prefix: str, defaults: dict) -> str:
         st.info("Thin edge — vig and model error may consume it.")
     else:
         st.warning("No edge at these inputs — your model agrees with or trails the market.")
+
+    from simulations.thinking_plots import plot_sports_comparison
+
+    plot_sports_comparison(model_p, market_p, injury)
+
     return (
         f"After adjustments, **{adj}%** vs market **{market_p}%** is **{edge:+} points**. "
         "Wide uncertainty on injuries and small samples can erase apparent edge."
@@ -295,6 +289,11 @@ def _render_ml_analysis(key_prefix: str, defaults: dict) -> str:
         st.success("Moderate gap — reasonable starting point.")
     if lr == "1e-2" and gap > 12:
         st.caption("High learning rate + large gap: try lower η, early stopping, or L2/dropout.")
+
+    from simulations.thinking_plots import plot_lr_curves
+
+    plot_lr_curves(train_acc, val_acc, lr)
+
     return (
         f"A **{gap}-point** train–val gap suggests {'overfitting' if gap > 15 else 'watch generalization'}. "
         f"Learning rate **{lr}** affects stability — tune on validation, not training accuracy alone."
@@ -354,9 +353,51 @@ def _render_forecast_analysis(key_prefix: str, defaults: dict) -> str:
     st.metric("Point forecast", f"{center:.1f}")
     st.metric(f"~{conf}% illustrative range", f"{low:.1f} – {high:.1f}")
     st.caption("Ranges widen with lead time and noise — point forecasts hide uncertainty.")
+
+    from simulations.thinking_plots import plot_forecast_cone
+
+    plot_forecast_cone(baseline, trend, noise, lead)
+
     return (
         f"After **{lead}** periods, center forecast **{center:.1f}** with a rough **{conf}%** band "
         f"**{low:.1f}–{high:.1f}**. Trust calibrated probabilities over single icons."
+    )
+
+
+def _render_treatment_compare(key_prefix: str, defaults: dict) -> str:
+    st.caption("Compare **Treatment A** vs **Treatment B** on the same growth model (teaching sketch).")
+    growth = st.slider("Untreated growth (%/month)", 2, 25, int(defaults.get("g", 12)), key=f"{key_prefix}_tg")
+    kill_a = st.slider("Treatment A — kill effect (%/month)", 0, 25, int(defaults.get("ka", 10)), key=f"{key_prefix}_tka")
+    kill_b = st.slider("Treatment B — kill effect (%/month)", 0, 25, int(defaults.get("kb", 14)), key=f"{key_prefix}_tkb")
+    weeks = st.slider("Weeks on treatment", 4, 52, int(defaults.get("weeks", 24)), key=f"{key_prefix}_tw")
+
+    net_a = growth - kill_a
+    net_b = growth - kill_b
+    v0 = 100.0
+    end_a = v0 * ((1 + net_a / 100) ** (weeks / 4))
+    end_b = v0 * ((1 + net_b / 100) ** (weeks / 4))
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Net rate A", f"{net_a:+.0f}%/mo")
+    c2.metric("Net rate B", f"{net_b:+.0f}%/mo")
+    c3.metric(f"Volume at week {weeks}", f"A:{end_a:.0f}  B:{end_b:.0f}")
+
+    if end_b < end_a < v0:
+        st.success("**Treatment B** shows lower burden than A in this simplified model.")
+    elif end_a < end_b < v0:
+        st.success("**Treatment A** shows lower burden than B in this simplified model.")
+    elif net_a < 0 and net_b < 0:
+        st.info("Both shrink — pick using side effects, evidence, and patient factors, not this sketch alone.")
+    else:
+        st.warning("Both net rates still positive — neither slows enough in this toy model.")
+
+    from simulations.thinking_plots import plot_treatment_ab
+
+    plot_treatment_ab(float(growth), float(kill_a), float(kill_b), weeks)
+
+    return (
+        f"At **{weeks} weeks**, A ends near **{end_a:.0f}** vs B **{end_b:.0f}** (index 100 start). "
+        "Change kill rates — the better treatment is whichever drives **net growth** below zero with acceptable toxicity."
     )
 
 
@@ -387,6 +428,7 @@ def render_interactive_analysis(interactive: str, key_prefix: str, defaults: dic
         "ev_prop": _render_ev_prop_analysis,
         "sports_edge": _render_sports_edge_analysis,
         "growth": _render_growth_analysis,
+        "treatment_compare": _render_treatment_compare,
         "ml_split": _render_ml_analysis,
         "motion": _render_motion_analysis,
         "projectile": _render_projectile_analysis,

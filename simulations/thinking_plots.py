@@ -229,6 +229,100 @@ def plot_treatment_comparison(
     _show(fig)
 
 
+def plot_forecast_cone(
+    baseline: float,
+    trend_pct: float,
+    noise_pct: float,
+    lead: int,
+) -> None:
+    """Point forecast with widening uncertainty cone."""
+    t_hist = np.arange(0, 20)
+    y_hist = baseline * (1 + trend_pct / 100) ** (t_hist / 20) + np.random.default_rng(0).normal(0, baseline * noise_pct / 500, 20)
+    t_fut = np.arange(20, 20 + lead)
+    center = baseline * (1 + trend_pct / 100) ** (t_fut / 20)
+    width = baseline * (noise_pct / 100) * (1 + 0.12 * np.arange(1, lead + 1))
+    fig, ax = plt.subplots(figsize=(8, 3.5))
+    ax.plot(t_hist, y_hist, "o-", color="#64748b", markersize=4, label="History")
+    ax.plot(t_fut, center, "--", color="#059669", lw=2, label="Forecast")
+    ax.fill_between(t_fut, center - width, center + width, alpha=0.25, color="#059669", label="Uncertainty")
+    ax.axvline(19.5, color="#94a3b8", linestyle=":")
+    ax.set_xlabel("Time (periods)")
+    ax.set_ylabel("Value")
+    ax.set_title("Forecast — uncertainty grows with lead time")
+    ax.legend(fontsize=8)
+    ax.grid(alpha=0.3)
+    fig.tight_layout()
+    _show(fig)
+
+
+def plot_lr_curves(train_acc: float, val_acc: float, lr_label: str) -> None:
+    """Synthetic loss curves illustrating learning-rate behavior."""
+    epochs = np.arange(1, 41)
+    base = 1.0 * np.exp(-0.08 * epochs)
+    if lr_label == "1e-2":
+        train = base * (1 + 0.15 * np.sin(epochs / 2)) + 0.05
+        val = base * 1.4 + 0.12 + 0.02 * epochs
+    elif lr_label == "1e-5":
+        train = 0.9 * np.exp(-0.02 * epochs) + 0.2
+        val = train + 0.05
+    else:
+        train = base + 0.05
+        val = base + 0.08 + (train_acc - val_acc) / 500 * epochs
+    fig, ax = plt.subplots(figsize=(7, 3.5))
+    ax.plot(epochs, train, label="Train loss (illustrative)", color="#6366f1", lw=2)
+    ax.plot(epochs, val, label="Val loss (illustrative)", color="#f59e0b", lw=2)
+    ax.set_xlabel("Epoch")
+    ax.set_ylabel("Loss")
+    ax.set_title(f"Learning dynamics at η = {lr_label}")
+    ax.legend(fontsize=8)
+    ax.grid(alpha=0.3)
+    fig.tight_layout()
+    _show(fig)
+    plot_train_val_gap(train_acc, val_acc)
+
+
+def plot_treatment_ab(
+    growth: float,
+    kill_a: float,
+    kill_b: float,
+    weeks: int,
+) -> None:
+    """Treatment A vs B on the same tumor growth sketch."""
+    t = np.arange(0, weeks + 1)
+    none = np.exp(growth * t / 10)
+    a = np.exp((growth - kill_a) * t / 10)
+    b = np.exp((growth - kill_b) * t / 10)
+    fig, ax = plt.subplots(figsize=(8, 3.5))
+    ax.plot(t, none, "--", color="#94a3b8", label="No treatment")
+    ax.plot(t, a, label=f"Treatment A (kill {kill_a:.0f}%)", color="#3b82f6", lw=2)
+    ax.plot(t, b, label=f"Treatment B (kill {kill_b:.0f}%)", color="#22c55e", lw=2)
+    ax.set_xlabel("Week")
+    ax.set_ylabel("Relative tumor burden")
+    ax.set_title("Treatment A vs B — compare net rates")
+    ax.legend(fontsize=8)
+    ax.grid(alpha=0.3)
+    fig.tight_layout()
+    _show(fig)
+
+
+def plot_sports_comparison(model_p: float, market_p: float, injury_adj: int) -> None:
+    """Side-by-side model vs market with adjustment band."""
+    adj = model_p + injury_adj
+    fig, ax = plt.subplots(figsize=(7, 3))
+    labels = ["Market", "Your model", "After injury adj."]
+    vals = [market_p, model_p, adj]
+    colors = ["#94a3b8", "#6366f1", "#059669"]
+    ax.bar(labels, vals, color=colors)
+    ax.axhline(50, color="#e2e8f0", linestyle=":", lw=1)
+    ax.set_ylim(0, 100)
+    ax.set_ylabel("Win probability (%)")
+    ax.set_title("Your estimate vs market")
+    ax.grid(axis="y", alpha=0.3)
+    fig.tight_layout()
+    _show(fig)
+    plot_uncertainty_band(max(5, adj - 8), adj, min(95, adj + 8), adj)
+
+
 def plot_train_val_gap(train_acc: float, val_acc: float) -> None:
     """Train vs validation — overfitting visual."""
     fig, ax = plt.subplots(figsize=(5, 3))

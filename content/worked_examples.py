@@ -209,6 +209,37 @@ WORKED_EXAMPLES: list[dict] = [
     ),
     _ex(
         "sports", "sports",
+        "What are the Mets' chances to make the playoffs if they're 2 games back with 30 games left?",
+        "Estimate **P(Mets clinch)** from remaining schedule strength and rivals — then compare to futures market price if betting.",
+        "**Probability forecasting** for a season outcome (playoff chase).",
+        ["Games back", "Games remaining", "Per-game win probability", "Opponent strength", "Market implied %"],
+        ["Ties and tiebreakers simplified", "Injuries folded into win% slider"],
+        "Rough: need expected wins ≥ rivals; use binomial intuition or Monte Carlo for many scenarios.",
+        (
+            "Example: **2 games back**, **30 games left**, you estimate **55%** to win each game.\n\n"
+            "Expected Mets wins ≈ 0.55×30 = **16.5** — compare to rival's expected wins.\n\n"
+            "If market futures imply **28%** but your model says **38%**, check calibration before betting.\n\n"
+            "Playoff races need **ranges**, not one number."
+        ),
+        "sports_edge",
+        {
+            "Schedule": "Strength of remaining opponents shifts win% — don't use season average blindly.",
+            "Regression": "Hot streaks in small samples overstate true talent.",
+        },
+        "Playoff odds are fragile to injury news and rival outcomes.",
+        "Build win% from schedule; compare to market implied probability.",
+        {"model": 38, "market": 28, "injury": 2},
+        math_translation="Compare your playoff probability to the market's implied price.",
+        abstract_structure={
+            "kind": "Forecast under uncertainty — season outcome.",
+            "comparing": "Your P(playoffs) vs market implied %.",
+            "unknown": "Future wins, rival performance, injuries.",
+            "needs_estimate": "Per-game win probability over remaining schedule.",
+            "structure": "Expected wins vs rivals + uncertainty band.",
+        },
+    ),
+    _ex(
+        "sports", "sports",
         "How would I estimate the Knicks' chance to win tonight?",
         "Produce **P(Knicks win)** using team strength, home court, injuries, and rest — then compare to market odds if betting.",
         "**Probability forecasting** for a single game.",
@@ -222,11 +253,11 @@ WORKED_EXAMPLES: list[dict] = [
             "4. Report a **range** (e.g. 54–62%), not false precision.\n\n"
             "Example: baseline 58% → injury −5% ⇒ **~53%**."
         ),
-        "ev_bet",
+        "sports_edge",
         {"Shrinkage": "Early-season extremes regress toward prior-year talent."},
         "One-game predictions are noisy — wide intervals are honest.",
         "Separate prediction from bet decision; betting needs edge vs. market.",
-        {"p": 55, "odds": "-110", "stake": 100},
+        {"model": 55, "market": 48, "injury": -3},
     ),
     _ex(
         "sports", "sports",
@@ -289,7 +320,30 @@ WORKED_EXAMPLES: list[dict] = [
     # --- Medicine ---
     _ex(
         "medicine", "medicine",
-        "How could we compare two cancer treatments?",
+        "Treatment A vs Treatment B: which slows the tumor more under these rates?",
+        "Compare **net tumor change** when each therapy has different kill/growth effects — not anecdotes.",
+        "**Competing rates model** — growth vs treatment kill for A and B.",
+        ["Untreated growth rate", "Kill rate A", "Kill rate B", "Tumor volume over time", "Toxicity (not in toy model)"],
+        ["Same patient population", "Rates constant over horizon", "Volume proxy is measurable"],
+        "dV/dt ∝ growth − kill; compare net rates and projected volume at a fixed time.",
+        (
+            "If growth = **12%/month**, A kills **10%/month**, B kills **14%/month**:\n\n"
+            "Net A = **+2%/month** (still growing).\n"
+            "Net B = **−2%/month** (shrinking in this sketch).\n\n"
+            "B wins on burden here — but toxicity and trial data still decide clinically."
+        ),
+        "treatment_compare",
+        {
+            "RCT": "Randomized trials compare A vs B on predefined endpoints with confidence intervals.",
+            "Rates": "Growth and kill are teaching shortcuts — real tumors need data fitting.",
+        },
+        "Lower volume in a model ≠ automatically choose that drug in clinic.",
+        "Slide kill rates — see which net rate goes negative first.",
+        {"g": 12, "ka": 10, "kb": 14, "weeks": 24},
+    ),
+    _ex(
+        "medicine", "medicine",
+        "How could we compare two cancer treatments in a clinical trial?",
         "Compare **outcomes between groups** assigned to treatment A vs. B — causally, not by anecdote.",
         "**Statistical inference** / randomized controlled trial design.",
         ["Primary endpoint (survival, progression)", "Sample size", "Effect size", "p-value / confidence interval"],
@@ -302,14 +356,14 @@ WORKED_EXAMPLES: list[dict] = [
             "4. Decide if difference is beyond chance (and clinically meaningful).\n\n"
             "Without randomization, confounders break the comparison."
         ),
-        "growth",
+        "treatment_compare",
         {
             "RCT": "Randomization balances known and unknown confounders in expectation.",
             "Survival analysis": "Kaplan-Meier curves and log-rank tests compare groups over time.",
         },
         "Treatment A 'better' stories need control-arm evidence.",
-        "Design: randomized trial with predefined endpoint.",
-        {"g": 10, "k": 12},
+        "Use the comparison sliders, then read trial statistics.",
+        {"g": 10, "ka": 8, "kb": 12, "weeks": 20},
     ),
     _ex(
         "medicine", "medicine",
