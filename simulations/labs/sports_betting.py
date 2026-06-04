@@ -1,7 +1,10 @@
 """Sports Betting Lab — EV, odds conversion, team comparison."""
 
+import matplotlib.pyplot as plt
 import numpy as np
 import streamlit as st
+
+from simulations.thinking_visuals import render_probability_tree
 
 
 def _decimal_to_implied(decimal_odds: float) -> float:
@@ -15,6 +18,18 @@ def _american_to_decimal(american: float) -> float:
 
 
 def run_sports_betting_lab() -> None:
+    st.markdown("#### Probability & payout picture")
+    st.caption("Move sliders below — the tree and EV chart update as you explore.")
+
+    preview_p = st.slider("Preview win % (tree)", 20, 80, 50, key="sb_tree_p") / 100
+    preview_stake = 100
+    preview_profit = 90
+    from simulations.thinking_plots import plot_ev_bars, plot_probability_tree
+
+    plot_probability_tree(preview_p, preview_stake, preview_profit)
+    plot_ev_bars(preview_p, preview_profit, preview_stake)
+
+    st.markdown("---")
     st.markdown("#### Compare two teams")
 
     col1, col2 = st.columns(2)
@@ -52,6 +67,26 @@ def run_sports_betting_lab() -> None:
     m2.metric("Your win probability", f"{win_prob:.1%}")
     m3.metric("Market implied prob", f"{implied:.1%}")
     m4.metric("Edge", f"{edge:+.1%}")
+
+    col_v1, col_v2 = st.columns(2)
+    with col_v1:
+        render_probability_tree(win_prob, decimal_odds, stake)
+    with col_v2:
+        probs = np.linspace(0.15, 0.85, 50)
+        ev_curve = probs * profit_if_win - (1 - probs) * stake
+        fig, ax = plt.subplots(figsize=(5, 3.5))
+        ax.plot(probs * 100, ev_curve, color="#6366f1", linewidth=2)
+        ax.axhline(0, color="#94a3b8", linestyle="--", linewidth=1)
+        ax.axvline(win_prob * 100, color="#059669", linestyle=":", linewidth=1.5, label="Your estimate")
+        ax.scatter([win_prob * 100], [ev], color="#059669", s=60, zorder=5)
+        ax.set_xlabel("Win probability (%)")
+        ax.set_ylabel("EV ($)")
+        ax.set_title("EV vs your probability estimate")
+        ax.grid(True, alpha=0.3)
+        ax.legend(fontsize=8)
+        fig.tight_layout()
+        st.pyplot(fig)
+        plt.close(fig)
 
     if ev > 0:
         st.success(

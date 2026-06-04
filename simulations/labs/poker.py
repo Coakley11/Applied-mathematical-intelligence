@@ -96,6 +96,13 @@ def run_poker_lab() -> None:
     else:
         st.caption("Your equity is below pot odds — you need implied odds or a better spot.")
 
+    from simulations.thinking_plots import plot_ev_bars, plot_probability_tree
+
+    profit_if_win = pot_after_call - bet_to_call if action != "Fold" else bet_to_call
+    st.markdown("##### Payout diagram")
+    plot_probability_tree(win_prob, bet_to_call, max(profit_if_win, 1))
+    plot_ev_bars(win_prob, max(profit_if_win, 1), bet_to_call)
+
     st.markdown("---")
     st.markdown("#### Kelly bankroll sizing")
     edge = max(win_prob - pot_odds, 0)

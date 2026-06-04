@@ -29,8 +29,8 @@ def render_home() -> None:
     with st.expander("How this works", expanded=False):
         st.markdown(
             """
-            1. **Solve a Problem** — real-world question → math tools.
+            1. **Solve a Problem** — real-world question → math tools; **Mathematical thinking** tab is an interactive workshop.
             2. **Explore a Math Idea** — math concept → real-world applications.
-            3. **Labs** — simulate, predict, train hands-on.
+            3. **Labs** — simulate, predict, train hands-on with charts and sliders.
             """
         )

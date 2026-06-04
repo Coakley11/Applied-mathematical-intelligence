@@ -2,13 +2,19 @@
 
 import streamlit as st
 
+from components.thinking_workshop import render_thinking_quick_cards
 from content.thinking_lab import THINKING_TOPICS
 
 
 def render_thinking_topics_panel() -> None:
     """Topic library panel — frameworks for how quantitative thinkers approach problems."""
     st.markdown("#### Thinking topic library")
-    st.caption("Short frameworks — questions to ask, not formulas to memorize.")
+    st.caption(
+        "Pick a topic, then try the questions on your problem — or use **Interactive workshop** "
+        "for visuals and sliders."
+    )
+    render_thinking_quick_cards()
+    st.markdown("---")
 
     topic_names = [t["name"] for t in THINKING_TOPICS]
     choice = st.selectbox("Pick a topic", topic_names, key="thinking_topic_select")
@@ -35,6 +41,7 @@ def render_thinking_topics_panel() -> None:
         key=f"thinking_apply_{topic['id']}",
     )
     if user_problem.strip():
-        st.markdown("Using this framework, ask yourself:")
+        st.markdown("**Try it yourself** — using this framework, ask:")
         for q in topic["questions"]:
             st.markdown(f"- {q}")
+        st.caption("Open the **Interactive workshop** tab to walk through a thinking style with charts.")

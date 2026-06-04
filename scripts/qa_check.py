@@ -60,6 +60,14 @@ def main() -> int:
             SECONDARY_LAB_NAMES,
         )
         from content.thinking_lab import THINKING_LAB, THINKING_TOPICS
+        from content.thinking_workshop import (
+            WORKSHOP_MODES,
+            WORKSHOP_STYLES,
+            DOMAIN_WALKTHROUGHS,
+            classify_problem,
+            get_mode_walkthrough,
+            infer_problem_domain,
+        )
         from content.themes import THEME_NAMES
         from content.tool_guides import TOOL_GUIDES
         from simulations.labs import LAB_RUNNERS
@@ -111,6 +119,9 @@ def main() -> int:
 
     if len(THINKING_TOPICS) != 11:
         errors.append(f"Expected 11 thinking topics, got {len(THINKING_TOPICS)}")
+
+    if not get_mode_walkthrough("sports bet EV", "modeling").get("variables"):
+        errors.append("get_mode_walkthrough modeling walkthrough invalid")
 
     if len(WORKSHOP_STEPS) != 8:
         errors.append(f"Expected 8 workshop steps, got {len(WORKSHOP_STEPS)}")
@@ -223,6 +234,27 @@ def main() -> int:
 
     if len(MATHEMATICIAN_MODE_TOPICS) != 8:
         errors.append(f"Expected 8 mathematician mode topics, got {len(MATHEMATICIAN_MODE_TOPICS)}")
+
+    if len(WORKSHOP_MODES) != 6:
+        errors.append(f"Expected 6 thinking workshop modes, got {len(WORKSHOP_MODES)}")
+
+    if len(WORKSHOP_STYLES) != 6:
+        errors.append(f"Expected 6 thinking workshop styles, got {len(WORKSHOP_STYLES)}")
+
+    for style in WORKSHOP_STYLES:
+        for key in ("id", "name", "visual", "tagline"):
+            if not style.get(key):
+                errors.append(f"Workshop style missing {key}: {style.get('id')}")
+
+    for domain_key, modes in DOMAIN_WALKTHROUGHS.items():
+        if len(modes) < 6:
+            errors.append(f"Domain walkthrough incomplete: {domain_key}")
+
+    if infer_problem_domain("machine learning overfitting") != "ai":
+        errors.append("infer_problem_domain failed for AI")
+
+    if classify_problem("machine learning overfitting").get("domain_key") != "ai":
+        errors.append("classify_problem failed for AI")
 
     if len(LAB_THINKING_PROMPTS) != 4:
         errors.append(f"Expected 4 lab thinking prompts, got {len(LAB_THINKING_PROMPTS)}")

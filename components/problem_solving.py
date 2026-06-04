@@ -7,6 +7,7 @@ import streamlit as st
 from components.problem_analyst import render_abstract_section, render_quantitative_flow
 from components.section_intro import render_section_header
 from components.thinking_lab import render_thinking_topics_panel
+from components.thinking_workshop import render_thinking_workshop
 from content.problem_solving import (
     DEFAULT_PATTERN,
     MATHEMATICIAN_MODE_TOPICS,
@@ -107,9 +108,17 @@ def _render_area_hub() -> None:
 
 def _render_mathematical_thinking() -> None:
     st.markdown("#### How do mathematicians think?")
-    st.caption("Separate from solving — abstraction, modeling, assumptions, simplification, uncertainty, optimization.")
+    st.caption(
+        "Applied math laboratory — enter a scenario, pick a thinking style, play with sliders and visuals. "
+        "Less reading, more experimenting."
+    )
 
-    sub_core, sub_topics = st.tabs(["Core ideas", "Topic library"])
+    sub_workshop, sub_core, sub_topics = st.tabs(
+        ["Interactive workshop", "Quick reference", "Topic library"]
+    )
+
+    with sub_workshop:
+        render_thinking_workshop()
 
     with sub_core:
         names = [t["name"] for t in MATHEMATICIAN_MODE_TOPICS]
@@ -117,7 +126,9 @@ def _render_mathematical_thinking() -> None:
         topic = next(t for t in MATHEMATICIAN_MODE_TOPICS if t["name"] == choice)
         with st.container(border=True):
             st.markdown(f"**{topic['name']}** — {topic['idea']}")
+            st.markdown(f"*{topic['prompt']}*")
             st.info(f"Example: {topic['example']}")
+        st.caption("Use the **Interactive workshop** tab to apply this style to your own problem.")
 
     with sub_topics:
         render_thinking_topics_panel()

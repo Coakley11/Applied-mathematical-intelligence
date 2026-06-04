@@ -6,6 +6,14 @@ import streamlit as st
 
 
 def run_optimization_lab() -> None:
+    from simulations.thinking_plots import plot_tradeoff_curve
+
+    st.markdown("#### Objective vs constraint")
+    obj_w = st.slider("Objective weight (explore)", 0.0, 1.0, 0.6, key="opt_trade_obj")
+    tight = st.slider("Constraint tightness (explore)", 0.0, 1.0, 0.45, key="opt_trade_tight")
+    plot_tradeoff_curve(obj_w, tight)
+
+    st.markdown("---")
     st.markdown("#### Define your options")
 
     st.caption("Allocate a budget across projects. Each has a return and a risk score.")

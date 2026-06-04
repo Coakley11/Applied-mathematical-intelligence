@@ -17,17 +17,9 @@ def render_practical_lab(lab_name: str) -> None:
 
     render_section_header(lab["icon"], lab["action"], lab["tagline"])
 
-    render_start_here(
-        lab.get("start_here", lab["intro"]),
-        lab.get("start_steps"),
-    )
+    st.markdown("#### Start experimenting")
+    st.caption("Use the controls below first — this is a lab, not a chapter. Optional reading is collapsed.")
 
-    if lab.get("is_math_hub"):
-        _render_math_systems_overview()
-
-    render_lab_thinking_gate(lab_name, key_prefix=lab_name.replace(" ", "_"))
-
-    st.markdown("#### Now try it")
     if len(tools) == 1:
         render_guided_tool(tools[0]["runner_id"])
     else:
@@ -36,6 +28,17 @@ def render_practical_lab(lab_name: str) -> None:
         for tab, tool in zip(tabs, tools):
             with tab:
                 render_guided_tool(tool["runner_id"])
+
+    with st.expander("Before you started — quick thinking prompts (optional)", expanded=False):
+        render_lab_thinking_gate(lab_name, key_prefix=lab_name.replace(" ", "_"))
+
+    with st.expander("What is this lab? (optional)", expanded=False):
+        render_start_here(
+            lab.get("start_here", lab["intro"]),
+            lab.get("start_steps"),
+        )
+        if lab.get("is_math_hub"):
+            _render_math_systems_overview()
 
     related = [d for d in lab.get("related_domains", []) if d in DOMAINS]
     if related:

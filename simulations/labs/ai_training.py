@@ -59,6 +59,13 @@ def run_ai_training_lab() -> None:
     st.pyplot(fig)
     plt.close(fig)
 
+    from simulations.thinking_plots import plot_train_val_gap
+
+    train_pct = max(50, 100 - int(losses[-1] * 15)) if losses else 85
+    val_pct = max(45, train_pct - st.slider("Simulated overfit gap (pts)", 0, 25, 12, key="ai_gap"))
+    st.markdown("##### Train vs validation")
+    plot_train_val_gap(train_pct, val_pct)
+
     final_loss = losses[-1] if losses else 0
     converged = len(losses) > 5 and losses[-1] < losses[0] * 0.5
 

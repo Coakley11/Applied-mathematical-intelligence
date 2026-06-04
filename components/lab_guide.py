@@ -17,25 +17,26 @@ def run_tool(runner_id: str) -> None:
 
 
 def render_guided_tool(runner_id: str) -> None:
-    """Full guided flow for one simulation tool."""
+    """Lab-first guided flow — play with the simulation, then interpret."""
     guide = TOOL_GUIDES.get(runner_id)
     if not guide:
-        st.caption("Interactive simulation")
+        st.caption("Interactive simulation — move the controls first.")
         run_tool(runner_id)
         return
 
     st.markdown(f"### {guide['plain_name']}")
-    st.markdown(guide["what"])
+    st.caption(guide["what"][:200] + ("…" if len(guide["what"]) > 200 else ""))
 
-    with st.expander("Why are we asking this? (think first)", expanded=False):
-        st.markdown(guide["figuring_out"])
-        st.markdown(f"*In context:* {guide['why']}")
-
-    st.markdown("#### Run it")
+    st.markdown("#### Play with it")
+    st.caption("Change sliders and inputs — watch the charts update. Read explanations after you explore.")
     run_tool(runner_id)
 
     st.markdown("#### What to look for")
     st.info(guide["interpret"])
+
+    with st.expander("Why are we asking this? (after you explore)", expanded=False):
+        st.markdown(guide["figuring_out"])
+        st.markdown(f"*In context:* {guide['why']}")
 
     with st.expander("Go deeper (optional)", expanded=False):
         st.markdown("**Why this matters**")

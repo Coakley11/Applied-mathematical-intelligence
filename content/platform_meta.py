@@ -8,7 +8,7 @@ from content.themes import THEME_NAMES
 from content.tool_guides import TOOL_GUIDES
 from simulations.registry import SIMULATION_COUNT
 
-VERSION = "3.4.0"
+VERSION = "3.5.0"
 
 FEATURED_DOMAINS = [
     "Quantitative Finance",
@@ -25,6 +25,7 @@ ROADMAP = [
     "Playable poker practice mini-game in betting lab",
     "Plotly interactive charts for lab visualizations",
     "Shareable lab URLs via Streamlit multipage",
+    "Expand thinking workshop to all Advanced reference pillars",
 ]
 
 NUM_THEMES = len(THEME_NAMES)

@@ -32,6 +32,15 @@ def main() -> int:
         from components.problem_solving import render_problem_solving_lab  # noqa: F401
         from components.problem_thinking import render_lab_thinking_gate  # noqa: F401
         from components.thinking_lab import render_thinking_topics_panel  # noqa: F401
+        from components.thinking_workshop import render_thinking_workshop  # noqa: F401
+        from content.thinking_workshop import (
+            WORKSHOP_MODES,
+            WORKSHOP_STYLES,
+            classify_problem,
+            get_mode_walkthrough,
+            get_walkthrough,
+            infer_problem_domain,
+        )
         from components.math_idea_explorer import render_math_idea_explorer  # noqa: F401
         from content.math_idea_explorer import MATH_CONCEPTS, detect_concept
         from content.analyst_briefs import ANALYST_BRIEFS, get_analyst_brief
@@ -172,6 +181,25 @@ def main() -> int:
 
     if len(THINKING_TOPICS) != 11:
         errors.append("Thinking Lab topics != 11")
+
+    if len(WORKSHOP_MODES) != 6:
+        errors.append(f"Expected 6 workshop modes, got {len(WORKSHOP_MODES)}")
+
+    if not get_mode_walkthrough("Is this bet worth it at +150?", "abstraction").get("deeper_structure"):
+        errors.append("get_mode_walkthrough failed")
+    if len(WORKSHOP_STYLES) != 6:
+        errors.append(f"Expected 6 workshop styles, got {len(WORKSHOP_STYLES)}")
+
+    domain = infer_problem_domain("Is this sports bet worth making at +150?")
+    if domain not in ("betting", "sports"):
+        errors.append(f"infer_problem_domain betting/sports failed: {domain}")
+
+    wt = get_walkthrough("betting", "abstraction")
+    if not wt.get("structures") and not wt.get("matters"):
+        errors.append("get_walkthrough betting/abstraction empty")
+
+    if classify_problem("test").get("domain_key") != infer_problem_domain("test"):
+        errors.append("classify_problem domain_key mismatch")
 
     for i, p in enumerate(PORTFOLIO_PROBLEMS):
         if not p.get("question"):

@@ -26,6 +26,9 @@ def tumor_growth():
     t = np.arange(periods)
     net = growth - treatment
     size = initial * np.exp(net * t)
+    from simulations.thinking_plots import plot_treatment_comparison
+
+    plot_treatment_comparison(growth * 40, treatment * 40, min(periods, 24))
     plot_line(t, size, "Competing Growth vs Treatment", "Time", "Tumor Size")
     if net > 0:
         st.warning("Net growth positive — treatment weaker than proliferation.")
