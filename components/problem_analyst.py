@@ -64,6 +64,10 @@ def _merge_worked_with_brief(worked: dict | None, pattern_id: str) -> dict:
         "recommendation": worked.get("recommendation", ""),
         "limitations": brief.get("limitations", ""),
         "analyst_steps": brief.get("analyst_steps", []),
+        "try_this": worked.get("try_this", ""),
+        "takeaway_plain": worked.get("takeaway_plain", ""),
+        "chart_note": worked.get("chart_note", ""),
+        "scenario": worked.get("scenario", ""),
     }
 
 
@@ -80,14 +84,20 @@ def render_quantitative_flow(
 
     with st.container(border=True):
         st.markdown(f"**Your question:** *{problem}*")
-        st.caption(f"{area['icon']} {area['name']} — adjust sliders and compare scenarios below.")
+        if flow.get("try_this"):
+            st.info(f"**Try this:** {flow['try_this']}")
+        else:
+            st.caption(f"{area['icon']} {area['name']} — move the sliders; charts update instantly.")
 
-    st.markdown("#### Experiment — change assumptions, watch the answer move")
+    st.markdown("#### Experiment")
     live_note = render_interactive_analysis(
         flow["interactive"],
         key_prefix,
         flow.get("interactive_defaults", {}),
+        scenario=flow.get("scenario", ""),
     )
+    if flow.get("chart_note"):
+        st.caption(flow["chart_note"])
     if live_note:
         try:
             from applied_intelligence_activity import log_problem_solved
@@ -104,11 +114,13 @@ def render_quantitative_flow(
             pass
 
     st.markdown("#### What does this mean?")
-    if live_note:
+    if flow.get("takeaway_plain"):
+        st.success(f"**In plain terms:** {flow['takeaway_plain']}")
+    elif live_note:
         st.markdown(live_note)
-    if flow.get("interpretation"):
+    if flow.get("interpretation") and not flow.get("takeaway_plain"):
         st.markdown(flow["interpretation"])
-    if flow.get("recommendation"):
+    if flow.get("recommendation") and not flow.get("takeaway_plain"):
         st.info(f"**Takeaway:** {flow['recommendation']}")
     if flow.get("limitations"):
         st.caption(f"*Caveat:* {flow['limitations']}")
@@ -192,11 +204,15 @@ def _render_ev_analysis(key_prefix: str, defaults: dict) -> str:
     )
 
 
-def _render_ev_prop_analysis(key_prefix: str, defaults: dict) -> str:
-    st.caption("Prop / futures style: stake, profit if the event hits, your P(success).")
+def _render_ev_prop_analysis(key_prefix: str, defaults: dict, scenario: str = "") -> str:
+    if scenario == "judge_prop":
+        st.caption("Aaron Judge **30+ home runs** prop — same math as any yes/no bet.")
+    else:
+        st.caption("Yes/no prop: stake, profit if it hits, your chance it happens.")
     stake = st.number_input("Amount risked ($)", min_value=1.0, value=float(defaults.get("stake", 200)), key=f"{key_prefix}_pst")
-    profit = st.number_input("Profit if you win ($)", min_value=1.0, value=float(defaults.get("profit", 180)), key=f"{key_prefix}_ppr")
-    p_pct = st.slider("Your P(event happens) %", 5, 95, int(defaults.get("p", 35)), key=f"{key_prefix}_ppp")
+    profit = st.number_input("Profit if prop wins ($)", min_value=1.0, value=float(defaults.get("profit", 180)), key=f"{key_prefix}_ppr")
+    p_label = "Your chance Judge hits 30+ HR (%)" if scenario == "judge_prop" else "Your chance the event happens (%)"
+    p_pct = st.slider(p_label, 5, 95, int(defaults.get("p", 35)), key=f"{key_prefix}_ppp")
     p = p_pct / 100.0
     break_even = stake / (stake + profit)
     ev = p * profit - (1 - p) * stake
@@ -215,6 +231,8 @@ def _render_ev_prop_analysis(key_prefix: str, defaults: dict) -> str:
 
     plot_probability_tree(p, profit, stake)
     plot_ev_bars(p, profit, stake)
+    if scenario == "judge_prop":
+        st.caption("Tree: win vs lose. Bars: each outcome’s contribution to expected value.")
 
     return (
         f"Risking **${stake:.0f}** to win **${profit:.0f}** needs about **{break_even:.0%}** to break even. "
@@ -222,10 +240,31 @@ def _render_ev_prop_analysis(key_prefix: str, defaults: dict) -> str:
     )
 
 
-def _render_sports_edge_analysis(key_prefix: str, defaults: dict) -> str:
-    model_p = st.slider("Your projected win probability (%)", 30, 80, int(defaults.get("model", 58)), key=f"{key_prefix}_spm")
-    market_p = st.slider("Market implied probability (%)", 30, 80, int(defaults.get("market", 52)), key=f"{key_prefix}_spk")
-    injury = st.slider("Injury / news adjustment (percentage points)", -15, 15, int(defaults.get("injury", 0)), key=f"{key_prefix}_spi")
+def _render_sports_edge_analysis(key_prefix: str, defaults: dict, scenario: str = "") -> str:
+    if scenario == "mets_playoffs":
+        st.caption("Mets **playoff chase** — your estimate vs futures market price.")
+        model_label, market_label, adj_label = (
+            "Your chance Mets make playoffs (%)",
+            "Market implied playoff chance (%)",
+            "Schedule / injury tweak (points)",
+        )
+        chart_title = "Mets playoffs — your model vs market"
+    elif scenario == "knicks_game":
+        st.caption("Knicks **tonight** — your win chance vs the betting line.")
+        model_label, market_label, adj_label = (
+            "Your chance Knicks win tonight (%)",
+            "Market implied win chance (%)",
+            "Injury / rest news tweak (points)",
+        )
+        chart_title = "Knicks game — your model vs market"
+    else:
+        model_label = "Your estimate (%)"
+        market_label = "Market implied (%)"
+        adj_label = "News / injury tweak (points)"
+        chart_title = "Your estimate vs market"
+    model_p = st.slider(model_label, 25, 85, int(defaults.get("model", 58)), key=f"{key_prefix}_spm")
+    market_p = st.slider(market_label, 25, 85, int(defaults.get("market", 52)), key=f"{key_prefix}_spk")
+    injury = st.slider(adj_label, -15, 15, int(defaults.get("injury", 0)), key=f"{key_prefix}_spi")
     adj = model_p + injury
     edge = adj - market_p
     c1, c2, c3 = st.columns(3)
@@ -241,11 +280,11 @@ def _render_sports_edge_analysis(key_prefix: str, defaults: dict) -> str:
 
     from simulations.thinking_plots import plot_sports_comparison
 
-    plot_sports_comparison(model_p, market_p, injury)
+    plot_sports_comparison(model_p, market_p, injury, title=chart_title)
 
     return (
         f"After adjustments, **{adj}%** vs market **{market_p}%** is **{edge:+} points**. "
-        "Wide uncertainty on injuries and small samples can erase apparent edge."
+        "A thin edge can vanish if your estimate is off by a few points."
     )
 
 
@@ -270,15 +309,20 @@ def _render_growth_analysis(key_prefix: str, defaults: dict) -> str:
     )
 
 
-def _render_ml_analysis(key_prefix: str, defaults: dict) -> str:
+def _render_ml_analysis(key_prefix: str, defaults: dict, scenario: str = "") -> str:
+    if scenario == "learning_rate":
+        st.caption("**Learning rate** — how big each training step is.")
+    else:
+        st.caption("**Overfitting check** — training vs validation accuracy.")
     train_acc = st.slider("Training accuracy (%)", 50, 100, int(defaults.get("tr", 92)), key=f"{key_prefix}_tr")
     val_acc = st.slider("Validation accuracy (%)", 50, 100, int(defaults.get("va", 78)), key=f"{key_prefix}_va")
     lr = st.select_slider(
-        "Learning rate (order of magnitude)",
-        options=["1e-2", "1e-3", "1e-4", "1e-5"],
-        value=defaults.get("lr", "1e-3"),
+        "Learning rate (step size)",
+        options=["1e-2 (large)", "1e-3 (medium)", "1e-4 (small)", "1e-5 (tiny)"],
+        value=_lr_display(defaults.get("lr", "1e-3")),
         key=f"{key_prefix}_lr",
     )
+    lr_key = lr.split()[0]
     gap = train_acc - val_acc
     st.metric("Train − validation gap", f"{gap} pts")
     if gap > 15:
@@ -287,17 +331,27 @@ def _render_ml_analysis(key_prefix: str, defaults: dict) -> str:
         st.warning("Likely **underfitting** or weak features.")
     else:
         st.success("Moderate gap — reasonable starting point.")
-    if lr == "1e-2" and gap > 12:
-        st.caption("High learning rate + large gap: try lower η, early stopping, or L2/dropout.")
+    if lr_key == "1e-2" and gap > 12:
+        st.caption("Large learning rate + big gap: try a smaller rate, early stopping, or regularization.")
 
     from simulations.thinking_plots import plot_lr_curves
 
-    plot_lr_curves(train_acc, val_acc, lr)
+    plot_lr_curves(train_acc, val_acc, lr_key)
 
     return (
         f"A **{gap}-point** train–val gap suggests {'overfitting' if gap > 15 else 'watch generalization'}. "
-        f"Learning rate **{lr}** affects stability — tune on validation, not training accuracy alone."
+        f"Learning rate **{lr_key}** affects stability — tune on validation, not training accuracy alone."
     )
+
+
+def _lr_display(raw: str) -> str:
+    mapping = {
+        "1e-2": "1e-2 (large)",
+        "1e-3": "1e-3 (medium)",
+        "1e-4": "1e-4 (small)",
+        "1e-5": "1e-5 (tiny)",
+    }
+    return mapping.get(str(raw), "1e-3 (medium)")
 
 
 def _render_motion_analysis(key_prefix: str, defaults: dict) -> str:
@@ -341,12 +395,18 @@ def _render_projectile_analysis(key_prefix: str, defaults: dict) -> str:
     )
 
 
-def _render_forecast_analysis(key_prefix: str, defaults: dict) -> str:
-    baseline = st.number_input("Baseline forecast", value=float(defaults.get("baseline", 100)), key=f"{key_prefix}_fb")
-    trend = st.slider("Trend per period (%)", -30, 30, int(defaults.get("trend", 0)), key=f"{key_prefix}_ft")
-    noise = st.slider("Typical noise (±%)", 1, 40, int(defaults.get("noise", 12)), key=f"{key_prefix}_fn")
-    conf = st.slider("Confidence level (%)", 80, 99, int(defaults.get("conf", 95)), key=f"{key_prefix}_fc")
-    lead = st.slider("Forecast lead time (periods)", 1, 14, int(defaults.get("lead", 3)), key=f"{key_prefix}_fl")
+def _render_forecast_analysis(key_prefix: str, defaults: dict, scenario: str = "") -> str:
+    if scenario == "weather_cone":
+        st.caption("**Weather-style forecast** — see uncertainty widen as you look further ahead.")
+    baseline = st.number_input(
+        "Starting value (e.g. temperature index)",
+        value=float(defaults.get("baseline", 72 if scenario == "weather_cone" else 100)),
+        key=f"{key_prefix}_fb",
+    )
+    trend = st.slider("Trend per day (%)", -30, 30, int(defaults.get("trend", 0)), key=f"{key_prefix}_ft")
+    noise = st.slider("Day-to-day variability (±%)", 1, 40, int(defaults.get("noise", 15 if scenario == "weather_cone" else 12)), key=f"{key_prefix}_fn")
+    conf = st.slider("How confident (%)", 80, 99, int(defaults.get("conf", 90 if scenario == "weather_cone" else 95)), key=f"{key_prefix}_fc")
+    lead = st.slider("Days ahead to forecast", 1, 14, int(defaults.get("lead", 7 if scenario == "weather_cone" else 3)), key=f"{key_prefix}_fl")
     center = baseline * (1 + trend / 100) ** lead
     width = center * (noise / 100) * (1 + (100 - conf) / 40 + lead * 0.15)
     low, high = center - width, center + width
@@ -356,16 +416,17 @@ def _render_forecast_analysis(key_prefix: str, defaults: dict) -> str:
 
     from simulations.thinking_plots import plot_forecast_cone
 
-    plot_forecast_cone(baseline, trend, noise, lead)
+    title = "Weather forecast — uncertainty cone" if scenario == "weather_cone" else "Forecast uncertainty cone"
+    plot_forecast_cone(baseline, trend, noise, lead, title=title)
 
     return (
-        f"After **{lead}** periods, center forecast **{center:.1f}** with a rough **{conf}%** band "
-        f"**{low:.1f}–{high:.1f}**. Trust calibrated probabilities over single icons."
+        f"After **{lead}** days, best guess **{center:.1f}** but plausible range **{low:.1f}–{high:.1f}**. "
+        "Farther out ⇒ wider cone."
     )
 
 
-def _render_treatment_compare(key_prefix: str, defaults: dict) -> str:
-    st.caption("Compare **Treatment A** vs **Treatment B** on the same growth model (teaching sketch).")
+def _render_treatment_compare(key_prefix: str, defaults: dict, scenario: str = "") -> str:
+    st.caption("Compare **Treatment A** vs **B** — same tumor, different kill rates (teaching model).")
     growth = st.slider("Untreated growth (%/month)", 2, 25, int(defaults.get("g", 12)), key=f"{key_prefix}_tg")
     kill_a = st.slider("Treatment A — kill effect (%/month)", 0, 25, int(defaults.get("ka", 10)), key=f"{key_prefix}_tka")
     kill_b = st.slider("Treatment B — kill effect (%/month)", 0, 25, int(defaults.get("kb", 14)), key=f"{key_prefix}_tkb")
@@ -394,6 +455,7 @@ def _render_treatment_compare(key_prefix: str, defaults: dict) -> str:
     from simulations.thinking_plots import plot_treatment_ab
 
     plot_treatment_ab(float(growth), float(kill_a), float(kill_b), weeks)
+    st.caption("Blue = A, green = B. Lower line = stronger treatment in this simple model.")
 
     return (
         f"At **{weeks} weeks**, A ends near **{end_a:.0f}** vs B **{end_b:.0f}** (index 100 start). "
@@ -421,8 +483,14 @@ def _render_structure_analysis(key_prefix: str, defaults: dict) -> str:
     )
 
 
-def render_interactive_analysis(interactive: str, key_prefix: str, defaults: dict) -> str:
-    st.caption("Adjust inputs — results update immediately.")
+def render_interactive_analysis(
+    interactive: str,
+    key_prefix: str,
+    defaults: dict,
+    *,
+    scenario: str = "",
+    chart_note: str = "",
+) -> str:
     handlers = {
         "ev_bet": _render_ev_analysis,
         "ev_prop": _render_ev_prop_analysis,
@@ -437,7 +505,14 @@ def render_interactive_analysis(interactive: str, key_prefix: str, defaults: dic
         "structure": _render_structure_analysis,
     }
     fn = handlers.get(interactive, _render_ev_analysis)
-    return fn(key_prefix, defaults) or ""
+    uses_scenario = interactive in (
+        "ev_prop", "sports_edge", "treatment_compare", "ml_split", "forecast", "forecast_range",
+    )
+    if uses_scenario:
+        result = fn(key_prefix, defaults, scenario) or ""
+    else:
+        result = fn(key_prefix, defaults) or ""
+    return result
 
 
 def render_try_yourself(pattern: dict, area: dict) -> None:

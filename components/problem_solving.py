@@ -1,5 +1,6 @@
 """Solve a Problem — seven quantitative areas, analyst flow."""
 
+import hashlib
 import re
 
 import streamlit as st
@@ -80,7 +81,11 @@ def _render_area_hub() -> None:
 
     library_problem = st.session_state.get("ps_library_problem", "")
     examples = area["example_questions"]
-    example = st.selectbox("Pick an example question", examples, key=f"ps_ex_{area['id']}")
+    example = st.selectbox(
+        "Pick an example (featured ones are first)",
+        examples,
+        key=f"ps_ex_{area['id']}",
+    )
 
     custom = ""
     if example.endswith("Custom question (type below)"):
@@ -101,7 +106,8 @@ def _render_area_hub() -> None:
     if pattern.get("id") not in (pattern_id, "abstract"):
         pattern_id = pattern.get("id", pattern_id)
 
-    key_prefix = f"ps_{area['id']}_{pattern_id}"
+    slug = hashlib.md5(problem.encode("utf-8")).hexdigest()[:10]
+    key_prefix = f"ps_{area['id']}_{slug}"
     st.markdown("---")
     render_quantitative_flow(problem, pattern, pattern_id, area, key_prefix)
 

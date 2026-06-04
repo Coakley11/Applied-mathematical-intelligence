@@ -234,6 +234,8 @@ def plot_forecast_cone(
     trend_pct: float,
     noise_pct: float,
     lead: int,
+    *,
+    title: str = "Forecast — uncertainty grows with lead time",
 ) -> None:
     """Point forecast with widening uncertainty cone."""
     t_hist = np.arange(0, 20)
@@ -248,7 +250,7 @@ def plot_forecast_cone(
     ax.axvline(19.5, color="#94a3b8", linestyle=":")
     ax.set_xlabel("Time (periods)")
     ax.set_ylabel("Value")
-    ax.set_title("Forecast — uncertainty grows with lead time")
+    ax.set_title(title)
     ax.legend(fontsize=8)
     ax.grid(alpha=0.3)
     fig.tight_layout()
@@ -256,7 +258,7 @@ def plot_forecast_cone(
 
 
 def plot_lr_curves(train_acc: float, val_acc: float, lr_label: str) -> None:
-    """Synthetic loss curves illustrating learning-rate behavior."""
+    """Loss curves + accuracy gap in one figure (avoids duplicate charts)."""
     epochs = np.arange(1, 41)
     base = 1.0 * np.exp(-0.08 * epochs)
     if lr_label == "1e-2":
@@ -268,17 +270,26 @@ def plot_lr_curves(train_acc: float, val_acc: float, lr_label: str) -> None:
     else:
         train = base + 0.05
         val = base + 0.08 + (train_acc - val_acc) / 500 * epochs
-    fig, ax = plt.subplots(figsize=(7, 3.5))
-    ax.plot(epochs, train, label="Train loss (illustrative)", color="#6366f1", lw=2)
-    ax.plot(epochs, val, label="Val loss (illustrative)", color="#f59e0b", lw=2)
-    ax.set_xlabel("Epoch")
-    ax.set_ylabel("Loss")
-    ax.set_title(f"Learning dynamics at η = {lr_label}")
-    ax.legend(fontsize=8)
-    ax.grid(alpha=0.3)
+
+    fig, axes = plt.subplots(1, 2, figsize=(9, 3.5))
+    axes[0].plot(epochs, train, label="Train loss", color="#6366f1", lw=2)
+    axes[0].plot(epochs, val, label="Val loss", color="#f59e0b", lw=2)
+    axes[0].set_xlabel("Epoch")
+    axes[0].set_ylabel("Loss")
+    axes[0].set_title(f"Training at learning rate {lr_label}")
+    axes[0].legend(fontsize=8)
+    axes[0].grid(alpha=0.3)
+
+    gap = train_acc - val_acc
+    axes[1].bar(["Train", "Validation"], [train_acc, val_acc], color=["#6366f1", "#f59e0b"])
+    axes[1].set_ylim(0, 100)
+    axes[1].set_ylabel("Accuracy %")
+    axes[1].set_title(f"Accuracy gap: {gap:.0f} pts")
+    if gap > 15:
+        axes[1].text(0.5, 0.9, "Overfitting risk", transform=axes[1].transAxes, ha="center", color="#b91c1c")
+    axes[1].grid(axis="y", alpha=0.3)
     fig.tight_layout()
     _show(fig)
-    plot_train_val_gap(train_acc, val_acc)
 
 
 def plot_treatment_ab(
@@ -305,22 +316,27 @@ def plot_treatment_ab(
     _show(fig)
 
 
-def plot_sports_comparison(model_p: float, market_p: float, injury_adj: int) -> None:
-    """Side-by-side model vs market with adjustment band."""
+def plot_sports_comparison(
+    model_p: float,
+    market_p: float,
+    injury_adj: int,
+    *,
+    title: str = "Your estimate vs market",
+) -> None:
+    """Side-by-side model vs market — one clear bar chart."""
     adj = model_p + injury_adj
     fig, ax = plt.subplots(figsize=(7, 3))
-    labels = ["Market", "Your model", "After injury adj."]
+    labels = ["Market", "Your model", "After tweak"]
     vals = [market_p, model_p, adj]
     colors = ["#94a3b8", "#6366f1", "#059669"]
     ax.bar(labels, vals, color=colors)
-    ax.axhline(50, color="#e2e8f0", linestyle=":", lw=1)
-    ax.set_ylim(0, 100)
-    ax.set_ylabel("Win probability (%)")
-    ax.set_title("Your estimate vs market")
+    ax.axhline(market_p, color="#dc2626", linestyle="--", lw=1, alpha=0.6, label="Market line")
+    ax.set_ylim(0, max(100, max(vals) + 5))
+    ax.set_ylabel("Chance (%)")
+    ax.set_title(title)
     ax.grid(axis="y", alpha=0.3)
     fig.tight_layout()
     _show(fig)
-    plot_uncertainty_band(max(5, adj - 8), adj, min(95, adj + 8), adj)
 
 
 def plot_train_val_gap(train_acc: float, val_acc: float) -> None:

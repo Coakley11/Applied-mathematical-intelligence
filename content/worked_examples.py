@@ -22,6 +22,10 @@ def _ex(
     interactive_defaults: dict | None = None,
     math_translation: str = "",
     abstract_structure: dict | None = None,
+    try_this: str = "",
+    takeaway_plain: str = "",
+    chart_note: str = "",
+    scenario: str = "",
 ) -> dict:
     out = {
         "area_id": area_id,
@@ -43,7 +47,39 @@ def _ex(
         out["math_translation"] = math_translation
     if abstract_structure:
         out["abstract_structure"] = abstract_structure
+    if try_this:
+        out["try_this"] = try_this
+    if takeaway_plain:
+        out["takeaway_plain"] = takeaway_plain
+    if chart_note:
+        out["chart_note"] = chart_note
+    if scenario:
+        out["scenario"] = scenario
     return out
+
+
+# Featured examples surface first in each area dropdown (user-testing polish).
+FLAGSHIP_ORDER: dict[str, list[str]] = {
+    "betting": [
+        "I want to bet $200 that Aaron Judge hits 30 home runs. Is it a good bet?",
+    ],
+    "sports": [
+        "What are the Mets' chances to make the playoffs if they're 2 games back with 30 games left?",
+        "How would I estimate the Knicks' chance to win tonight?",
+        "Is an Aaron Judge 30+ home run prop bet reasonable?",
+    ],
+    "medicine": [
+        "Treatment A vs Treatment B: which slows the tumor more under these rates?",
+    ],
+    "ai": [
+        "Why is my training accuracy high but validation accuracy low?",
+        "How does learning rate affect training?",
+    ],
+    "forecasting": [
+        "How does uncertainty grow over time?",
+        "How confident should we be in a weather forecast?",
+    ],
+}
 
 
 WORKED_EXAMPLES: list[dict] = [
@@ -182,6 +218,10 @@ WORKED_EXAMPLES: list[dict] = [
             "needs_estimate": "HR rate, playing time, park factors, injury risk.",
             "structure": "EV = P(win)×profit − P(lose)×stake.",
         },
+        try_this="Set stake and payout, then slide **your chance Judge hits 30+ HR**. If EV stays negative, the bet is −EV at that price.",
+        takeaway_plain="Good bet only if your true chance of 30+ homers is **above break-even** (about 53% at $200 to win $180).",
+        chart_note="Tree: win vs lose paths. Bars: how much each outcome adds to expected value.",
+        scenario="judge_prop",
     ),
     # --- Sports Prediction ---
     _ex(
@@ -206,6 +246,10 @@ WORKED_EXAMPLES: list[dict] = [
         "Prop bets are EV problems dressed as player narratives.",
         "Build P(30+) from rate × playing time; compare to implied odds.",
         {"stake": 200, "profit": 180, "p": 38},
+        try_this="Same as betting: slide **your chance of 30+ HR** and compare to break-even from the payout.",
+        takeaway_plain="Reasonable only if your model’s probability beats the price — not because of the player name.",
+        chart_note="Green path = prop hits; red = misses. Net bar is expected profit per bet.",
+        scenario="judge_prop",
     ),
     _ex(
         "sports", "sports",
@@ -237,6 +281,10 @@ WORKED_EXAMPLES: list[dict] = [
             "needs_estimate": "Per-game win probability over remaining schedule.",
             "structure": "Expected wins vs rivals + uncertainty band.",
         },
+        try_this="Slide **your Mets playoff %** and **market %**. Green edge means your estimate is higher than the market.",
+        takeaway_plain="A bet only makes sense if your playoff chance is meaningfully above the market — not just because they are close in the standings.",
+        chart_note="Bars compare market price, your model, and injury/schedule tweak.",
+        scenario="mets_playoffs",
     ),
     _ex(
         "sports", "sports",
@@ -258,6 +306,10 @@ WORKED_EXAMPLES: list[dict] = [
         "One-game predictions are noisy — wide intervals are honest.",
         "Separate prediction from bet decision; betting needs edge vs. market.",
         {"model": 55, "market": 48, "injury": -3},
+        try_this="Set **Knicks win chance** vs **market odds %**, then tweak injuries. Watch the edge number.",
+        takeaway_plain="You are comparing two probabilities. A few points of edge can matter; 10+ points still needs a reality check.",
+        chart_note="Taller bar after tweaks = your estimate beats the market.",
+        scenario="knicks_game",
     ),
     _ex(
         "sports", "sports",
@@ -340,6 +392,10 @@ WORKED_EXAMPLES: list[dict] = [
         "Lower volume in a model ≠ automatically choose that drug in clinic.",
         "Slide kill rates — see which net rate goes negative first.",
         {"g": 12, "ka": 10, "kb": 14, "weeks": 24},
+        try_this="Slide **kill rates for A and B**. The lower line on the chart is the stronger treatment in this sketch.",
+        takeaway_plain="Whichever treatment pulls **net growth below zero** shrinks the tumor here — real choices also need trial data and side effects.",
+        chart_note="Blue = Treatment A, green = Treatment B, gray dashed = no treatment.",
+        scenario="treatment_ab",
     ),
     _ex(
         "medicine", "medicine",
@@ -445,6 +501,10 @@ WORKED_EXAMPLES: list[dict] = [
         "Memorization looks like learning on training data only.",
         "Treat as overfitting until proven otherwise; simplify or regularize.",
         {"tr": 92, "va": 78},
+        try_this="Match your **train vs validation accuracy**, then try a higher learning rate. A big gap means overfitting risk.",
+        takeaway_plain="High train and lower validation means the model memorized training noise — it may fail on new data.",
+        chart_note="Left: loss over epochs. Right: train vs validation accuracy gap.",
+        scenario="overfitting",
     ),
     _ex(
         "ai", "ai",
@@ -485,7 +545,11 @@ WORKED_EXAMPLES: list[dict] = [
         {"Schedules": "Reduce η when progress stalls (step decay, cosine)."},
         "η is a knob on speed vs. stability.",
         "Tune on validation loss — not training loss alone.",
-        {"tr": 88, "va": 85},
+        {"tr": 88, "va": 85, "lr": "1e-3"},
+        try_this="Pick a **learning rate** and watch the loss curves. Too high = unstable; too low = slow learning.",
+        takeaway_plain="Learning rate controls step size. Tune it using **validation** performance, not training accuracy alone.",
+        chart_note="Training loss should fall smoothly without validation getting worse.",
+        scenario="learning_rate",
     ),
     _ex(
         "ai", "ai",
@@ -631,7 +695,11 @@ WORKED_EXAMPLES: list[dict] = [
         {"Ensembles": "Perturb initial conditions; cloud of outcomes.", "Lorenz": "Sensitive dependence."},
         "Never treat day-7 like day-1 precision.",
         "Report wider bands at longer leads.",
-        {"lead": 7},
+        {"baseline": 72, "trend": 0, "noise": 15, "conf": 90, "lead": 7},
+        try_this="Increase **forecast days ahead** and **noise**. The green cone should widen — that is lost certainty.",
+        takeaway_plain="Farther forecasts should be **less certain**. Use the cone width, not a single number.",
+        chart_note="Green band = plausible range; dashed line = best guess.",
+        scenario="weather_cone",
     ),
     _ex(
         "forecasting", "weather",
@@ -762,11 +830,17 @@ WORKED_EXAMPLES: list[dict] = [
 
 WORKED_BY_QUESTION: dict[str, dict] = {ex["question"]: ex for ex in WORKED_EXAMPLES}
 
+def _sort_area_questions(area_id: str, questions: list[str]) -> list[str]:
+    priority = FLAGSHIP_ORDER.get(area_id, [])
+    ordered = [q for q in priority if q in questions]
+    rest = [q for q in questions if q not in ordered]
+    return ordered + rest
+
+
 AREA_EXAMPLE_QUESTIONS: dict[str, list[str]] = {}
 for _area in ("betting", "sports", "medicine", "ai", "space", "forecasting", "abstract"):
-    AREA_EXAMPLE_QUESTIONS[_area] = [
-        ex["question"] for ex in WORKED_EXAMPLES if ex["area_id"] == _area
-    ] + [CUSTOM_SUFFIX]
+    _qs = [ex["question"] for ex in WORKED_EXAMPLES if ex["area_id"] == _area]
+    AREA_EXAMPLE_QUESTIONS[_area] = _sort_area_questions(_area, _qs) + [CUSTOM_SUFFIX]
 
 
 def get_worked_example(question: str, area_id: str) -> dict | None:
