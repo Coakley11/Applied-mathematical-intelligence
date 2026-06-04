@@ -329,13 +329,3 @@ def _render_demo_panels(mode_id: str, domain: str) -> None:
         "I want to know if this sports bet is worth making.", mode_id
     )
     _render_visual_panel(mode_id, demo_walk)
-
-
-def render_thinking_quick_cards() -> None:
-    """Compact six-lens preview for the topic library tab."""
-    cols = st.columns(3)
-    for i, mode in enumerate(WORKSHOP_MODES):
-        with cols[i % 3]:
-            with st.container(border=True):
-                st.markdown(f"**{mode['icon']} {mode['name']}**")
-                st.caption(mode["tagline"])
