@@ -38,9 +38,9 @@ def tumor_growth():
 
 def epidemic_sir():
     population = 1_000_000
-    beta = st.slider("Transmission rate β", 0.1, 1.2, 0.45)
-    gamma = st.slider("Recovery rate γ", 0.05, 0.5, 0.12)
-    days = st.slider("Days", 30, 200, 120)
+    beta = st.slider("Transmission rate β", 0.1, 1.2, 0.45, key="sir_beta")
+    gamma = st.slider("Recovery rate γ", 0.05, 0.5, 0.12, key="sir_gamma")
+    days = st.slider("Days", 30, 200, 120, key="sir_days")
     s, i, r = population - 1000, 1000, 0
     s_hist, i_hist, r_hist = [s], [i], [r]
     for _ in range(days):

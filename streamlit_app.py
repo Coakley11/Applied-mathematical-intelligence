@@ -19,6 +19,8 @@ from content.practical_labs import (
 from content.platform_meta import VERSION
 from simulations.registry import run_simulation
 from suite_branding import PAGE_ICON
+import portfolio_polish as pp
+import portfolio_demo as pdemo
 
 st.set_page_config(
     page_title="Applied Mathematical Intelligence",
@@ -35,6 +37,7 @@ except Exception:
     pass
 
 inject_platform_styles()
+pp.inject_polish_css(st, app_slug="applied-math")
 
 PRIMARY_NAV = ["Home"] + PRIMARY_ACTIONS + ["Advanced reference"]
 
@@ -51,6 +54,8 @@ try:
     render_command_center_sidebar_link(st)
 except Exception:
     pass
+
+pp.render_sidebar_toggle(st)
 
 st.sidebar.title("Applied Mathematical Intelligence")
 st.sidebar.caption(f"Applied Mathematical Intelligence · v{VERSION}")
@@ -71,13 +76,14 @@ view_mode = st.sidebar.radio(
 st.session_state.view_mode = view_mode
 
 help_text = NAV_HELP.get(view_mode, "")
-if help_text:
+if help_text and not pp.is_screenshot_mode(st):
     st.sidebar.markdown(
         f"<p style='font-size:0.82rem;color:#64748b;margin:-0.25rem 0 1rem 0;'>{help_text}</p>",
         unsafe_allow_html=True,
     )
 
-st.sidebar.caption("Items at the bottom of the list are optional reading.")
+if not pp.is_screenshot_mode(st) and not pp.is_demo_mode(st):
+    st.sidebar.caption("Items at the bottom of the list are optional reading.")
 
 ref_lens = "Statistics / Pattern Detection"
 ref_depth = "Professional Overview"
