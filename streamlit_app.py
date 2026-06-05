@@ -45,6 +45,13 @@ if "view_mode" not in st.session_state:
 # SIDEBAR
 # =====================================================
 
+try:
+    from suite_command_center_link import render_command_center_sidebar_link
+
+    render_command_center_sidebar_link(st)
+except Exception:
+    pass
+
 st.sidebar.title("Applied Mathematical Intelligence")
 st.sidebar.caption(f"Applied Mathematical Intelligence · v{VERSION}")
 
