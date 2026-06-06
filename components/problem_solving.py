@@ -58,6 +58,53 @@ def _render_area_hub() -> None:
     st.markdown("#### Choose a real-world area")
     st.caption("Pick where your question lives — then ask something specific and quantitative.")
 
+    preloaded = str(st.session_state.get("ps_library_problem") or "").strip()
+    if preloaded and st.session_state.get("_suite_ai_question"):
+        source = str(st.session_state.get("_suite_ai_source_app") or "").strip()
+        source_page = str(st.session_state.get("_suite_ai_source_page") or "").strip()
+        ctx_raw = str(st.session_state.get("_suite_ai_context") or "").strip()
+        st.markdown("#### Applied Math question (from suite app)")
+        st.markdown(f"**{preloaded}**")
+        banner = f"From **{source or 'suite app'}**"
+        if source_page:
+            banner += f" · {source_page}"
+        st.caption(banner)
+        if ctx_raw:
+            try:
+                import json
+
+                parsed = json.loads(ctx_raw)
+                if isinstance(parsed, dict):
+                    try:
+                        from suite_analytical_question import format_context_lines
+
+                        lines = format_context_lines(parsed)
+                    except Exception:
+                        lines = [f"{k}: {v}" for k, v in parsed.items() if v][:8]
+                    if lines:
+                        st.markdown("**Context**")
+                        for line in lines:
+                            st.markdown(f"- {line}")
+                else:
+                    st.caption(ctx_raw[:400])
+            except Exception:
+                if ctx_raw.startswith("Question:") or ctx_raw.startswith("Context:"):
+                    st.markdown(ctx_raw.replace(" · ", "\n\n"))
+                else:
+                    st.caption(ctx_raw[:400])
+        area_ids = [a["id"] for a in QUANT_AREAS]
+        area_id = str(st.session_state.get("ps_area_id") or area_ids[0])
+        if area_id not in area_ids:
+            area_id = area_ids[0]
+        area = QUANT_AREA_BY_ID[area_id]
+        pattern_id = area["pattern_id"]
+        pattern = _match_pattern(preloaded, pattern_id)
+        slug = hashlib.md5(preloaded.encode("utf-8")).hexdigest()[:10]
+        key_prefix = f"ps_{area['id']}_{slug}"
+        st.markdown("---")
+        render_quantitative_flow(preloaded, pattern, pattern_id, area, key_prefix)
+        return
+
     area_ids = [a["id"] for a in QUANT_AREAS]
     default_id = st.session_state.get("ps_area_id", area_ids[0])
     if default_id not in area_ids:
