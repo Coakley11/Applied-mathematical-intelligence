@@ -352,7 +352,7 @@ class TestResolveSuiteSolver(unittest.TestCase):
                 context={"player": "Test", "metrics": ["HR"]},
             )
             self.assertTrue(result.partial)
-            self.assertIn("Fallback", result.result)
+            self.assertTrue(result.computed.get("fallback") or "Partial" in (result.result or ""))
         finally:
             solvers_mod.dispatch_solver = real_dispatch
 

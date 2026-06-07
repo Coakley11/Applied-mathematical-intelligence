@@ -32,7 +32,91 @@ def _match_pattern(text: str, area_pattern_id: str) -> dict:
     return result
 
 
+def _load_suite_context() -> tuple[str, str, str, dict]:
+    preloaded = str(st.session_state.get("ps_library_problem") or "").strip()
+    source = str(st.session_state.get("_suite_ai_source_app") or "").strip()
+    source_page = str(st.session_state.get("_suite_ai_source_page") or "").strip()
+    ctx_raw = str(st.session_state.get("_suite_ai_context") or "").strip()
+    ctx_dict: dict = {}
+    if ctx_raw:
+        try:
+            parsed = json.loads(ctx_raw)
+            if isinstance(parsed, dict):
+                ctx_dict = parsed
+        except Exception:
+            pass
+    if not ctx_dict:
+        qid = str(st.session_state.get("_suite_ai_question_id") or "").strip()
+        if qid:
+            try:
+                from suite_analytical_question import load_analytical_question_context
+
+                ctx_dict = load_analytical_question_context(qid)
+                if ctx_dict:
+                    st.session_state["_suite_ai_context"] = json.dumps(ctx_dict, ensure_ascii=False)
+            except Exception:
+                pass
+    if not source:
+        raw = str(ctx_dict.get("source_app") or "").strip().lower()
+        if "baseball" in raw:
+            source = "baseball"
+        elif "nba" in raw:
+            source = "nba"
+        elif "investment" in raw:
+            source = "investment"
+    return preloaded, source, source_page, ctx_dict
+
+
+def _render_suite_question_view() -> None:
+    """Suite-only path: solver answer first — no tabs, no generic quantitative flow."""
+    preloaded, source, source_page, ctx_dict = _load_suite_context()
+    if not preloaded:
+        st.warning("Suite question loaded but text is empty.")
+        return
+
+    try:
+        from suite_analytical_question import source_app_label
+
+        src_label = source_app_label(source) if source else ""
+    except Exception:
+        src_label = source or ""
+
+    if src_label or source_page:
+        st.caption(
+            f"From **{src_label or 'suite app'}**"
+            + (f" · {source_page}" if source_page else "")
+        )
+
+    try:
+        from components.applied_math_context_diagnostics import render_applied_math_context_diagnostics
+
+        render_applied_math_context_diagnostics(
+            st,
+            question=preloaded,
+            question_id=str(st.session_state.get("_suite_ai_question_id") or "").strip(),
+            source_app=source,
+            source_page=source_page,
+            context=ctx_dict,
+        )
+    except Exception:
+        pass
+
+    from components.applied_math_solver_ui import render_suite_solver_answer
+
+    render_suite_solver_answer(
+        st,
+        question=preloaded,
+        source_app=source,
+        source_page=source_page,
+        context=ctx_dict,
+    )
+
+
 def render_problem_solving_lab() -> None:
+    if st.session_state.get("_suite_ai_question"):
+        _render_suite_question_view()
+        return
+
     render_section_header(
         PROBLEM_SOLVING_LAB["icon"],
         PROBLEM_SOLVING_LAB["action"],
@@ -58,69 +142,6 @@ def render_problem_solving_lab() -> None:
 def _render_area_hub() -> None:
     st.markdown("#### Choose a real-world area")
     st.caption("Pick where your question lives — then ask something specific and quantitative.")
-
-    preloaded = str(st.session_state.get("ps_library_problem") or "").strip()
-    if preloaded and st.session_state.get("_suite_ai_question"):
-        source = str(st.session_state.get("_suite_ai_source_app") or "").strip()
-        source_page = str(st.session_state.get("_suite_ai_source_page") or "").strip()
-        ctx_raw = str(st.session_state.get("_suite_ai_context") or "").strip()
-        ctx_dict: dict = {}
-        if ctx_raw:
-            try:
-                parsed = json.loads(ctx_raw)
-                if isinstance(parsed, dict):
-                    ctx_dict = parsed
-            except Exception:
-                pass
-        if not ctx_dict:
-            qid = str(st.session_state.get("_suite_ai_question_id") or "").strip()
-            if qid:
-                try:
-                    from suite_analytical_question import load_analytical_question_context
-
-                    ctx_dict = load_analytical_question_context(qid)
-                    if ctx_dict:
-                        st.session_state["_suite_ai_context"] = json.dumps(ctx_dict, ensure_ascii=False)
-                except Exception:
-                    pass
-
-        st.markdown("#### Applied Math question")
-        st.markdown(f"**{preloaded}**")
-        try:
-            from suite_analytical_question import source_app_label
-
-            src_label = source_app_label(source) if source else ""
-        except Exception:
-            src_label = source or ""
-        if src_label or source_page:
-            st.caption(
-                f"From **{src_label or 'suite app'}**"
-                + (f" · {source_page}" if source_page else "")
-            )
-
-        try:
-            from components.applied_math_context_diagnostics import render_applied_math_context_diagnostics
-
-            render_applied_math_context_diagnostics(
-                st,
-                question=preloaded,
-                question_id=str(st.session_state.get("_suite_ai_question_id") or "").strip(),
-                source_app=source,
-                source_page=source_page,
-                context=ctx_dict,
-            )
-        except Exception:
-            pass
-
-        from components.applied_math_solver_ui import render_suite_solver_answer
-
-        render_suite_solver_answer(
-            st,
-            question=preloaded,
-            source_app=source,
-            context=ctx_dict,
-        )
-        return
 
     area_ids = [a["id"] for a in QUANT_AREAS]
     default_id = st.session_state.get("ps_area_id", area_ids[0])

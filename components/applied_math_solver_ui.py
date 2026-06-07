@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from components.applied_math_problem_router import (
@@ -12,7 +13,24 @@ from components.applied_math_problem_router import (
     ProblemRoute,
     route_suite_question,
 )
+from components.applied_math_solver_trace import SolverRunTrace
 from components.applied_math_solvers import SolverResult, _route_confidence_pct, solve_suite_question
+
+
+def render_applied_math_build_sidebar(st: Any) -> None:
+    """Developer Mode: confirm deployed solver build."""
+    try:
+        from components.applied_math_context_diagnostics import applied_math_developer_mode_enabled
+        from applied_math_build_info import build_info_lines
+
+        if not applied_math_developer_mode_enabled(st):
+            return
+        st.sidebar.markdown("---")
+        st.sidebar.markdown("**Applied Math Solver Build**")
+        for line in build_info_lines():
+            st.sidebar.caption(line)
+    except Exception:
+        pass
 
 
 def _fallback_solver_result(
@@ -22,13 +40,16 @@ def _fallback_solver_result(
     *,
     error: Exception | None = None,
 ) -> tuple[ProblemRoute, SolverResult]:
-    """Safe fallback when routing/dispatch fails — never raises."""
+    """Safe fallback when routing/dispatch fails — still answer-first."""
     route = route_suite_question(question, source_app=source_app, context=ctx)
+    missing = list(route.missing_fields)
+    model_note = "The closest model we can use is a threshold/decision problem once numeric context is attached."
     answer = ""
     assumptions: list[str] = []
-    missing: list[str] = list(route.missing_fields)
     problem = route.problem_type
-    calc = "Framework analysis"
+    calc = "Partial — missing inputs for a full calculation."
+    reasons: list[str] = []
+
     try:
         from components.applied_math_first_pass_analysis import analyze_suite_question
 
@@ -37,30 +58,49 @@ def _fallback_solver_result(
         assumptions = list(fp.assumptions)
         missing = list(fp.data_needed) or missing
         problem = fp.problem_type
-        calc = fp.method
+        calc = fp.method or calc
+        if missing:
+            reasons = [f"Missing **{missing[0]}** — cannot compute a firm verdict yet."]
     except Exception:
         answer = "We can model this once numeric context is attached from the source app."
+        reasons = ["Solver dispatch failed and first-pass analysis could not run."]
 
     if error is not None:
-        answer = f"{answer} (Solver unavailable: {error})".strip()
+        reasons.append(f"Error: {type(error).__name__}: {error}")
+
+    if not reasons and missing:
+        reasons = [f"Missing **{', '.join(missing[:3])}** from the source app."]
+
+    conf = max(25, _route_confidence_pct(route, True, len(missing)) - 10)
+    data_improve = [f"**{m}**" for m in missing[:4]] or [
+        "Return to the source app and re-send with the page loaded (filters/selections applied)."
+    ]
 
     return route, SolverResult(
         question=question.strip(),
         problem_type=problem,
-        math_idea="Define the measurable quantity, baseline, and decision threshold.",
+        math_idea=model_note,
         variables="variable · baseline · threshold",
         data_used=[f"Source: **{route.source_app}**"],
         calculation=calc,
-        result="Fallback analysis — solver could not run",
+        result="Partial — uncertain",
         interpretation=answer,
         assumptions=assumptions or ["Context from the source app reflects the user's current view."],
-        sensitivity_notes="Enable Developer Mode to inspect the full context payload.",
+        sensitivity_notes="Re-send from the source app after the relevant page has loaded fully.",
         missing_fields=missing,
         partial=True,
         problem_type_id=route.problem_type_id,
-        conclusion="Best estimate unavailable — solver fallback",
-        confidence_pct=_route_confidence_pct(route, True, len(missing)),
-        data_would_improve=[f"**{m}**" for m in missing[:4]],
+        conclusion="Partial / uncertain",
+        confidence_pct=conf,
+        confidence_label="Low",
+        reasons=reasons[:4],
+        model_note=model_note,
+        data_would_improve=data_improve,
+        pivot_assumption=(
+            f"Adding **{missing[0]}** would change this from uncertain to a quantitative verdict."
+            if missing
+            else ""
+        ),
     )
 
 
@@ -144,7 +184,7 @@ def _seed_control_defaults(st: Any, route: ProblemRoute, defaults: dict[str, Any
 
 def _render_controls(st: Any, route: ProblemRoute) -> None:
     pid = route.problem_type_id
-    st.markdown("**Try changing assumptions**")
+    st.markdown("**Assumptions (adjust and watch the conclusion update)**")
 
     if pid == NBA_STAT_CHASE:
         st.number_input("Games remaining", min_value=1, max_value=20, key=_control_key(pid, "games"))
@@ -210,20 +250,18 @@ def _render_controls(st: Any, route: ProblemRoute) -> None:
         st.caption("No assumption controls for this problem type yet.")
 
 
-def render_solver_sections(
-    st: Any,
-    route: ProblemRoute,
-    result: SolverResult,
-    *,
-    question: str = "",
-) -> None:
-    st.markdown("### Applied Math answer")
-    q = (question or result.question or "").strip()
-    if q:
-        st.markdown(f"**Question**  \n{q}")
-    st.caption(f"Problem type: **{result.problem_type or route.problem_type}**")
+def render_conclusion_headline(st: Any, result: SolverResult, *, route: ProblemRoute | None = None) -> bool:
+    """First visible block — returns False if conclusion engine did not populate."""
+    headline = (result.conclusion or "").strip()
+    if not headline:
+        headline = (result.result or "").strip()
+    if not headline or headline.lower().startswith("framework"):
+        st.error(
+            "**Solver path did not produce a conclusion.** "
+            "Enable Developer Mode → Solver diagnostics to inspect routing and context."
+        )
+        return False
 
-    headline = (result.conclusion or result.result or "No conclusion").strip()
     st.success(f"**Best conclusion:** {headline}")
 
     if result.confidence_pct is not None:
@@ -232,58 +270,91 @@ def render_solver_sections(
         st.markdown(f"**Confidence:** {result.confidence_pct}%{label_txt}")
 
     if result.reasons:
-        st.markdown("**Main reason**")
-        for line in result.reasons[:4]:
-            st.markdown(f"- {line}")
+        primary = result.reasons[0]
+        st.markdown(f"**Main reason:** {primary}")
+        if len(result.reasons) > 1:
+            with st.expander("Additional reasons", expanded=False):
+                for line in result.reasons[1:4]:
+                    st.markdown(f"- {line}")
+    elif result.interpretation:
+        first = result.interpretation.split(".")[0].strip()
+        if first:
+            st.markdown(f"**Main reason:** {first}.")
+
+    if route is not None:
+        st.caption(
+            f"Solver `{route.problem_type_id}` · router confidence {route.confidence:.0%}"
+            + (" · partial data" if result.partial else "")
+        )
+    return True
+
+
+def render_solver_sections(
+    st: Any,
+    route: ProblemRoute,
+    result: SolverResult,
+    *,
+    question: str = "",
+) -> None:
+    render_conclusion_headline(st, result, route=route)
 
     if result.pivot_assumption:
         st.info(f"**What assumption matters most?** {result.pivot_assumption}")
 
-    if result.model_note:
-        st.caption(result.model_note)
-
     if result.partial and result.data_would_improve:
-        st.markdown(f"**Current confidence: {result.confidence_pct or 'low'}%. Adding this would help:**")
+        st.markdown("**What would improve this answer:**")
         for item in result.data_would_improve[:4]:
             st.markdown(f"- {item}")
-    elif result.partial and result.missing_fields:
-        st.info(
-            "Partial analysis — missing: "
-            + ", ".join(result.missing_fields)
-            + ". Adjust assumptions below or return to the source app."
-        )
 
-    with st.expander("Math, sensitivity notes, and details", expanded=False):
+    if result.calculation:
+        st.markdown("**Calculation**")
+        st.markdown(result.calculation)
+
+    if result.assumptions:
+        st.markdown("**Assumptions**")
+        for a in result.assumptions:
+            st.markdown(f"- {a}")
+
+    if result.sensitivity_rows:
+        st.markdown("**Sensitivity**")
+        try:
+            import pandas as pd
+
+            st.dataframe(
+                pd.DataFrame(result.sensitivity_rows),
+                hide_index=True,
+                use_container_width=True,
+            )
+        except Exception:
+            for row in result.sensitivity_rows:
+                st.markdown(
+                    f"- **{row.get('Parameter', '')}** · {row.get('Scenario', '')} → {row.get('Outcome', '')}"
+                )
+    elif result.sensitivity_notes:
+        st.markdown("**What changes the answer?**")
+        st.markdown(result.sensitivity_notes)
+
+    q = (question or result.question or "").strip()
+    with st.expander("Question, data, and math details", expanded=False):
+        if q:
+            st.markdown(f"**Question:** {q}")
+        st.caption(f"Problem type: **{result.problem_type or route.problem_type}** (`{route.problem_type_id}`)")
+        if result.model_note:
+            st.markdown(result.model_note)
         if result.math_idea:
-            st.markdown(f"**Mathematical idea**  \n{result.math_idea}")
-
+            st.markdown(f"**Mathematical idea:** {result.math_idea}")
         if result.variables:
             st.markdown("**Variables**")
             st.markdown(f"```\n{result.variables.strip()}\n```")
-
         st.markdown("**Data used**")
         if result.data_used:
             for line in result.data_used[:5]:
                 st.markdown(f"- {line}")
         else:
             st.markdown("- No numeric inputs attached yet.")
-
-        if result.calculation:
-            st.markdown("**Calculation**")
-            st.markdown(result.calculation)
-
         if result.interpretation:
             st.markdown("**Full interpretation**")
             st.markdown(result.interpretation)
-
-        if result.assumptions:
-            st.markdown("**Assumptions**")
-            for a in result.assumptions:
-                st.markdown(f"- {a}")
-
-        if result.sensitivity_notes:
-            st.markdown("**What changes the answer (notes)**")
-            st.markdown(result.sensitivity_notes)
 
 
 def render_solver_dev_diagnostics(
@@ -291,21 +362,83 @@ def render_solver_dev_diagnostics(
     *,
     route: ProblemRoute,
     result: SolverResult,
+    trace: SolverRunTrace | None = None,
+    context: dict[str, Any] | None = None,
 ) -> None:
     try:
         from components.applied_math_context_diagnostics import applied_math_developer_mode_enabled
+        from applied_math_build_info import build_info_lines
     except Exception:
         return
     if not applied_math_developer_mode_enabled(st):
         return
-    with st.expander("Solver diagnostics (Developer Mode)", expanded=False):
-        st.markdown(f"- **Route:** `{route.problem_type_id}` · confidence {route.confidence:.0%}")
-        st.markdown(f"- **Solver:** `{result.problem_type_id}`")
-        st.markdown(f"- **Partial:** {result.partial}")
+
+    ctx = dict(context or {})
+    with st.expander("Solver diagnostics (Developer Mode)", expanded=True):
+        st.markdown("**Applied Math Solver Build**")
+        for line in build_info_lines():
+            st.markdown(f"- {line}")
+
+        if trace is not None:
+            st.markdown("**Run trace**")
+            for key, val in trace.to_dict().items():
+                if isinstance(val, list):
+                    st.markdown(f"- **{key}:** {', '.join(str(v) for v in val) if val else '—'}")
+                else:
+                    st.markdown(f"- **{key}:** `{val}`")
+
+        st.markdown("**Router / solver**")
+        st.markdown(f"- **problem_type_id:** `{route.problem_type_id}`")
+        st.markdown(f"- **problem_type:** {route.problem_type}")
+        st.markdown(f"- **router confidence:** {route.confidence:.0%}")
+        st.markdown(f"- **solver_id:** `{result.problem_type_id}`")
+        st.markdown(f"- **partial:** {result.partial}")
+        st.markdown(f"- **conclusion:** {result.conclusion or result.result or '—'}")
+        st.markdown(f"- **confidence_pct:** {result.confidence_pct}")
+        st.markdown(f"- **reasons_count:** {len(result.reasons)}")
+
         if route.available_fields:
-            st.markdown(f"- **Fields used:** {', '.join(route.available_fields[:12])}")
+            st.markdown(f"- **fields available:** {', '.join(route.available_fields)}")
         if route.missing_fields:
-            st.markdown(f"- **Fields missing:** {', '.join(route.missing_fields)}")
+            st.markdown(f"- **fields missing:** {', '.join(route.missing_fields)}")
+        if ctx:
+            st.markdown(f"- **context keys received:** {', '.join(sorted(ctx.keys())[:24])}")
+
+        with st.expander("Raw context JSON", expanded=False):
+            st.code(json.dumps(ctx, indent=2, ensure_ascii=False, default=str)[:12000])
+
+
+def _build_trace(
+    *,
+    route: ProblemRoute,
+    result: SolverResult,
+    question: str,
+    source_app: str,
+    source_page: str,
+    context: dict[str, Any],
+    used_fallback: bool,
+    fallback_error: str = "",
+) -> SolverRunTrace:
+    return SolverRunTrace(
+        renderer_path="render_suite_solver_answer",
+        used_fallback=used_fallback,
+        fallback_error=fallback_error,
+        generic_flow_rendered=False,
+        source_app=source_app,
+        source_page=source_page,
+        question=question,
+        problem_type_id=route.problem_type_id,
+        problem_type=route.problem_type,
+        router_confidence=route.confidence,
+        solver_id=result.problem_type_id,
+        fields_available=list(route.available_fields),
+        fields_missing=list(route.missing_fields),
+        context_keys=sorted(context.keys()),
+        conclusion=result.conclusion or result.result or "",
+        confidence_pct=result.confidence_pct,
+        reasons_count=len(result.reasons),
+        partial=result.partial,
+    )
 
 
 def render_suite_solver_answer(
@@ -313,10 +446,13 @@ def render_suite_solver_answer(
     *,
     question: str,
     source_app: str,
+    source_page: str = "",
     context: dict[str, Any],
-) -> None:
+) -> SolverRunTrace:
     """Route, solve, render interactive Applied Math answer for suite questions."""
     ctx = dict(context or {})
+    used_fallback = False
+    fallback_error = ""
     try:
         route, seed_result = resolve_suite_solver(question, source_app=source_app, context=ctx)
         params = _seed_control_defaults(st, route, seed_result.default_controls)
@@ -326,30 +462,26 @@ def render_suite_solver_answer(
             context=ctx,
             params=params,
         )
-        render_solver_sections(st, route, result, question=question)
-        _render_controls(st, route)
-        if result.sensitivity_rows:
-            st.markdown("**Sensitivity table**")
-            try:
-                import pandas as pd
-
-                st.dataframe(
-                    pd.DataFrame(result.sensitivity_rows),
-                    hide_index=True,
-                    use_container_width=True,
-                )
-            except Exception:
-                for row in result.sensitivity_rows:
-                    st.markdown(
-                        f"- **{row.get('Parameter', '')}** · {row.get('Scenario', '')} → {row.get('Outcome', '')}"
-                    )
-        elif result.sensitivity_notes:
-            st.markdown("**What changes the answer?**")
-            st.markdown(result.sensitivity_notes)
-        else:
-            st.caption("_Adjust the assumptions above to stress-test the conclusion._")
-        render_solver_dev_diagnostics(st, route=route, result=result)
+        used_fallback = bool(result.computed.get("fallback"))
     except Exception as exc:
+        used_fallback = True
+        fallback_error = f"{type(exc).__name__}: {exc}"
         route, result = _fallback_solver_result(question, source_app, ctx, error=exc)
         st.warning("Showing fallback analysis — the solver hit an unexpected error.")
-        render_solver_sections(st, route, result, question=question)
+
+    trace = _build_trace(
+        route=route,
+        result=result,
+        question=question,
+        source_app=source_app,
+        source_page=source_page,
+        context=ctx,
+        used_fallback=used_fallback,
+        fallback_error=fallback_error,
+    )
+    st.session_state["_ami_last_solver_trace"] = trace.to_dict()
+
+    render_solver_sections(st, route, result, question=question)
+    _render_controls(st, route)
+    render_solver_dev_diagnostics(st, route=route, result=result, trace=trace, context=ctx)
+    return trace

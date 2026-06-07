@@ -490,9 +490,11 @@ def analyze_suite_question(
             answer=" ".join(
                 x
                 for x in (
+                    result.conclusion,
+                    " ".join(result.reasons),
+                    result.interpretation,
                     result.calculation,
                     result.result,
-                    result.interpretation,
                 )
                 if x
             ).strip(),

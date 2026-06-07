@@ -82,8 +82,10 @@ pp.render_sidebar_toggle(st)
 
 try:
     from components.applied_math_context_diagnostics import render_developer_mode_sidebar_toggle
+    from components.applied_math_solver_ui import render_applied_math_build_sidebar
 
     render_developer_mode_sidebar_toggle(st)
+    render_applied_math_build_sidebar(st)
 except Exception:
     pass
 
