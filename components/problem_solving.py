@@ -106,6 +106,20 @@ def _render_area_hub() -> None:
             for line in ctx_lines:
                 st.markdown(f"- {line}")
 
+        try:
+            from components.applied_math_context_diagnostics import render_applied_math_context_diagnostics
+
+            render_applied_math_context_diagnostics(
+                st,
+                question=preloaded,
+                question_id=str(st.session_state.get("_suite_ai_question_id") or "").strip(),
+                source_app=source,
+                source_page=source_page,
+                context=ctx_dict,
+            )
+        except Exception:
+            pass
+
         from components.applied_math_analysis_scaffold import render_applied_math_analysis_scaffold
         from components.applied_math_first_pass_analysis import analyze_suite_question, render_first_pass_analysis
 
