@@ -101,6 +101,7 @@ def _fallback_solver_result(
             if missing
             else ""
         ),
+        computed={"fallback": True},
     )
 
 
@@ -184,7 +185,7 @@ def _seed_control_defaults(st: Any, route: ProblemRoute, defaults: dict[str, Any
 
 def _render_controls(st: Any, route: ProblemRoute) -> None:
     pid = route.problem_type_id
-    st.markdown("**Assumptions (adjust and watch the conclusion update)**")
+    st.markdown("**Try changing assumptions**")
 
     if pid == NBA_STAT_CHASE:
         st.number_input("Games remaining", min_value=1, max_value=20, key=_control_key(pid, "games"))
@@ -250,42 +251,41 @@ def _render_controls(st: Any, route: ProblemRoute) -> None:
         st.caption("No assumption controls for this problem type yet.")
 
 
-def render_conclusion_headline(st: Any, result: SolverResult, *, route: ProblemRoute | None = None) -> bool:
-    """First visible block — returns False if conclusion engine did not populate."""
+def render_conclusion_headline(st: Any, result: SolverResult) -> bool:
+    """Answer-first block — plain English, no internal solver labels."""
     headline = (result.conclusion or "").strip()
     if not headline:
         headline = (result.result or "").strip()
     if not headline or headline.lower().startswith("framework"):
         st.error(
-            "**Solver path did not produce a conclusion.** "
-            "Enable Developer Mode → Solver diagnostics to inspect routing and context."
+            "We could not produce a clear conclusion for this question. "
+            "Enable Developer Mode to inspect routing and context."
         )
         return False
 
-    st.success(f"**Best conclusion:** {headline}")
+    with st.container(border=True):
+        st.markdown(f"**Best conclusion:** {headline}")
 
-    if result.confidence_pct is not None:
-        label = result.confidence_label or ""
-        label_txt = f" ({label})" if label else ""
-        st.markdown(f"**Confidence:** {result.confidence_pct}%{label_txt}")
+        if result.confidence_pct is not None:
+            label = result.confidence_label or ""
+            label_txt = f" ({label})" if label else ""
+            st.markdown(f"**Confidence:** {result.confidence_pct}%{label_txt}")
 
-    if result.reasons:
-        primary = result.reasons[0]
-        st.markdown(f"**Main reason:** {primary}")
-        if len(result.reasons) > 1:
-            with st.expander("Additional reasons", expanded=False):
-                for line in result.reasons[1:4]:
-                    st.markdown(f"- {line}")
-    elif result.interpretation:
-        first = result.interpretation.split(".")[0].strip()
-        if first:
-            st.markdown(f"**Main reason:** {first}.")
+        if result.reasons:
+            st.markdown(f"**Main reason:** {result.reasons[0]}")
+        elif result.interpretation:
+            first = result.interpretation.split(".")[0].strip()
+            if first:
+                st.markdown(f"**Main reason:** {first}.")
 
-    if route is not None:
-        st.caption(
-            f"Solver `{route.problem_type_id}` · router confidence {route.confidence:.0%}"
-            + (" · partial data" if result.partial else "")
-        )
+        if result.pivot_assumption:
+            st.markdown(f"**What assumption matters most?** {result.pivot_assumption}")
+
+        if result.partial and result.data_would_improve:
+            st.markdown("**What would improve this answer:**")
+            for item in result.data_would_improve[:3]:
+                st.markdown(f"- {item}")
+
     return True
 
 
@@ -296,19 +296,27 @@ def render_solver_sections(
     *,
     question: str = "",
 ) -> None:
-    render_conclusion_headline(st, result, route=route)
+    if not render_conclusion_headline(st, result):
+        return
 
-    if result.pivot_assumption:
-        st.info(f"**What assumption matters most?** {result.pivot_assumption}")
+    st.markdown("---")
+    st.markdown("#### Supporting math")
 
-    if result.partial and result.data_would_improve:
-        st.markdown("**What would improve this answer:**")
-        for item in result.data_would_improve[:4]:
-            st.markdown(f"- {item}")
+    if result.math_idea:
+        st.markdown("**Mathematical method**")
+        st.markdown(result.math_idea)
+
+    if result.variables:
+        st.markdown("**Variables**")
+        st.markdown(f"```\n{result.variables.strip()}\n```")
 
     if result.calculation:
         st.markdown("**Calculation**")
         st.markdown(result.calculation)
+
+    if result.interpretation:
+        st.markdown("**Interpretation**")
+        st.markdown(result.interpretation)
 
     if result.assumptions:
         st.markdown("**Assumptions**")
@@ -333,28 +341,6 @@ def render_solver_sections(
     elif result.sensitivity_notes:
         st.markdown("**What changes the answer?**")
         st.markdown(result.sensitivity_notes)
-
-    q = (question or result.question or "").strip()
-    with st.expander("Question, data, and math details", expanded=False):
-        if q:
-            st.markdown(f"**Question:** {q}")
-        st.caption(f"Problem type: **{result.problem_type or route.problem_type}** (`{route.problem_type_id}`)")
-        if result.model_note:
-            st.markdown(result.model_note)
-        if result.math_idea:
-            st.markdown(f"**Mathematical idea:** {result.math_idea}")
-        if result.variables:
-            st.markdown("**Variables**")
-            st.markdown(f"```\n{result.variables.strip()}\n```")
-        st.markdown("**Data used**")
-        if result.data_used:
-            for line in result.data_used[:5]:
-                st.markdown(f"- {line}")
-        else:
-            st.markdown("- No numeric inputs attached yet.")
-        if result.interpretation:
-            st.markdown("**Full interpretation**")
-            st.markdown(result.interpretation)
 
 
 def render_solver_dev_diagnostics(
@@ -403,6 +389,11 @@ def render_solver_dev_diagnostics(
             st.markdown(f"- **fields missing:** {', '.join(route.missing_fields)}")
         if ctx:
             st.markdown(f"- **context keys received:** {', '.join(sorted(ctx.keys())[:24])}")
+
+        st.markdown("**Data used (solver)**")
+        if result.data_used:
+            for line in result.data_used[:8]:
+                st.markdown(f"- {line}")
 
         with st.expander("Raw context JSON", expanded=False):
             st.code(json.dumps(ctx, indent=2, ensure_ascii=False, default=str)[:12000])

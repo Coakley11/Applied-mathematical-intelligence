@@ -342,11 +342,20 @@ def solve_nba_stat_chase(
     model_note = "We can model this as a rate-needed chase — gap ÷ games remaining vs recent production."
 
     if required_rate is not None and exp_rate is not None:
-        conclusion = _verdict_to_conclusion(verdict)
+        cushion = exp_rate - required_rate
+        if exp_rate >= required_rate * 1.05:
+            conclusion = f"Likely yes — {player} is on pace to pass {target_name} in {stat}."
+        elif exp_rate >= required_rate * 0.85:
+            conclusion = f"Uncertain — {player} is close to the pace needed to pass {target_name} in {stat}."
+        else:
+            conclusion = f"Unlikely — {player} would need an unsustainable {stat} pace to pass {target_name}."
         reasons = [
-            f"He needs **{required_rate:.1f}** {stat}/game over **{games}** remaining games.",
-            f"Recent pace is **{exp_rate:.1f}** {stat}/game (cushion **{exp_rate - required_rate:+.1f}**).",
+            f"He needs **{required_rate:.1f}** {stat}/game over **{games}** remaining games and is averaging **{exp_rate:.1f}**."
         ]
+        if abs(cushion) >= 0.1:
+            reasons.append(
+                f"That is a **{cushion:+.1f}** {stat}/game cushion vs the required pace."
+            )
         conf_pct = _nba_pass_confidence(required_rate, exp_rate)
         if games is not None and games <= 5:
             pivot = (
@@ -522,19 +531,39 @@ def solve_baseball_trend(
         "**Slope threshold** filters gradual vs sharp trends."
     )
 
-    conclusion = _verdict_to_conclusion(result)
+    conclusion = "Insufficient data to answer"
     reasons: list[str] = []
     pivot = ""
     conf_pct: int | None = None
     sens_rows: list[dict[str, str]] = []
     data_improve: list[str] = []
-    model_note = "We can model this as trend strength vs noise — slope and R² vs your thresholds."
+    model_note = "We model this as a rate-needed chase: gap ÷ games remaining compared to recent production."
 
     if slope is not None and r2 is not None:
-        reasons = [
-            f"Slope **{slope:g}** {stat}/season with R² **{r2:g}** ({strength}, {noise} noise).",
-            f"Thresholds: |slope| ≥ **{min_slope}**, R² ≥ **{min_r2}**.",
-        ]
+        if meaningful:
+            conclusion = (
+                f"The {stat} trend looks meaningful for {player} — strong enough to factor into decisions."
+            )
+            reasons = [
+                f"Slope is **{slope:g}** {stat}/season with R² **{r2:g}**, above your thresholds (slope ≥ {min_slope}, R² ≥ {min_r2}).",
+            ]
+            if delta is not None:
+                reasons.append(f"Net change over the window (delta) is **{delta:g}** {stat}.")
+        elif strength == "noisy":
+            conclusion = f"The {stat} trend looks moderately meaningful, but still noisy."
+            reasons = [
+                f"The slope is **{direction}** (**{slope:g}**/season) and R² is **{r2:g}**, but the fit is inconsistent — year-to-year noise may dominate.",
+            ]
+        elif strength == "weak":
+            conclusion = f"The {stat} trend looks weak — not strong enough to rely on for decisions."
+            reasons = [
+                f"|slope| (**{abs(slope):g}**) or R² (**{r2:g}**) falls below meaningful thresholds for {stat}.",
+            ]
+        else:
+            conclusion = f"The {stat} trend is inconclusive with the current data."
+            reasons = [
+                f"Slope **{slope:g}**/season, R² **{r2:g}** — review thresholds below.",
+            ]
         conf_pct = 82 if meaningful else (58 if strength == "noisy" else 44)
         pivot = (
             f"This answer flips if R² falls below **{min_r2:.2f}** "
@@ -552,6 +581,8 @@ def solve_baseball_trend(
     elif missing:
         data_improve = [f"**{m}** from Baseball Trends (Advanced Trend Intelligence)" for m in missing]
         conf_pct = 40
+        conclusion = f"We cannot judge whether {player}'s {stat} trend is meaningful without regression output."
+        reasons = ["Slope and R² from the Trends page are required before a quantitative verdict."]
 
     return _coach_result(
         question=question,
@@ -673,23 +704,40 @@ def solve_investment_rebalance(
         "**Risk tolerance** shifts how aggressively you act on the same drift."
     )
 
-    conclusion = _verdict_to_conclusion(action)
+    conclusion = "We need drift data from Portfolio Health before answering."
     reasons: list[str] = []
     pivot = ""
     conf_pct: int | None = None
     sens_rows: list[dict[str, str]] = []
     data_improve: list[str] = []
-    model_note = "We can model this as a drift-threshold decision — max weight drift vs your rebalance band."
+    model_note = "We model drift as current weight minus target weight, compared to your rebalance threshold."
 
     if parsed:
-        reasons = [
-            f"Max drift is **{max_drift:.1f}pp** vs **{drift_threshold:g}pp** threshold.",
-        ]
-        if overweight and underweight:
-            reasons.append(
-                f"**{overweight[0]}** is **{overweight[1]:+.1f}pp** overweight; "
-                f"**{underweight[0]}** is **{underweight[1]:+.1f}pp** underweight."
-            )
+        n_over_thresh = sum(1 for v in parsed.values() if abs(v) >= drift_threshold)
+        if max_drift >= drift_threshold:
+            conclusion = f"Yes — rebalancing is mathematically justified at your **{drift_threshold:g}%** drift threshold."
+            if overweight and underweight:
+                reasons = [
+                    f"**{overweight[0]}** is **{abs(overweight[1]):.0f}** percentage points above target and "
+                    f"**{underweight[0]}** is **{abs(underweight[1]):.0f}** below target."
+                ]
+                if n_over_thresh >= 2:
+                    reasons.insert(
+                        0,
+                        f"**{n_over_thresh}** holdings exceed the allowed drift threshold.",
+                    )
+            else:
+                reasons = [f"Max drift is **{max_drift:.1f}pp**, above the **{drift_threshold:g}pp** threshold."]
+        elif max_drift >= drift_threshold * 0.6:
+            conclusion = "Monitor — drift is noticeable but still below your rebalance threshold."
+            reasons = [
+                f"Max drift is **{max_drift:.1f}pp** vs a **{drift_threshold:g}pp** threshold — watch before acting.",
+            ]
+        else:
+            conclusion = "No — holdings are within your drift tolerance; rebalancing is not required yet."
+            reasons = [
+                f"Max drift is **{max_drift:.1f}pp**, below the **{drift_threshold:g}pp** threshold.",
+            ]
         conf_pct = 86 if max_drift >= drift_threshold else (64 if max_drift >= drift_threshold * 0.6 else 72)
         pivot = (
             f"This answer changes if drift threshold is raised above **{max_drift:.1f}pp** "
@@ -703,6 +751,8 @@ def solve_investment_rebalance(
     elif missing:
         data_improve = ["**rebalance_drift** from Portfolio Health (run Analyze if needed)"]
         conf_pct = 38
+        conclusion = "Unclear — rebalance drift data is missing from the transferred context."
+        reasons = ["Run Portfolio Health in the Investment app, then re-send the question."]
 
     return _coach_result(
         question=question,
@@ -816,21 +866,33 @@ def solve_investment_risk_return(
         "**Minimum Sharpe** sets how much return per unit risk you demand."
     )
 
-    conclusion = _verdict_to_conclusion(verdict)
+    conclusion = "We need return and volatility from Portfolio Health before answering."
     reasons: list[str] = []
     pivot = ""
     conf_pct: int | None = None
     sens_rows: list[dict[str, str]] = []
     data_improve: list[str] = []
-    model_note = "We can model this as return per unit of risk — Sharpe ratio vs your volatility ceiling."
+    model_note = "We model return per unit of risk — Sharpe ratio vs your volatility ceiling."
 
-    if exp_ret is not None and vol is not None:
+    if exp_ret is not None and vol is not None and sharpe is not None:
+        if sharpe >= min_sharpe and vol <= max_vol:
+            conclusion = (
+                f"Yes — the **{exp_ret:g}%** expected return appears worth **{vol:g}%** volatility at your goal."
+            )
+        elif sharpe >= min_sharpe * 0.8:
+            conclusion = (
+                f"Unclear — **{exp_ret:g}%** return vs **{vol:g}%** volatility is borderline for your risk tolerance."
+            )
+        else:
+            conclusion = (
+                f"Too risky — **{vol:g}%** volatility is not justified by **{exp_ret:g}%** expected return at your Sharpe floor."
+            )
         reasons = [
-            f"Expected return **{exp_ret:g}%** for **{vol:g}%** volatility.",
+            f"Sharpe ratio is **{sharpe:g}** (your minimum is **{min_sharpe:g}**).",
         ]
-        if sharpe is not None:
-            reasons.append(f"Sharpe **{sharpe:g}** vs minimum **{min_sharpe:g}**.")
-        conf_pct = 84 if sharpe and sharpe >= min_sharpe and vol <= max_vol else (55 if sharpe else 50)
+        if drawdown is not None:
+            reasons.append(f"Worst peak-to-trough drawdown is **{drawdown:g}%**.")
+        conf_pct = 84 if sharpe >= min_sharpe and vol <= max_vol else (55 if sharpe >= min_sharpe * 0.8 else 48)
         pivot = (
             f"This answer becomes negative if volatility exceeds **{max_vol:g}%** "
             f"(currently **{vol:g}%**) or Sharpe falls below **{min_sharpe:g}**."
@@ -847,6 +909,8 @@ def solve_investment_risk_return(
     elif missing:
         data_improve = [f"**{m}** from Portfolio Health" for m in missing]
         conf_pct = 40
+        conclusion = "Unclear — expected return and volatility are not in the transferred context."
+        reasons = ["Run Analyze Portfolio in the Investment app, then re-send the question."]
 
     assumptions = [
         f"Risk profile: {risk_level}.",

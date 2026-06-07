@@ -68,24 +68,20 @@ def _load_suite_context() -> tuple[str, str, str, dict]:
 
 
 def _render_suite_question_view() -> None:
-    """Suite-only path: solver answer first — no tabs, no generic quantitative flow."""
+    """Suite-only path: normal page shell + solver answer."""
     preloaded, source, source_page, ctx_dict = _load_suite_context()
     if not preloaded:
         st.warning("Suite question loaded but text is empty.")
         return
 
-    try:
-        from suite_analytical_question import source_app_label
+    from components.applied_math_suite_page import render_suite_question_page_header
 
-        src_label = source_app_label(source) if source else ""
-    except Exception:
-        src_label = source or ""
-
-    if src_label or source_page:
-        st.caption(
-            f"From **{src_label or 'suite app'}**"
-            + (f" · {source_page}" if source_page else "")
-        )
+    render_suite_question_page_header(
+        st,
+        question=preloaded,
+        source_app=source,
+        source_page=source_page,
+    )
 
     try:
         from components.applied_math_context_diagnostics import render_applied_math_context_diagnostics

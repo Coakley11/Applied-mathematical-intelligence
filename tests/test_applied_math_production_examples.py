@@ -89,8 +89,21 @@ class TestProductionExamples(unittest.TestCase):
             },
             "Is Lorenzo Cain's HR trend meaningful?",
         )
-        self.assertTrue(result.conclusion)
+        self.assertIn("meaningful", result.conclusion.lower())
+        self.assertTrue(result.reasons)
         self.assertTrue(result.sensitivity_rows)
+
+    def test_baseball_noisy_trend_plain_english(self) -> None:
+        result = solve_baseball_trend(
+            {
+                "player": "Lorenzo Cain",
+                "metrics": ["HR"],
+                "trend_summary": {"slope": 0.8, "r2": 0.15, "direction": "up", "stat": "HR"},
+            },
+            "Is Lorenzo Cain's HR trend meaningful?",
+        )
+        self.assertIn("noisy", result.conclusion.lower())
+        self.assertIn("slope", result.reasons[0].lower())
 
     def test_investment_rebalance(self) -> None:
         route = route_suite_question(
@@ -103,7 +116,7 @@ class TestProductionExamples(unittest.TestCase):
             {"rebalance_drift": {"VTI": "+6.0pp", "BND": "-4.0pp"}},
             "Should I rebalance this portfolio?",
         )
-        self.assertIn("rebalance", result.conclusion.lower())
+        self.assertIn("rebalancing", result.conclusion.lower())
         self.assertTrue(result.reasons)
 
     def test_soto_vs_judge(self) -> None:

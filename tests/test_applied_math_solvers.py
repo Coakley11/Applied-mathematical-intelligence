@@ -206,7 +206,7 @@ class TestConclusionEngine(unittest.TestCase):
             games_remaining=4,
             expected_rate=4.8,
         )
-        self.assertIn(result.conclusion.lower(), ("likely yes", "uncertain — too close to call"))
+        self.assertIn("Likely yes", result.conclusion)
         self.assertGreaterEqual(result.confidence_pct or 0, 50)
         self.assertTrue(result.reasons)
         self.assertTrue(result.sensitivity_rows)
@@ -218,7 +218,7 @@ class TestConclusionEngine(unittest.TestCase):
             "Should I rebalance?",
             drift_threshold=5.0,
         )
-        self.assertIn("rebalance", result.conclusion.lower())
+        self.assertIn("rebalancing", result.conclusion.lower())
         self.assertGreaterEqual(result.confidence_pct or 0, 75)
         self.assertTrue(result.sensitivity_rows)
 

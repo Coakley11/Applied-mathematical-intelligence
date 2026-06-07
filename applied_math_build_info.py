@@ -8,8 +8,8 @@ from pathlib import Path
 # Bump on each solver release; shown when git is unavailable.
 GIT_COMMIT_PINNED = "fdbfd0a"
 GIT_BRANCH_PINNED = "dev"
-SOLVER_BUILD_MARKER = "2026-06-08-conclusion-v3"
-SOLVER_UI_VERSION = "2.2.0"
+SOLVER_BUILD_MARKER = "2026-06-08-suite-page-v4"
+SOLVER_UI_VERSION = "2.3.0"
 ROUTER_VERSION = "1.2.0"
 SOLVER_CORE_VERSION = "2.2.0"
 
