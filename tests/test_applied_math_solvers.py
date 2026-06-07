@@ -188,6 +188,67 @@ class TestInvestmentRiskReturnSolver(unittest.TestCase):
         self.assertIn("exceeds", result.interpretation.lower())
 
 
+class TestConclusionEngine(unittest.TestCase):
+    def test_nba_stat_chase_conclusion_and_sensitivity(self) -> None:
+        result = solve_nba_stat_chase(
+            {
+                "stat_gap": {
+                    "player": "Jalen Brunson",
+                    "comparison": "Allan Houston",
+                    "stat": "rebounds",
+                    "gap": 12,
+                    "current_value": 8,
+                    "target_value": 20,
+                    "games_remaining": 4,
+                }
+            },
+            "Will Brunson pass Allan Houston in playoff rebounds?",
+            games_remaining=4,
+            expected_rate=4.8,
+        )
+        self.assertIn(result.conclusion.lower(), ("likely yes", "uncertain — too close to call"))
+        self.assertGreaterEqual(result.confidence_pct or 0, 50)
+        self.assertTrue(result.reasons)
+        self.assertTrue(result.sensitivity_rows)
+        self.assertTrue(result.pivot_assumption)
+
+    def test_rebalance_conclusion_yes(self) -> None:
+        result = solve_investment_rebalance(
+            {"rebalance_drift": {"VTI": "+6.0pp", "BND": "-4.0pp"}},
+            "Should I rebalance?",
+            drift_threshold=5.0,
+        )
+        self.assertIn("rebalance", result.conclusion.lower())
+        self.assertGreaterEqual(result.confidence_pct or 0, 75)
+        self.assertTrue(result.sensitivity_rows)
+
+    def test_player_compare_broad_question(self) -> None:
+        route = route_suite_question(
+            "Is Soto likely to surpass Judge?",
+            source_app="baseball",
+            context={"player_a": "Juan Soto", "player_b": "Aaron Judge"},
+        )
+        result = dispatch_solver(
+            route,
+            "Is Soto likely to surpass Judge?",
+            {"player_a": "Juan Soto", "player_b": "Aaron Judge"},
+        )
+        self.assertIn("uncertain", result.conclusion.lower())
+        self.assertTrue(result.model_note)
+        self.assertTrue(result.data_would_improve)
+
+    def test_finalize_fills_confidence_from_route(self) -> None:
+        route, result = solve_suite_question(
+            "Is this trend meaningful?",
+            source_app="baseball",
+            context={
+                "trend_summary": {"slope": 1.2, "r2": 0.64, "direction": "up", "stat": "HR"},
+            },
+        )
+        self.assertIsNotNone(result.confidence_pct)
+        self.assertTrue(result.conclusion)
+
+
 class TestGenericFallback(unittest.TestCase):
     def test_unknown_app_uses_generic(self) -> None:
         route, result = solve_suite_question(

@@ -45,6 +45,15 @@ class SolverResult:
     problem_type_id: str = ""
     computed: dict[str, Any] = field(default_factory=dict)
     default_controls: dict[str, Any] = field(default_factory=dict)
+    # Conclusion engine — answer-first UX
+    conclusion: str = ""
+    confidence_pct: int | None = None
+    confidence_label: str = ""
+    reasons: list[str] = field(default_factory=list)
+    pivot_assumption: str = ""
+    sensitivity_rows: list[dict[str, str]] = field(default_factory=list)
+    model_note: str = ""
+    data_would_improve: list[str] = field(default_factory=list)
 
     # Legacy alias — older code/tests referenced problem_detected
     @property
@@ -56,6 +65,83 @@ class SolverResult:
 
 def _cap_data_used(lines: list[str], limit: int = 5) -> list[str]:
     return [ln for ln in lines if ln][:limit]
+
+
+def _confidence_label(pct: int) -> str:
+    if pct >= 75:
+        return "High"
+    if pct >= 55:
+        return "Medium"
+    return "Low"
+
+
+def _route_confidence_pct(route: ProblemRoute, partial: bool, missing_count: int) -> int:
+    base = float(route.confidence)
+    if partial:
+        base = max(0.25, base - 0.12 * max(1, missing_count))
+    return int(round(base * 100))
+
+
+def _verdict_to_conclusion(verdict: str) -> str:
+    low = verdict.lower()
+    if "likely" in low and "unlikely" not in low:
+        return "Likely yes"
+    if "unlikely" in low:
+        return "Likely no"
+    if "toss-up" in low or "borderline" in low or "uncertain" in low:
+        return "Uncertain — too close to call"
+    if "rebalance" in low and "no action" not in low and "monitor" not in low:
+        return "Yes — rebalance"
+    if "monitor" in low:
+        return "Not yet — monitor drift"
+    if "no action" in low:
+        return "No — within tolerance"
+    if "meaningful" in low and "not meaningful" not in low and "weak" not in low:
+        return "Yes — trend looks meaningful"
+    if "noisy" in low:
+        return "Uncertain — noisy trend"
+    if "weak" in low:
+        return "No — trend too weak to trust"
+    if low.startswith("yes"):
+        return "Yes"
+    if low.startswith("no"):
+        return "No"
+    return verdict.split("—")[0].strip() if "—" in verdict else verdict
+
+
+def _nba_pass_confidence(required: float | None, expected: float | None) -> int | None:
+    if required is None or expected is None or required <= 0:
+        return None
+    ratio = expected / required
+    if ratio >= 1.15:
+        return 88
+    if ratio >= 1.05:
+        return 78
+    if ratio >= 0.95:
+        return 62
+    if ratio >= 0.85:
+        return 48
+    return 32
+
+
+def _finalize_result(route: ProblemRoute, result: SolverResult) -> SolverResult:
+    """Fill conclusion-engine fields when solvers omit them."""
+    if not result.conclusion and result.result:
+        result.conclusion = _verdict_to_conclusion(result.result)
+    if result.confidence_pct is None:
+        result.confidence_pct = _route_confidence_pct(
+            route, result.partial, len(result.missing_fields)
+        )
+    if not result.confidence_label:
+        result.confidence_label = _confidence_label(result.confidence_pct)
+    if not result.model_note and result.math_idea:
+        result.model_note = f"We can model this as: {result.math_idea[0].lower() + result.math_idea[1:] if result.math_idea else ''}"
+    if result.partial and not result.data_would_improve and result.missing_fields:
+        result.data_would_improve = [
+            f"Adding **{field}** would raise confidence above {result.confidence_pct}%."
+            for field in result.missing_fields[:4]
+        ]
+    return result
 
 
 def _coach_result(
@@ -75,6 +161,14 @@ def _coach_result(
     default_controls: dict[str, Any] | None = None,
     missing_fields: list[str] | None = None,
     partial: bool = False,
+    conclusion: str = "",
+    confidence_pct: int | None = None,
+    confidence_label: str = "",
+    reasons: list[str] | None = None,
+    pivot_assumption: str = "",
+    sensitivity_rows: list[dict[str, str]] | None = None,
+    model_note: str = "",
+    data_would_improve: list[str] | None = None,
 ) -> SolverResult:
     return SolverResult(
         question=question.strip(),
@@ -92,6 +186,14 @@ def _coach_result(
         problem_type_id=problem_type_id,
         computed=computed or {},
         default_controls=default_controls or {},
+        conclusion=conclusion or _verdict_to_conclusion(result),
+        confidence_pct=confidence_pct,
+        confidence_label=confidence_label,
+        reasons=reasons or [],
+        pivot_assumption=pivot_assumption,
+        sensitivity_rows=sensitivity_rows or [],
+        model_note=model_note,
+        data_would_improve=data_would_improve or [],
     )
 
 
@@ -231,6 +333,56 @@ def solve_nba_stat_chase(
         if alt_req:
             sensitivity += f" At {alt_games} games left, required_rate rises to **{alt_req:.2f}**/game."
 
+    conclusion = "Insufficient data to answer"
+    reasons: list[str] = []
+    pivot = ""
+    conf_pct: int | None = None
+    sens_rows: list[dict[str, str]] = []
+    data_improve: list[str] = []
+    model_note = "We can model this as a rate-needed chase — gap ÷ games remaining vs recent production."
+
+    if required_rate is not None and exp_rate is not None:
+        conclusion = _verdict_to_conclusion(verdict)
+        reasons = [
+            f"He needs **{required_rate:.1f}** {stat}/game over **{games}** remaining games.",
+            f"Recent pace is **{exp_rate:.1f}** {stat}/game (cushion **{exp_rate - required_rate:+.1f}**).",
+        ]
+        conf_pct = _nba_pass_confidence(required_rate, exp_rate)
+        if games is not None and games <= 5:
+            pivot = (
+                f"This answer changes dramatically if **games remaining** drops below **{games}** "
+                f"(required rate rises above **{required_rate:.1f}**/game)."
+            )
+        elif required_rate and exp_rate:
+            pivot = (
+                f"This answer flips if expected {stat}/game falls below **{required_rate:.1f}** "
+                f"(currently **{exp_rate:.1f}**)."
+            )
+    elif required_rate is not None:
+        reasons = [f"Required pace is **{required_rate:.1f}** {stat}/game — set expected rate to judge likelihood."]
+        conf_pct = 45
+    elif missing:
+        data_improve = [f"**{m}**" for m in missing]
+
+    if gap is not None and games and games > 0:
+        for g in range(max(1, games - 2), games + 3):
+            req_g = gap / g
+            if exp_rate is not None:
+                out = _verdict_to_conclusion(
+                    "Likely — on pace to pass"
+                    if exp_rate >= req_g * 1.05
+                    else (
+                        "Toss-up — close to required pace"
+                        if exp_rate >= req_g * 0.85
+                        else "Unlikely — required pace is too high"
+                    )
+                )
+            else:
+                out = f"Need {req_g:.1f}/game"
+            sens_rows.append(
+                {"Parameter": "Games remaining", "Scenario": str(g), "Outcome": out}
+            )
+
     return _coach_result(
         question=question,
         problem_type="NBA stat chase",
@@ -261,6 +413,13 @@ def solve_nba_stat_chase(
             "expected_rate": exp_rate if exp_rate is not None else 3.0,
             "target_value": target if target is not None else 0.0,
         },
+        conclusion=conclusion,
+        confidence_pct=conf_pct,
+        reasons=reasons,
+        pivot_assumption=pivot,
+        sensitivity_rows=sens_rows,
+        model_note=model_note,
+        data_would_improve=data_improve,
     )
 
 
@@ -363,6 +522,37 @@ def solve_baseball_trend(
         "**Slope threshold** filters gradual vs sharp trends."
     )
 
+    conclusion = _verdict_to_conclusion(result)
+    reasons: list[str] = []
+    pivot = ""
+    conf_pct: int | None = None
+    sens_rows: list[dict[str, str]] = []
+    data_improve: list[str] = []
+    model_note = "We can model this as trend strength vs noise — slope and R² vs your thresholds."
+
+    if slope is not None and r2 is not None:
+        reasons = [
+            f"Slope **{slope:g}** {stat}/season with R² **{r2:g}** ({strength}, {noise} noise).",
+            f"Thresholds: |slope| ≥ **{min_slope}**, R² ≥ **{min_r2}**.",
+        ]
+        conf_pct = 82 if meaningful else (58 if strength == "noisy" else 44)
+        pivot = (
+            f"This answer flips if R² falls below **{min_r2:.2f}** "
+            f"(currently **{r2:g}**) or |slope| drops under **{min_slope}**."
+        )
+        for r2_try in (0.25, 0.35, 0.50, 0.65):
+            ok = abs(slope) >= min_slope and r2 >= r2_try
+            sens_rows.append(
+                {
+                    "Parameter": "R² threshold",
+                    "Scenario": f"≥ {r2_try:.2f}",
+                    "Outcome": "Meaningful trend" if ok else "Not meaningful",
+                }
+            )
+    elif missing:
+        data_improve = [f"**{m}** from Baseball Trends (Advanced Trend Intelligence)" for m in missing]
+        conf_pct = 40
+
     return _coach_result(
         question=question,
         problem_type="Trend significance",
@@ -388,6 +578,13 @@ def solve_baseball_trend(
             "meaningful": meaningful,
         },
         default_controls={"min_slope": min_slope, "min_r2": min_r2},
+        conclusion=conclusion,
+        confidence_pct=conf_pct,
+        reasons=reasons,
+        pivot_assumption=pivot,
+        sensitivity_rows=sens_rows,
+        model_note=model_note,
+        data_would_improve=data_improve,
     )
 
 
@@ -476,6 +673,37 @@ def solve_investment_rebalance(
         "**Risk tolerance** shifts how aggressively you act on the same drift."
     )
 
+    conclusion = _verdict_to_conclusion(action)
+    reasons: list[str] = []
+    pivot = ""
+    conf_pct: int | None = None
+    sens_rows: list[dict[str, str]] = []
+    data_improve: list[str] = []
+    model_note = "We can model this as a drift-threshold decision — max weight drift vs your rebalance band."
+
+    if parsed:
+        reasons = [
+            f"Max drift is **{max_drift:.1f}pp** vs **{drift_threshold:g}pp** threshold.",
+        ]
+        if overweight and underweight:
+            reasons.append(
+                f"**{overweight[0]}** is **{overweight[1]:+.1f}pp** overweight; "
+                f"**{underweight[0]}** is **{underweight[1]:+.1f}pp** underweight."
+            )
+        conf_pct = 86 if max_drift >= drift_threshold else (64 if max_drift >= drift_threshold * 0.6 else 72)
+        pivot = (
+            f"This answer changes if drift threshold is raised above **{max_drift:.1f}pp** "
+            f"(current max drift) or lowered below **{drift_threshold:g}pp**."
+        )
+        for thresh in (3.0, 5.0, 7.0, 10.0):
+            out = "Rebalance" if max_drift >= thresh else "Hold / monitor"
+            sens_rows.append(
+                {"Parameter": "Drift threshold (pp)", "Scenario": f"{thresh:g}", "Outcome": out}
+            )
+    elif missing:
+        data_improve = ["**rebalance_drift** from Portfolio Health (run Analyze if needed)"]
+        conf_pct = 38
+
     return _coach_result(
         question=question,
         problem_type="Portfolio drift / threshold decision",
@@ -500,6 +728,13 @@ def solve_investment_rebalance(
             "action": action,
         },
         default_controls={"drift_threshold": drift_threshold, "risk_tolerance": risk_tolerance},
+        conclusion=conclusion,
+        confidence_pct=conf_pct,
+        reasons=reasons,
+        pivot_assumption=pivot,
+        sensitivity_rows=sens_rows,
+        model_note=model_note,
+        data_would_improve=data_improve,
     )
 
 
@@ -581,6 +816,38 @@ def solve_investment_risk_return(
         "**Minimum Sharpe** sets how much return per unit risk you demand."
     )
 
+    conclusion = _verdict_to_conclusion(verdict)
+    reasons: list[str] = []
+    pivot = ""
+    conf_pct: int | None = None
+    sens_rows: list[dict[str, str]] = []
+    data_improve: list[str] = []
+    model_note = "We can model this as return per unit of risk — Sharpe ratio vs your volatility ceiling."
+
+    if exp_ret is not None and vol is not None:
+        reasons = [
+            f"Expected return **{exp_ret:g}%** for **{vol:g}%** volatility.",
+        ]
+        if sharpe is not None:
+            reasons.append(f"Sharpe **{sharpe:g}** vs minimum **{min_sharpe:g}**.")
+        conf_pct = 84 if sharpe and sharpe >= min_sharpe and vol <= max_vol else (55 if sharpe else 50)
+        pivot = (
+            f"This answer becomes negative if volatility exceeds **{max_vol:g}%** "
+            f"(currently **{vol:g}%**) or Sharpe falls below **{min_sharpe:g}**."
+        )
+        for vol_cap in (12.0, 15.0, 18.0, 22.0):
+            if sharpe is not None:
+                ok = sharpe >= min_sharpe and vol <= vol_cap
+                out = "Worth the risk" if ok else "Too risky"
+            else:
+                out = f"Vol cap {vol_cap:g}%"
+            sens_rows.append(
+                {"Parameter": "Volatility cap (%)", "Scenario": f"{vol_cap:g}", "Outcome": out}
+            )
+    elif missing:
+        data_improve = [f"**{m}** from Portfolio Health" for m in missing]
+        conf_pct = 40
+
     assumptions = [
         f"Risk profile: {risk_level}.",
         "Return and volatility are historical estimates unless noted forward.",
@@ -612,17 +879,26 @@ def solve_investment_risk_return(
             "max_volatility": max_vol,
             "acceptable_volatility": max_vol,
         },
+        conclusion=conclusion,
+        confidence_pct=conf_pct,
+        reasons=reasons,
+        pivot_assumption=pivot,
+        sensitivity_rows=sens_rows,
+        model_note=model_note,
+        data_would_improve=data_improve,
     )
 
 
 def _generic_solver(route: ProblemRoute, question: str, ctx: dict[str, Any]) -> SolverResult:
-    missing_note = ""
+    model_note = "We can model this as a threshold/decision problem once one measurable quantity is attached."
+    data_improve = [f"**{f}**" for f in route.missing_fields[:4]]
+    conclusion = "Best estimate unavailable — need numeric context"
+    reasons: list[str] = []
     if route.missing_fields:
-        missing_note = (
-            "We can model this as a threshold/decision problem, but need: "
-            + ", ".join(route.missing_fields)
-            + "."
-        )
+        reasons = [
+            "The question needs at least one number from the source page before a quantitative verdict.",
+        ]
+    partial_conf = _route_confidence_pct(route, True, len(route.missing_fields))
     return _coach_result(
         question=question,
         problem_type=route.problem_type,
@@ -630,13 +906,24 @@ def _generic_solver(route: ProblemRoute, question: str, ctx: dict[str, Any]) -> 
         variables="variable = what you measure\nbaseline = comparison point\nthreshold = decision cutoff",
         data_used=[f"Source: **{route.source_app}**"],
         calculation="State the claim as one number, then compare to baseline ± uncertainty.",
-        result="Framework — attach numeric context from the source app",
-        interpretation=missing_note or "Translate the question into one measurable quantity.",
+        result="Partial — attach numeric context from the source app",
+        interpretation=(
+            "We can model this as a threshold/decision problem, but need: "
+            + ", ".join(route.missing_fields)
+            + "."
+            if route.missing_fields
+            else "Translate the question into one measurable quantity and re-send from the source app."
+        ),
         assumptions=["Context from the source app reflects the user's current view."],
-        sensitivity_notes="Adding missing fields enables a domain-specific solver.",
+        sensitivity_notes="Adding missing fields enables a domain-specific solver with a firmer conclusion.",
         missing_fields=list(route.missing_fields),
         partial=True,
         problem_type_id=route.problem_type_id,
+        conclusion=conclusion,
+        confidence_pct=partial_conf,
+        reasons=reasons,
+        model_note=model_note,
+        data_would_improve=data_improve,
     )
 
 
@@ -775,7 +1062,52 @@ def dispatch_solver(
         )
 
     if pid == BASEBALL_PLAYER_COMPARE:
-        pa, pb = ctx.get("player_a"), ctx.get("player_b")
+        pa = str(ctx.get("player_a") or "").strip()
+        pb = str(ctx.get("player_b") or "").strip()
+        cmp_extra = ctx.get("_ami_comparison_context") or ctx.get("comparison_differences")
+        diff_bits: list[str] = []
+        if isinstance(cmp_extra, dict):
+            for k, v in list(cmp_extra.items())[:4]:
+                diff_bits.append(f"{k}: {v}")
+        elif isinstance(cmp_extra, list):
+            diff_bits = [str(x) for x in cmp_extra[:4]]
+
+        surpass = any(w in question.lower() for w in ("surpass", "pass", "better", "beat"))
+        model_note = "We can model this as rate-stat value gap per plate appearance, adjusted for playing time."
+        if diff_bits:
+            conclusion = f"**{pa}** leads on attached comparison stats" if pa else "Comparison favors one side on attached stats"
+            reasons = diff_bits[:3]
+            conf_pct = 68
+            result_text = conclusion
+            interp = " ".join(diff_bits)
+            partial = False
+        elif pa and pb:
+            conclusion = "Possible but uncertain — rate stats not attached"
+            reasons = [
+                f"Comparing **{pa}** vs **{pb}** — rate production may be similar; projection depends on playing time and career length.",
+            ]
+            conf_pct = 58 if surpass else 52
+            result_text = "Too close to call without rate comparison"
+            interp = (
+                f"For “{pa} vs {pb}”, attach OPS/SLG/WAR comparison from the Comparison Tool "
+                "for a sharper quantitative verdict."
+            )
+            partial = bool(route.missing_fields)
+        else:
+            conclusion = "Need both players selected"
+            reasons = []
+            conf_pct = 35
+            result_text = "Select two players in Comparison Tool"
+            interp = "Open Comparison Tool, select both players, then re-send the question."
+            partial = True
+
+        data_improve = []
+        if not diff_bits:
+            data_improve = [
+                "**comparison_stats** (OPS, SLG, WAR) from Comparison Tool",
+                "**projections** for playing-time / career length questions",
+            ]
+
         return _coach_result(
             question=question,
             problem_type="Player comparison",
@@ -783,13 +1115,18 @@ def dispatch_solver(
             variables="value_i = rate stats per PA × playing-time projection",
             data_used=[f"**{pa}** vs **{pb}**"] if pa and pb else [],
             calculation="Subtract rate-based value scores; weight scarce categories.",
-            result="Compare rate stats per PA with replacement baseline",
-            interpretation="If gaps are within one standard error, call it too close to call.",
+            result=result_text,
+            interpretation=interp,
             assumptions=["Same position eligibility matters for roster fit."],
-            sensitivity_notes="Weight scarce categories (SB, HR) higher in category leagues.",
+            sensitivity_notes="Weight scarce categories (SB, HR) higher in category leagues; career-length questions need projection inputs.",
             missing_fields=route.missing_fields,
-            partial=bool(route.missing_fields),
+            partial=partial,
             problem_type_id=pid,
+            conclusion=conclusion,
+            confidence_pct=conf_pct,
+            reasons=reasons,
+            model_note=model_note,
+            data_would_improve=data_improve,
         )
 
     if pid == INVESTMENT_MACRO:
@@ -827,4 +1164,4 @@ def solve_suite_question(
     result = dispatch_solver(route, question, ctx, params)
     if result is None:
         raise ValueError("dispatch_solver returned None")
-    return route, result
+    return route, _finalize_result(route, result)
