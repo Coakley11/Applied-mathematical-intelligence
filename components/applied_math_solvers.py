@@ -2369,6 +2369,318 @@ def solve_investment_drawdown_attribution(
     )
 
 
+def _parse_draft_projection(text: str) -> dict[str, Any]:
+    """Extract ADP, round hints, and rank from draft projection strings."""
+    low = str(text or "").lower()
+    out: dict[str, Any] = {}
+    m = re.search(r"\badp\s*[#:]?\s*(\d+(?:\.\d+)?)\b", low)
+    if m:
+        out["adp"] = float(m.group(1))
+    m = re.search(r"\brank\s*[#:]?\s*(\d+)\b", low)
+    if m:
+        out["projected_rank"] = int(m.group(1))
+    m = re.search(r"round\s*(\d+)", low)
+    if m:
+        out["projected_round"] = int(m.group(1))
+    m = re.search(r"pick\s*(\d+)", low)
+    if m:
+        out["pick"] = int(m.group(1))
+    nums = [int(x) for x in re.findall(r"\b(\d{1,3})\b", low) if 1 <= int(x) <= 300]
+    if nums and "adp" not in out:
+        out["adp"] = float(min(nums))
+    return out
+
+
+def _parse_pct(val: Any) -> float | None:
+    if val is None or val == "":
+        return None
+    if isinstance(val, (int, float)):
+        v = float(val)
+        return v if v <= 1 else v
+    s = str(val).strip().replace("%", "")
+    try:
+        v = float(s)
+        return v if v <= 1 else v
+    except ValueError:
+        return None
+
+
+def solve_baseball_draft(
+    ctx: dict[str, Any],
+    question: str,
+    *,
+    draft_round: int | None = None,
+    current_pick: int | None = None,
+    adp: float | None = None,
+    projected_rank: int | None = None,
+    replacement_value: float = 50.0,
+    risk_tolerance: str = "moderate",
+    num_teams: int = 12,
+) -> SolverResult:
+    """Draft value edge — rank_edge = ADP − current pick."""
+    player = str(ctx.get("player") or (ctx.get("players") or [""])[0] if isinstance(ctx.get("players"), list) else "").strip()
+    proj_text = str(ctx.get("draft_projection") or "")
+    parsed = _parse_draft_projection(proj_text)
+
+    rnd = draft_round if draft_round is not None else _num(ctx.get("draft_round"))
+    rnd = int(rnd) if rnd is not None else int(parsed.get("projected_round") or 2)
+    pick = current_pick if current_pick is not None else _num(ctx.get("current_pick"))
+    if pick is None:
+        pick = parsed.get("pick")
+    if pick is None:
+        pick = (rnd - 1) * num_teams + (num_teams // 2) + 1
+
+    adp_val = adp if adp is not None else parsed.get("adp")
+    if adp_val is None and projected_rank is not None:
+        adp_val = float(projected_rank)
+    if adp_val is None:
+        adp_val = parsed.get("projected_rank") or float(pick)
+
+    rank = projected_rank if projected_rank is not None else parsed.get("projected_rank") or int(round(float(adp_val)))
+    pick = int(pick)
+    adp_val = float(adp_val)
+    rank_edge = adp_val - pick
+    value_edge = float(replacement_value) + rank_edge * 2.5
+
+    tol = {"conservative": 1.0, "moderate": 0.0, "aggressive": -1.5}.get(str(risk_tolerance).lower(), 0.0)
+    if rank_edge >= 3 + tol:
+        verdict = "Worth it"
+        label = "Value — player typically goes later than this pick"
+    elif rank_edge >= -2 + tol:
+        verdict = "Fair price"
+        label = "Near fair — ADP close to your pick slot"
+    elif rank_edge >= -6 + tol:
+        verdict = "Wait"
+        label = "Slight reach — consider waiting one round"
+    else:
+        verdict = "Avoid"
+        label = "Overdraft — ADP much earlier than this pick"
+
+    short_answer = f"**{verdict}** for **{player or 'this player'}** at pick **{pick}** (ADP **{adp_val:g}**)."
+    why = label
+    if rank_edge > 0:
+        why += f" You get ~**{rank_edge:.0f}** picks of value vs ADP."
+    elif rank_edge < 0:
+        why += f" You're reaching ~**{abs(rank_edge):.0f}** picks ahead of ADP."
+
+    opp = f"Opportunity cost: passing here may leave **{player or 'this tier'}** for pick ~**{int(adp_val)}**."
+    if rank_edge < -2:
+        opp = f"Waiting one round could land similar value near pick **{int(adp_val)}** instead of **{pick}**."
+
+    math_idea = (
+        "This is a **draft value edge** decision — compare where the player usually goes (ADP/rank) "
+        "to your current pick slot."
+    )
+    variables = (
+        "rank_edge = ADP − current_pick\n"
+        "value_edge = replacement_value + rank_edge × scale\n"
+        "positive rank_edge → value · negative → reach/overdraft"
+    )
+    calc = (
+        f"ADP / projected rank: **{adp_val:g}**\n"
+        f"Your pick: **{pick}** (round **{rnd}**)\n"
+        f"rank_edge = {adp_val:g} − {pick} = **{rank_edge:+.0f}**\n"
+        f"value_edge ≈ {replacement_value:g} + {rank_edge:+.0f}×2.5 = **{value_edge:.0f}**"
+    )
+
+    missing: list[str] = []
+    if not player:
+        missing.append("player")
+    if not proj_text and adp is None:
+        missing.append("draft_projection or ADP")
+
+    live_metrics = {
+        "Verdict": verdict,
+        "Rank edge": f"{rank_edge:+.0f}",
+        "ADP vs pick": f"{adp_val:g} vs {pick}",
+    }
+
+    sens_rows = []
+    for delta in (-3, 0, 3):
+        adj = rank_edge + delta
+        out = "Worth it" if adj >= 3 else "Fair" if adj >= -2 else "Wait" if adj >= -6 else "Avoid"
+        sens_rows.append({"Parameter": "Pick slot", "Scenario": f"{pick + delta}", "Outcome": out})
+
+    return _coach_result(
+        question=question,
+        problem_type="Draft decision",
+        math_idea=math_idea,
+        variables=variables,
+        data_used=_cap_data_used([
+            f"Player: **{player}**" if player else "",
+            f"Projection: {proj_text}" if proj_text else "",
+            f"Round: **{rnd}** · Pick: **{pick}**",
+            f"League: {ctx.get('draft_format') or ctx.get('league_format') or 'standard'}",
+        ]),
+        calculation=calc,
+        result=short_answer,
+        interpretation=opp,
+        assumptions=[
+            f"ADP reflects {num_teams}-team league norms unless you override.",
+            f"Risk tolerance: **{risk_tolerance}** shifts reach/fade thresholds.",
+            "Does not auto-change your draft board — decision support only.",
+        ],
+        sensitivity_notes="If ADP moves 3 picks, verdict can flip — update ADP slider below.",
+        missing_fields=missing,
+        partial=bool(missing),
+        problem_type_id=BASEBALL_DRAFT,
+        computed={
+            "rank_edge": rank_edge,
+            "value_edge": value_edge,
+            "adp": adp_val,
+            "pick": pick,
+            "projected_rank": rank,
+        },
+        default_controls={
+            "draft_round": rnd,
+            "current_pick": pick,
+            "adp": adp_val,
+            "projected_rank": rank,
+            "replacement_value": replacement_value,
+            "risk_tolerance": risk_tolerance,
+            "num_teams": num_teams,
+        },
+        conclusion=short_answer,
+        confidence_pct=80 if not missing else 55,
+        reasons=[why],
+        short_answer=short_answer,
+        why=why,
+        sensitivity_plain=opp,
+        live_metrics=live_metrics,
+        sensitivity_rows=sens_rows,
+    )
+
+
+def solve_nba_matchup_edge(
+    ctx: dict[str, Any],
+    question: str,
+    *,
+    injury_adjustment_pp: float = 5.0,
+    prob_threshold_pp: float = 8.0,
+    stat_gap_threshold: float = 0.15,
+    stat_gap_weight: float = 0.4,
+) -> SolverResult:
+    """Matchup edge score — probability + scouting gaps − injury penalty."""
+    team = str(ctx.get("team") or "").strip()
+    opp = str(ctx.get("opponent") or "").strip()
+    wp = _parse_pct(ctx.get("series_probability") or ctx.get("win_probability"))
+    adv = ctx.get("matchup_advantages")
+    adv_list = [str(a).strip() for a in adv if str(a).strip()] if isinstance(adv, list) else []
+    inj = str(ctx.get("injury_summary") or "").strip()
+
+    prob_edge = ((wp - 50.0) / 100.0) if wp is not None else 0.0
+    stat_edge = min(0.35, len(adv_list) * 0.07)
+    for text in adv_list[:3]:
+        low = text.lower()
+        if any(w in low for w in ("strong", "clear", "major", "size", "mismatch")):
+            stat_edge += 0.04
+
+    injury_penalty = 0.0
+    if inj:
+        injury_penalty = injury_adjustment_pp / 100.0
+        if any(w in inj.lower() for w in ("out", "doubtful", "unlikely")):
+            injury_penalty += 0.03
+
+    edge_score = prob_edge * 0.55 + stat_edge * stat_gap_weight - injury_penalty
+    edge_pp = edge_score * 100.0
+    threshold = prob_threshold_pp
+
+    if edge_pp >= threshold:
+        verdict = "Meaningful edge"
+    elif edge_pp >= threshold * 0.45:
+        verdict = "Slight edge"
+    else:
+        verdict = "No clear edge"
+
+    driver_parts: list[str] = []
+    if wp is not None:
+        driver_parts.append(f"model probability **{wp:.0f}%**")
+    if adv_list:
+        driver_parts.append(f"**{len(adv_list)}** scouting advantage(s)")
+    if inj:
+        driver_parts.append(f"injury: {inj[:80]}")
+    main_driver = driver_parts[0] if driver_parts else "limited matchup data attached"
+
+    short_answer = f"**{verdict}** for **{team or 'Team'}** vs **{opp or 'opponent'}** (edge score **{edge_pp:+.1f}** pp)."
+    why = f"Main driver: {main_driver}. Edge score combines probability lean, schematic gaps, and injury downgrade."
+
+    math_idea = (
+        "This is a **matchup edge score** — not just the quoted probability. "
+        "We blend probability edge vs 50%, scouting advantage strength, and injury penalty."
+    )
+    variables = (
+        "prob_edge = (p − 50%) / 100\n"
+        "stat_edge = f(matchup_advantages count/strength)\n"
+        "edge_score = 0.55×prob_edge + weight×stat_edge − injury_penalty"
+    )
+    calc_lines = [
+        f"Probability: **{wp:.0f}%** → prob_edge **{prob_edge:+.3f}**" if wp is not None else "Probability: not attached",
+        f"Scouting edges: **{len(adv_list)}** → stat_edge **{stat_edge:.3f}**",
+        f"Injury penalty: **{injury_penalty:.3f}** ({injury_adjustment_pp:.0f} pp base)" if inj else "Injury penalty: **0**",
+        f"edge_score = **{edge_score:+.3f}** → **{edge_pp:+.1f} pp** vs threshold **{threshold:.0f} pp**",
+    ]
+
+    missing: list[str] = []
+    if not team:
+        missing.append("team")
+    if wp is None and not adv_list:
+        missing.append("win/series probability or matchup_advantages")
+
+    live_metrics = {
+        "Verdict": verdict,
+        "Edge (pp)": f"{edge_pp:+.1f}",
+        "Probability": f"{wp:.0f}%" if wp is not None else "—",
+    }
+
+    return _coach_result(
+        question=question,
+        problem_type="Matchup edge",
+        math_idea=math_idea,
+        variables=variables,
+        data_used=_cap_data_used([
+            f"**{team}** vs **{opp}**",
+            f"Probability: **{wp:.0f}%**" if wp is not None else "",
+            f"Advantages: {adv_list[0][:100]}" if adv_list else "",
+            f"Injuries: {inj[:100]}" if inj else "",
+        ]),
+        calculation="\n".join(calc_lines),
+        result=short_answer,
+        interpretation=f"Uncertainty: injury news or hot shooting can swing edge ±{prob_threshold_pp:.0f} pp.",
+        assumptions=[
+            "Probability and scouting edges refer to the same series/game horizon.",
+            "Injury adjustment is illustrative — update slider for your severity read.",
+        ],
+        sensitivity_notes=f"Increasing injury penalty by **{injury_adjustment_pp:.0f} pp** lowers edge score proportionally.",
+        missing_fields=missing,
+        partial=bool(missing),
+        problem_type_id=NBA_MATCHUP_EDGE,
+        computed={
+            "edge_score": edge_score,
+            "edge_pp": edge_pp,
+            "prob_edge": prob_edge,
+            "stat_edge": stat_edge,
+            "injury_penalty": injury_penalty,
+            "probability": wp,
+        },
+        default_controls={
+            "injury_adjustment_pp": injury_adjustment_pp,
+            "prob_threshold_pp": prob_threshold_pp,
+            "stat_gap_threshold": stat_gap_threshold,
+            "stat_gap_weight": stat_gap_weight,
+        },
+        conclusion=short_answer,
+        confidence_pct=76 if wp is not None or adv_list else 48,
+        reasons=[why],
+        short_answer=short_answer,
+        why=why,
+        sensitivity_plain=(
+            f"If injury penalty rises from **{injury_adjustment_pp:.0f}** to **{injury_adjustment_pp + 5:.0f} pp**, "
+            f"edge score drops ~5 pp — may flip between slight and no clear edge."
+        ),
+        live_metrics=live_metrics,
+    )
+
+
 def _generic_solver(route: ProblemRoute, question: str, ctx: dict[str, Any], params: dict[str, Any] | None = None) -> SolverResult:
     """Interactive partial solver — closest model + assumption controls."""
     p = dict(params or {})
@@ -2687,6 +2999,29 @@ def dispatch_solver(
             max_above_career_pct=float(p.get("max_above_career_pct", 35.0)),
         )
 
+    if pid == BASEBALL_DRAFT:
+        return solve_baseball_draft(
+            ctx,
+            question,
+            draft_round=p.get("draft_round"),
+            current_pick=p.get("current_pick"),
+            adp=p.get("adp"),
+            projected_rank=p.get("projected_rank"),
+            replacement_value=float(p.get("replacement_value", 50.0)),
+            risk_tolerance=str(p.get("risk_tolerance", "moderate")),
+            num_teams=int(p.get("num_teams", 12)),
+        )
+
+    if pid == NBA_MATCHUP_EDGE:
+        return solve_nba_matchup_edge(
+            ctx,
+            question,
+            injury_adjustment_pp=float(p.get("injury_adjustment_pp", 5.0)),
+            prob_threshold_pp=float(p.get("prob_threshold_pp", 8.0)),
+            stat_gap_threshold=float(p.get("stat_gap_threshold", 0.15)),
+            stat_gap_weight=float(p.get("stat_gap_weight", 0.4)),
+        )
+
     if pid in (NBA_WIN_PROBABILITY, NBA_LEGACY_COMPARISON):
         if pid == NBA_WIN_PROBABILITY:
             return solve_nba_win_probability(ctx, question)
@@ -2710,43 +3045,6 @@ def dispatch_solver(
             partial=bool(route.missing_fields),
             problem_type_id=pid,
             computed={"probability": wp},
-        )
-
-    if pid == NBA_MATCHUP_EDGE:
-        team = str(ctx.get("team") or "").strip()
-        opp = str(ctx.get("opponent") or "").strip()
-        adv = ctx.get("matchup_advantages")
-        adv_text = str(adv[0])[:120] if isinstance(adv, list) and adv else ""
-        inj = str(ctx.get("injury_summary") or "").strip()
-        wp = ctx.get("win_probability") or ctx.get("series_probability")
-        return _coach_result(
-            question=question,
-            problem_type=route.problem_type,
-            math_idea="Matchup edge — weight injuries and schematic advantages vs model probability.",
-            variables="edge = injury + positional mismatches\np = model series probability",
-            data_used=_cap_data_used([
-                f"**{team}** vs **{opp}**",
-                f"Scouting edge: {adv_text}" if adv_text else "",
-                f"Injuries: {inj}" if inj else "",
-                f"Model probability: **{wp}**" if wp else "",
-            ]),
-            calculation="Large p without matching edge → optimism; injury downgrade → lower p.",
-            result="Matchup assessed" if adv_text or inj else "Load matchup advantages",
-            interpretation=" ".join(
-                x
-                for x in (
-                    f"Edge for **{team}** vs **{opp}**.",
-                    f"Advantage: {adv_text}" if adv_text else "",
-                    f"Injury: {inj}" if inj else "",
-                )
-                if x
-            ),
-            assumptions=["Matchup summaries reflect the loaded scouting board."],
-            sensitivity_notes="Injury downgrades or hot shooting swing probability ±10–15 pp.",
-            missing_fields=route.missing_fields,
-            partial=bool(route.missing_fields),
-            problem_type_id=pid,
-            computed={"advantages": adv},
         )
 
     if pid == BASEBALL_HISTORICAL:

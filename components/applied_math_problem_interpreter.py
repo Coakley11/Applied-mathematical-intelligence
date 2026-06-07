@@ -111,6 +111,16 @@ MODEL_INFO: dict[str, dict[str, str]] = {
         "why": "The question is **what if** macro assumptions change.",
         "variables": "stressed return/vol = base + shock",
     },
+    "baseball_draft_decision": {
+        "name": "Draft value edge",
+        "why": "The question is whether a pick is **worth it, fair, or a reach** vs ADP.",
+        "variables": "rank_edge = ADP − current_pick",
+    },
+    "nba_matchup_edge": {
+        "name": "Matchup edge score",
+        "why": "The question asks whether the **matchup advantage is meaningful** vs probability and injuries.",
+        "variables": "edge_score = prob_edge + stat_edge − injury_penalty",
+    },
     "generic_interactive": {
         "name": "Interactive partial model",
         "why": "No exact solver matched, but we can still model the closest problem with your assumptions.",

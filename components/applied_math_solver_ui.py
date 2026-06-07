@@ -6,6 +6,7 @@ import json
 from typing import Any
 
 from components.applied_math_problem_router import (
+    BASEBALL_DRAFT,
     BASEBALL_FUTURE_ACCUMULATION,
     BASEBALL_GENERIC,
     BASEBALL_PLAYER_COMPARE,
@@ -20,6 +21,7 @@ from components.applied_math_problem_router import (
     INVESTMENT_RISK_RETURN,
     NBA_GENERIC,
     NBA_INVERSE_STAT_CHASE,
+    NBA_MATCHUP_EDGE,
     NBA_STAT_CHASE,
     NBA_WIN_PROBABILITY,
     ProblemRoute,
@@ -297,6 +299,31 @@ def _seed_control_defaults(st: Any, route: ProblemRoute, defaults: dict[str, Any
             st.session_state[ck] = float(defaults.get("equity_correlation", 0.85))
         params["market_decline"] = float(st.session_state[mk])
         params["equity_correlation"] = float(st.session_state[ck])
+    elif pid == BASEBALL_DRAFT:
+        for name, key, default in (
+            ("current_pick", "pick", 18),
+            ("adp", "adp", 22.0),
+            ("projected_rank", "rank", 18),
+            ("replacement_value", "rep", 50.0),
+        ):
+            ck = _control_key(pid, key)
+            if ck not in st.session_state:
+                st.session_state[ck] = float(defaults.get(name, default)) if name != "current_pick" else int(defaults.get(name, default))
+            params[name] = float(st.session_state[ck]) if name != "current_pick" else int(st.session_state[ck])
+        rk = _control_key(pid, "risk")
+        if rk not in st.session_state:
+            st.session_state[rk] = str(defaults.get("risk_tolerance", "moderate"))
+        params["risk_tolerance"] = str(st.session_state[rk])
+    elif pid == NBA_MATCHUP_EDGE:
+        for name, key, default in (
+            ("injury_adjustment_pp", "inj", 5.0),
+            ("prob_threshold_pp", "thr", 8.0),
+            ("stat_gap_weight", "wgt", 0.4),
+        ):
+            ck = _control_key(pid, key)
+            if ck not in st.session_state:
+                st.session_state[ck] = float(defaults.get(name, default))
+            params[name] = float(st.session_state[ck])
     elif _is_generic_route(route):
         purpose = route.math_purpose or PURPOSE_COMPARE
         gpid = "generic_interactive"
@@ -540,6 +567,23 @@ def _render_controls(st: Any, route: ProblemRoute) -> None:
             st.slider("Assumed market decline (%)", -40.0, -5.0, key=_control_key(pid, "mkt"))
         with c2:
             st.slider("Equity correlation", 0.5, 1.0, key=_control_key(pid, "corr"))
+    elif pid == BASEBALL_DRAFT:
+        c1, c2 = st.columns(2)
+        with c1:
+            st.number_input("Current pick (overall)", min_value=1, max_value=300, key=_control_key(pid, "pick"))
+            st.number_input("ADP", min_value=1.0, max_value=300.0, step=0.5, key=_control_key(pid, "adp"))
+        with c2:
+            st.number_input("Projected rank", min_value=1, max_value=300, key=_control_key(pid, "rank"))
+            st.number_input("Replacement value", min_value=0.0, max_value=100.0, key=_control_key(pid, "rep"))
+        st.selectbox("Risk tolerance", ["conservative", "moderate", "aggressive"], key=_control_key(pid, "risk"))
+    elif pid == NBA_MATCHUP_EDGE:
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.slider("Injury penalty (pp)", 0.0, 15.0, key=_control_key(pid, "inj"))
+        with c2:
+            st.slider("Edge threshold (pp)", 3.0, 20.0, key=_control_key(pid, "thr"))
+        with c3:
+            st.slider("Stat gap weight", 0.1, 0.8, key=_control_key(pid, "wgt"))
     elif _is_generic_route(route):
         gpid = "generic_interactive"
         purpose = route.math_purpose or PURPOSE_COMPARE
@@ -613,15 +657,14 @@ def _render_controls(st: Any, route: ProblemRoute) -> None:
         st.caption("No assumption controls for this problem type yet.")
 
 
-def _render_live_dashboard(st: Any, result: SolverResult) -> None:
-    """Show pass/fail and key computed values after hands-on controls."""
+def _render_live_dashboard(st: Any, result: SolverResult, *, max_metrics: int = 3) -> None:
+    """Show key computed values — capped for cleaner layout."""
     if not result.live_metrics:
         return
-    st.markdown("**At these assumptions:**")
-    n = len(result.live_metrics)
-    cols = st.columns(min(n, 4))
-    for i, (label, value) in enumerate(result.live_metrics.items()):
-        with cols[i % len(cols)]:
+    items = list(result.live_metrics.items())[:max_metrics]
+    cols = st.columns(len(items))
+    for i, (label, value) in enumerate(items):
+        with cols[i]:
             st.metric(label, value)
 
 
@@ -631,8 +674,10 @@ def render_coach_answer(
     result: SolverResult,
     *,
     question: str = "",
+    source_app: str = "",
+    source_page: str = "",
 ) -> bool:
-    """Math-coach layout: question → short answer → why → math → calculation → controls → sensitivity."""
+    """Card-based learning layout — question → answer → math → try it → sensitivity."""
     q = (question or result.question or "").strip()
     short = (result.short_answer or result.conclusion or result.result or "").strip()
     if not short or short.lower().startswith("framework"):
@@ -642,84 +687,98 @@ def render_coach_answer(
         )
         return False
 
+    intent_txt = (result.intent_restatement or route.intent_restatement or "").strip()
+    model_name = (result.model_name or route.model_name or route.problem_type or "").strip()
+    model_rationale = (result.model_rationale or route.model_rationale or "").strip()
+    why = (result.why or "").strip()
+    if not why and result.reasons:
+        why = result.reasons[0]
+    conf_pct = result.confidence_pct
+    conf_lbl = result.confidence_label or (f"{conf_pct}%" if conf_pct is not None else "")
+
+    # 1 — Question card
     with st.container(border=True):
-        st.markdown("#### 1. Your question")
+        st.markdown("##### Your question")
+        if source_app:
+            try:
+                from suite_analytical_question import source_app_label
+
+                src = source_app_label(source_app)
+            except Exception:
+                src = source_app
+            st.caption(f"From **{src}**" + (f" · {source_page}" if source_page else ""))
         if q:
             st.markdown(f'*"{q}"*')
-        else:
-            st.caption("Question text unavailable.")
-
-        intent_txt = (result.intent_restatement or route.intent_restatement or "").strip()
-        model_name = (result.model_name or route.model_name or "").strip()
-        model_rationale = (result.model_rationale or route.model_rationale or "").strip()
         if intent_txt:
-            st.markdown(f"**What you're really asking:** {intent_txt}")
+            st.markdown(f"**What you're asking:** {intent_txt}")
+
+    # 2 — Answer card
+    with st.container(border=True):
+        st.markdown("##### Answer")
+        st.markdown(f"### {short}")
+        if conf_lbl:
+            st.caption(f"Confidence: **{conf_lbl}**")
+        if why:
+            st.markdown(f"**Main reason:** {why}")
+
+    # 3 — Math card (formula details collapsed)
+    with st.container(border=True):
+        st.markdown("##### The math")
         if model_name:
-            st.markdown(f"**Model selected:** {model_name}")
+            st.markdown(f"**Model:** {model_name}")
         if model_rationale:
-            st.markdown(f"**Why this model:** {model_rationale}")
+            st.caption(model_rationale.replace("**", ""))
+        if result.math_idea:
+            st.markdown(result.math_idea)
+        with st.expander("Variables & calculation", expanded=False):
+            if result.variables:
+                st.markdown(f"```\n{result.variables.strip()}\n```")
+            if result.calculation:
+                st.markdown(result.calculation)
+        if result.partial and result.data_would_improve:
+            st.caption(result.data_would_improve[0])
+
+    # 4 — Try it yourself
+    with st.container(border=True):
+        st.markdown("##### Try it yourself")
+        st.caption("Adjust an assumption — the answer updates automatically.")
+        _render_controls(st, route)
+        _render_live_dashboard(st, result, max_metrics=3)
+
+    # 5 — Sensitivity
+    sens = (result.sensitivity_plain or result.pivot_assumption or result.sensitivity_notes or "").strip()
+    if sens or result.sensitivity_rows:
+        with st.container(border=True):
+            st.markdown("##### What changes the answer?")
+            if sens:
+                st.markdown(sens)
+            if result.sensitivity_rows:
+                try:
+                    import pandas as pd
+
+                    st.dataframe(
+                        pd.DataFrame(result.sensitivity_rows),
+                        hide_index=True,
+                        use_container_width=True,
+                    )
+                except Exception:
+                    for row in result.sensitivity_rows[:4]:
+                        st.markdown(
+                            f"- **{row.get('Parameter', '')}** · {row.get('Scenario', '')} → {row.get('Outcome', '')}"
+                        )
+
+    # 6 — Details (assumptions + data audit)
+    with st.expander("Details & assumptions", expanded=False):
         relevant = result.data_relevant or route.data_relevant
         missing = route.data_missing_interp or route.missing_fields
         if relevant:
-            st.caption("Data available: " + ", ".join(relevant[:6]))
+            st.markdown("**Data used:** " + ", ".join(relevant[:8]))
         if missing:
-            st.caption("Data missing (enter below or re-send from source app): " + ", ".join(str(m) for m in missing[:6]))
+            st.markdown("**Data missing:** " + ", ".join(str(m) for m in missing[:8]))
         solv = result.solvability or route.solvability
         if solv:
-            st.caption(f"Solvability: **{solv}**")
-
-        st.markdown("#### 2. Short answer")
-        st.markdown(short)
-
-        why = (result.why or "").strip()
-        if not why and result.reasons:
-            why = result.reasons[0]
-        if why:
-            st.markdown("#### 3. Why")
-            st.markdown(why)
-
-    st.markdown("#### 4. The math idea")
-    if result.math_idea:
-        st.markdown(result.math_idea)
-
-    if result.variables:
-        st.markdown("#### 5. Variables")
-        st.markdown(f"```\n{result.variables.strip()}\n```")
-
-    if result.calculation:
-        st.markdown("#### 6. Calculation")
-        st.markdown(result.calculation)
-
-    if result.partial and result.data_would_improve:
-        for hint in result.data_would_improve[:2]:
-            st.info(hint)
-
-    st.markdown("#### 7. Hands-on controls")
-    st.caption("Change an assumption — the answer and live result update automatically.")
-    _render_controls(st, route)
-    _render_live_dashboard(st, result)
-
-    st.markdown("#### 8. What changes the answer?")
-    sens = (result.sensitivity_plain or result.pivot_assumption or result.sensitivity_notes or "").strip()
-    if sens:
-        st.markdown(sens)
-    if result.sensitivity_rows:
-        try:
-            import pandas as pd
-
-            st.dataframe(
-                pd.DataFrame(result.sensitivity_rows),
-                hide_index=True,
-                use_container_width=True,
-            )
-        except Exception:
-            for row in result.sensitivity_rows:
-                st.markdown(
-                    f"- **{row.get('Parameter', '')}** · {row.get('Scenario', '')} → {row.get('Outcome', '')}"
-                )
-
-    if result.assumptions:
-        with st.expander("Assumptions behind this model", expanded=False):
+            st.caption(f"Solvability: {solv}")
+        if result.assumptions:
             for a in result.assumptions:
                 st.markdown(f"- {a}")
 
@@ -744,8 +803,17 @@ def render_solver_sections(
     result: SolverResult,
     *,
     question: str = "",
+    source_app: str = "",
+    source_page: str = "",
 ) -> None:
-    render_coach_answer(st, route, result, question=question)
+    render_coach_answer(
+        st,
+        route,
+        result,
+        question=question,
+        source_app=source_app,
+        source_page=source_page,
+    )
 
 
 def render_solver_dev_diagnostics(
@@ -894,6 +962,50 @@ def render_suite_solver_answer(
     )
     st.session_state["_ami_last_solver_trace"] = trace.to_dict()
 
-    render_solver_sections(st, route, result, question=question)
+    render_solver_sections(
+        st,
+        route,
+        result,
+        question=question,
+        source_app=source_app,
+        source_page=source_page,
+    )
+
+    # Return insight to source app (v1 — display only)
+    try:
+        from applied_math_return_insight import (
+            build_applied_math_full_analysis_url,
+            build_return_insight_payload,
+            render_return_to_source_button,
+            stage_pending_insight,
+        )
+        from suite_analytical_question import build_question_payload
+
+        qid = str(st.session_state.get("_suite_ai_question_id") or "").strip()
+        resume_key = f"ai:question:{qid}" if qid else ""
+        payload = build_question_payload(
+            source_app=source_app,
+            source_page=source_page,
+            question=question,
+            context=ctx,
+        )
+        full_url = build_applied_math_full_analysis_url(payload)
+        insight = build_return_insight_payload(
+            question=question,
+            source_app=source_app,
+            source_page=source_page,
+            question_id=qid,
+            route=route,
+            result=result,
+            resume_key=resume_key,
+            full_analysis_url=full_url,
+            context=ctx,
+        )
+        stage_pending_insight(st, insight, return_context=ctx)
+        st.markdown("---")
+        render_return_to_source_button(st, insight, resume_key=resume_key, return_context=ctx)
+    except Exception:
+        pass
+
     render_solver_dev_diagnostics(st, route=route, result=result, trace=trace, context=ctx)
     return trace
