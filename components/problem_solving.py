@@ -1,6 +1,7 @@
 """Solve a Problem — seven quantitative areas, analyst flow."""
 
 import hashlib
+import json
 import re
 
 import streamlit as st
@@ -66,13 +67,22 @@ def _render_area_hub() -> None:
         ctx_dict: dict = {}
         if ctx_raw:
             try:
-                import json
-
                 parsed = json.loads(ctx_raw)
                 if isinstance(parsed, dict):
                     ctx_dict = parsed
             except Exception:
                 pass
+        if not ctx_dict:
+            qid = str(st.session_state.get("_suite_ai_question_id") or "").strip()
+            if qid:
+                try:
+                    from suite_analytical_question import load_analytical_question_context
+
+                    ctx_dict = load_analytical_question_context(qid)
+                    if ctx_dict:
+                        st.session_state["_suite_ai_context"] = json.dumps(ctx_dict, ensure_ascii=False)
+                except Exception:
+                    pass
 
         st.markdown("#### Applied Math question")
         st.markdown(f"**Question:** {preloaded}")

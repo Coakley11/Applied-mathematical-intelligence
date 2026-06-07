@@ -74,6 +74,7 @@ def _baseball_analysis(question: str, ctx: dict[str, Any]) -> FirstPassAnalysis:
             ),
         ]
         trend_data = ctx.get("trend_summary")
+        data_needed: list[str] = []
         if isinstance(trend_data, dict) and trend_data:
             direction = trend_data.get("direction", "unknown")
             slope = trend_data.get("slope")
@@ -128,11 +129,25 @@ def _baseball_analysis(question: str, ctx: dict[str, Any]) -> FirstPassAnalysis:
         pa = str(ctx.get("player_a") or "").strip()
         pb = str(ctx.get("player_b") or "").strip()
         pair = f"**{pa}** vs **{pb}**" if pa and pb else "the selected players"
+        diff_note = ""
+        diffs = ctx.get("comparison_differences")
+        if isinstance(diffs, list) and diffs:
+            bits = []
+            for d in diffs[:2]:
+                if not isinstance(d, dict):
+                    continue
+                name = str(d.get("player") or "").strip()
+                slope = d.get("Slope") or d.get("slope")
+                if name and slope is not None:
+                    bits.append(f"{name}: slope {slope}")
+            if bits:
+                diff_note = " From context: " + "; ".join(bits) + "."
+        stats = _ctx_list(ctx.get("comparison_stats")) or metrics
         return FirstPassAnalysis(
             problem_type="Player value comparison",
             method="Rate-stat comparison with playing-time normalization",
             sections=[
-                ("Problem type", f"Compare fantasy/value contribution: {pair}."),
+                ("Problem type", f"Compare fantasy/value contribution: {pair} on {', '.join(stats[:3])}."),
                 (
                     "Mathematical approach",
                     "Normalize counting stats by PA/AB; compare rate stats (OBP, OPS) directly. "
@@ -143,9 +158,11 @@ def _baseball_analysis(question: str, ctx: dict[str, Any]) -> FirstPassAnalysis:
                 f"First pass: express both players in **value per plate appearance** for your league categories, "
                 f"then subtract. The larger gap on scarce categories (SB, HR in some leagues) drives the decision. "
                 "If gaps are within one standard error of career rates, call it **too close to call**."
+                f"{diff_note}"
             ),
             assumptions=["Same position eligibility matters for roster fit.", "Recent window reflects expected role."],
             limitations=["Does not include injury risk or playing-time projection without extra data."],
+            data_needed=[] if (pa and pb) else ["Both player names and comparison stats"],
         )
 
     return FirstPassAnalysis(
@@ -176,7 +193,18 @@ def _nba_analysis(question: str, ctx: dict[str, Any]) -> FirstPassAnalysis:
         players = re.findall(r"[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+", question)
         target = players[0] if players else "the leader"
         challenger = players[1] if len(players) > 1 else str(ctx.get("player") or "the challenger")
-        gap_note = str(ctx.get("stat_gap") or "").strip()
+        gap_ctx = ctx.get("stat_gap")
+        gap_note = ""
+        games_rem = ctx.get("games_remaining")
+        rate_needed = ctx.get("rate_needed")
+        if isinstance(gap_ctx, dict):
+            gap_note = str(gap_ctx.get("summary") or "").strip()
+            challenger = str(gap_ctx.get("player") or challenger)
+            target = str(gap_ctx.get("comparison") or target)
+            games_rem = gap_ctx.get("games_remaining") or games_rem
+            rate_needed = gap_ctx.get("rate_needed") or rate_needed
+        elif gap_ctx:
+            gap_note = str(gap_ctx).strip()
         sections = [
             (
                 "Problem type",
@@ -192,11 +220,15 @@ def _nba_analysis(question: str, ctx: dict[str, Any]) -> FirstPassAnalysis:
             ),
         ]
         answer = (
-            f"Set **Gap** = Houston total − Brunson total (playoff rebounds only). "
-            f"Estimate **E[remaining]** = (games left in series/playoffs) × (Brunson's playoff RPG). "
+            f"Set **Gap** = {target} total − {challenger} total (playoff stat from context). "
+            f"Estimate **E[remaining]** = (games left) × (challenger rate per game). "
             "If Gap > E[remaining] + margin for volatility, **unlikely**; if Gap is small relative to "
-            "2–3 games at his usual rate, **plausible but not certain**."
+            "2–3 games at usual rate, **plausible but not certain**."
         )
+        if games_rem is not None:
+            answer += f" Games remaining in context: **{games_rem}**."
+        if rate_needed is not None:
+            answer += f" Rate needed per game: **{rate_needed}**."
         if gap_note:
             answer = f"{gap_note} {answer}"
         return FirstPassAnalysis(
@@ -295,21 +327,34 @@ def _investment_analysis(question: str, ctx: dict[str, Any]) -> FirstPassAnalysi
             data_needed=data_needed_list,
         )
 
+    macro = ctx.get("macro_outlook") or ctx.get("macro_summary")
+    hist_note = str(ctx.get("context_note_historical") or "").strip()
+    fwd_note = str(ctx.get("context_note_forward") or "").strip()
+    macro_assumption = str(macro or "Macro assumptions not attached.")
+    if fwd_note:
+        macro_assumption += f" ({fwd_note})"
+    if hist_note and ("macro" in topics or macro):
+        macro_assumption = f"{macro_assumption} Historical metrics note: {hist_note}"
+
     return FirstPassAnalysis(
         problem_type="Portfolio risk / return analysis",
         method="Expected return vs volatility vs goal fit",
         sections=[
             (
                 "Approach",
-                "Express portfolio quality as return per unit risk, adjusted for concentration and macro regime.",
+                "Express portfolio quality as return per unit risk, adjusted for concentration and macro regime. "
+                + (f"Macro outlook: {macro}" if macro else ""),
             ),
         ],
         answer=(
             f"{'Health score: ' + str(health) + '. ' if health is not None else ''}"
             f"{'Holdings: ' + ', '.join(holdings[:4]) + '. ' if holdings else ''}"
-            "Compare expected return to volatility for your horizon; flag if one sector dominates risk."
+            f"{'Sharpe: ' + str(ctx.get('sharpe_ratio')) + '. ' if ctx.get('sharpe_ratio') else ''}"
+            f"{'Max drawdown: ' + str(ctx.get('max_drawdown')) + '. ' if ctx.get('max_drawdown') else ''}"
+            "Compare expected return to volatility for your horizon; flag if one sector dominates risk. "
+            + (hist_note if hist_note else "")
         ),
-        assumptions=[str(ctx.get("macro_summary") or "Macro assumptions not attached.")],
+        assumptions=[macro_assumption],
         limitations=["Attach weights and return/volatility from Portfolio Health for numeric recommendation."],
     )
 
