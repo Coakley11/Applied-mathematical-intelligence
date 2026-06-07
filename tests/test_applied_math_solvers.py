@@ -230,13 +230,16 @@ class TestConclusionEngine(unittest.TestCase):
             source_app="baseball",
             context={"player_a": "Juan Soto", "player_b": "Aaron Judge"},
         )
+        # "Surpass" is a forecast question — routes to future accumulation, not static compare.
+        from components.applied_math_problem_router import BASEBALL_FUTURE_ACCUMULATION
+
+        self.assertEqual(route.problem_type_id, BASEBALL_FUTURE_ACCUMULATION)
         result = dispatch_solver(
             route,
             "Is Soto likely to surpass Judge?",
             {"player_a": "Juan Soto", "player_b": "Aaron Judge"},
         )
         self.assertIn("attach", result.conclusion.lower())
-        self.assertTrue(result.data_would_improve)
 
     def test_finalize_fills_confidence_from_route(self) -> None:
         route, result = solve_suite_question(

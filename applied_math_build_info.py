@@ -8,10 +8,10 @@ from pathlib import Path
 # Bump on each solver release; shown when git is unavailable.
 GIT_COMMIT_PINNED = "fdbfd0a"
 GIT_BRANCH_PINNED = "dev"
-SOLVER_BUILD_MARKER = "2026-06-08-broad-solvers-p0p1-v6"
-SOLVER_UI_VERSION = "2.5.0"
-ROUTER_VERSION = "1.3.0"
-SOLVER_CORE_VERSION = "2.4.0"
+SOLVER_BUILD_MARKER = "2026-06-08-question-intent-v7"
+SOLVER_UI_VERSION = "2.6.0"
+ROUTER_VERSION = "1.4.0"
+SOLVER_CORE_VERSION = "2.5.0"
 
 
 def _git_short_commit() -> str:

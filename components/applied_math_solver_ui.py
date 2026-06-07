@@ -6,10 +6,12 @@ import json
 from typing import Any
 
 from components.applied_math_problem_router import (
+    BASEBALL_FUTURE_ACCUMULATION,
     BASEBALL_PLAYER_COMPARE,
     BASEBALL_PROJECTION,
     BASEBALL_TREND,
     INVESTMENT_CONCENTRATION,
+    INVESTMENT_DRAWDOWN_ATTRIBUTION,
     INVESTMENT_MACRO,
     INVESTMENT_REBALANCE,
     INVESTMENT_RISK_RETURN,
@@ -238,6 +240,32 @@ def _seed_control_defaults(st: Any, route: ProblemRoute, defaults: dict[str, Any
             st.session_state[ck] = float(defaults.get("max_above_career_pct", 35.0))
         params["max_above_recent_pct"] = float(st.session_state[rk])
         params["max_above_career_pct"] = float(st.session_state[ck])
+    elif pid == BASEBALL_FUTURE_ACCUMULATION:
+        for name, key, default in (
+            ("seasons_a", "sa", 10),
+            ("seasons_b", "sb", 10),
+        ):
+            ck = _control_key(pid, key)
+            if ck not in st.session_state:
+                st.session_state[ck] = int(defaults.get(name, default))
+            params[name] = int(st.session_state[ck])
+        for name, key, default in (
+            ("decline_a", "da", 0.02),
+            ("decline_b", "db", 0.03),
+        ):
+            ck = _control_key(pid, key)
+            if ck not in st.session_state:
+                st.session_state[ck] = float(defaults.get(name, default))
+            params[name] = float(st.session_state[ck])
+    elif pid == INVESTMENT_DRAWDOWN_ATTRIBUTION:
+        mk = _control_key(pid, "mkt")
+        ck = _control_key(pid, "corr")
+        if mk not in st.session_state:
+            st.session_state[mk] = float(defaults.get("market_decline", -20.0))
+        if ck not in st.session_state:
+            st.session_state[ck] = float(defaults.get("equity_correlation", 0.85))
+        params["market_decline"] = float(st.session_state[mk])
+        params["equity_correlation"] = float(st.session_state[ck])
 
     return params
 
@@ -389,6 +417,20 @@ def _render_controls(st: Any, route: ProblemRoute) -> None:
                 step=1.0,
                 key=_control_key(pid, "career"),
             )
+    elif pid == BASEBALL_FUTURE_ACCUMULATION:
+        c1, c2 = st.columns(2)
+        with c1:
+            st.number_input(f"Seasons remaining (player A)", min_value=1, max_value=20, key=_control_key(pid, "sa"))
+            st.slider("Decline rate A (per season)", 0.0, 0.15, key=_control_key(pid, "da"))
+        with c2:
+            st.number_input(f"Seasons remaining (player B)", min_value=1, max_value=20, key=_control_key(pid, "sb"))
+            st.slider("Decline rate B (per season)", 0.0, 0.15, key=_control_key(pid, "db"))
+    elif pid == INVESTMENT_DRAWDOWN_ATTRIBUTION:
+        c1, c2 = st.columns(2)
+        with c1:
+            st.slider("Assumed market decline (%)", -40.0, -5.0, key=_control_key(pid, "mkt"))
+        with c2:
+            st.slider("Equity correlation", 0.5, 1.0, key=_control_key(pid, "corr"))
     else:
         st.caption("No assumption controls for this problem type yet.")
 
@@ -428,6 +470,13 @@ def render_coach_answer(
             st.markdown(f'*"{q}"*')
         else:
             st.caption("Question text unavailable.")
+
+        intent_txt = (result.intent_restatement or route.intent_restatement or "").strip()
+        intent_lbl = route.intent_label or result.question_intent
+        if intent_txt:
+            st.markdown(f"**What you're really asking:** {intent_txt}")
+        if intent_lbl and intent_lbl not in intent_txt:
+            st.caption(f"Question type: {intent_lbl}")
 
         st.markdown("#### 2. Short answer")
         st.markdown(short)

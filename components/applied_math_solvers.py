@@ -9,6 +9,7 @@ from typing import Any
 
 from components.applied_math_problem_router import (
     BASEBALL_DRAFT,
+    BASEBALL_FUTURE_ACCUMULATION,
     BASEBALL_GENERIC,
     BASEBALL_HISTORICAL,
     BASEBALL_PLAYER_COMPARE,
@@ -16,6 +17,7 @@ from components.applied_math_problem_router import (
     BASEBALL_TREND,
     GENERIC_FALLBACK,
     INVESTMENT_CONCENTRATION,
+    INVESTMENT_DRAWDOWN_ATTRIBUTION,
     INVESTMENT_GENERIC,
     INVESTMENT_MACRO,
     INVESTMENT_REBALANCE,
@@ -62,6 +64,8 @@ class SolverResult:
     why: str = ""
     sensitivity_plain: str = ""
     live_metrics: dict[str, str] = field(default_factory=dict)
+    question_intent: str = ""
+    intent_restatement: str = ""
 
     # Legacy alias — older code/tests referenced problem_detected
     @property
@@ -157,6 +161,10 @@ def _finalize_result(route: ProblemRoute, result: SolverResult) -> SolverResult:
             f"Use the controls below to enter **{field.split('.')[-1]}** and solve hands-on."
             for field in result.missing_fields[:4]
         ]
+    if route.question_intent:
+        result.question_intent = route.question_intent
+    if route.intent_restatement:
+        result.intent_restatement = route.intent_restatement
     return result
 
 
@@ -1975,6 +1983,353 @@ def solve_baseball_projection_realism(
     )
 
 
+def _stat_row_for_focus(
+    rows: list[tuple[str, float, float]],
+    focus: str,
+) -> tuple[str, float, float] | None:
+    if not rows:
+        return None
+    focus_low = focus.lower()
+    for stat, a, b in rows:
+        if focus_low in stat.lower() or stat.lower() in focus_low:
+            return stat, a, b
+    # Prefer runs-like stats for forecast questions
+    for stat, a, b in rows:
+        if any(k in stat.lower() for k in ("run", "rbi", "hr", "hit")):
+            return stat, a, b
+    return rows[0]
+
+
+def _accumulate_with_decline(rate: float, seasons: int, decline: float) -> float:
+    """Total stat over seasons with per-season decline factor."""
+    total = 0.0
+    for t in range(seasons):
+        total += rate * ((1.0 - decline) ** t)
+    return total
+
+
+def solve_baseball_future_accumulation(
+    ctx: dict[str, Any],
+    question: str,
+    *,
+    seasons_a: int | None = None,
+    seasons_b: int | None = None,
+    decline_a: float = 0.02,
+    decline_b: float = 0.03,
+    horizon_seasons: int = 10,
+) -> SolverResult:
+    from components.applied_math_question_intent import classify_question_intent
+
+    intent = classify_question_intent(question)
+    pa = str(ctx.get("player_a") or "Player A").strip()
+    pb = str(ctx.get("player_b") or "Player B").strip()
+    focus = intent.focus_stat or "runs"
+    rows = _collect_comparison_rows(ctx, pa, pb)
+    picked = _stat_row_for_focus(rows, focus)
+    stat_name = picked[0] if picked else focus
+    rate_a = picked[1] if picked else None
+    rate_b = picked[2] if picked else None
+
+    # Parse ages from context if present
+    age_a = _num(ctx.get("player_a_age") or ctx.get("age_a"))
+    age_b = _num(ctx.get("player_b_age") or ctx.get("age_b"))
+    if isinstance(ctx.get("_ami_comparison_context"), dict):
+        for k, v in ctx["_ami_comparison_context"].items():
+            if "age" in k.lower() and pa.split()[-1].lower() in str(v).lower():
+                age_a = age_a or _extract_pair_values(str(v))[0]
+            if "age" in k.lower() and pb.split()[-1].lower() in str(v).lower():
+                age_b = age_b or _extract_pair_values(str(v))[0]
+        if "Age" in ctx["_ami_comparison_context"]:
+            a_age, b_age = _extract_pair_values(str(ctx["_ami_comparison_context"]["Age"]))
+            age_a = age_a or a_age
+            age_b = age_b or b_age
+
+    default_seasons = horizon_seasons
+    if intent.horizon:
+        m = re.search(r"(\d+)", intent.horizon)
+        if m:
+            default_seasons = int(m.group(1))
+
+    sa = seasons_a if seasons_a is not None else default_seasons
+    sb = seasons_b if seasons_b is not None else default_seasons
+    # Younger player often projects more remaining seasons — rough default from age
+    if age_a is not None and age_b is not None and seasons_a is None and seasons_b is None:
+        if age_a < age_b:
+            sa = default_seasons
+            sb = max(1, default_seasons - int(age_b - age_a))
+        elif age_b < age_a:
+            sb = default_seasons
+            sa = max(1, default_seasons - int(age_a - age_b))
+
+    missing: list[str] = []
+    if rate_a is None or rate_b is None:
+        missing.append("comparison_stats (rate for focus stat)")
+
+    math_idea = (
+        f"This is a **future accumulation** forecast — not who is better today. "
+        f"We project total **{stat_name}** as runs-per-season × remaining seasons, adjusted for decline."
+    )
+    variables = (
+        f"rate = {stat_name} per season\n"
+        f"seasons = projected seasons remaining\n"
+        f"decline = yearly production decline (0–1)\n"
+        f"total = Σ rate × (1 − decline)^t"
+    )
+
+    total_a = total_b = 0.0
+    calc = ""
+    if rate_a is not None and rate_b is not None:
+        total_a = _accumulate_with_decline(rate_a, sa, decline_a)
+        total_b = _accumulate_with_decline(rate_b, sb, decline_b)
+        calc = (
+            f"**{pa}**: {rate_a:g} {stat_name}/season × **{sa}** seasons (decline **{decline_a:.0%}/yr**)\n"
+            f"→ projected total ≈ **{total_a:.0f}** {stat_name}\n\n"
+            f"**{pb}**: {rate_b:g} {stat_name}/season × **{sb}** seasons (decline **{decline_b:.0%}/yr**)\n"
+            f"→ projected total ≈ **{total_b:.0f}** {stat_name}"
+        )
+
+    short_answer = "Attach per-season rates for both players from the chart."
+    why = ""
+    live_metrics: dict[str, str] = {}
+
+    if rate_a is not None and rate_b is not None:
+        leader = pa if total_a > total_b * 1.02 else pb if total_b > total_a * 1.02 else ""
+        if leader:
+            short_answer = (
+                f"**{leader}** projects to accumulate more **{stat_name}** over the horizon "
+                f"({total_a:.0f} vs {total_b:.0f}), even though today's rate may differ."
+            )
+        else:
+            short_answer = f"Too close to call — projected totals **{total_a:.0f}** vs **{total_b:.0f}** {stat_name}."
+        if age_a is not None and age_b is not None and age_a != age_b:
+            younger = pa if age_a < age_b else pb
+            why = (
+                f"**{younger}** is younger ({min(age_a, age_b):.0f} vs {max(age_a, age_b):.0f}), "
+                f"so more projected seasons can outweigh a lower current rate."
+            )
+        else:
+            why = (
+                f"Future totals depend on rate × seasons × decline — "
+                f"**{pa}** {rate_a:g}/yr for **{sa}** seasons vs **{pb}** {rate_b:g}/yr for **{sb}**."
+            )
+        live_metrics = {
+            f"{pa} projected {stat_name}": f"{total_a:.0f}",
+            f"{pb} projected {stat_name}": f"{total_b:.0f}",
+            "Leader (forecast)": leader or "Toss-up",
+        }
+
+    data_used = [
+        x
+        for x in (
+            f"Focus stat: **{stat_name}**",
+            f"{pa} rate: **{rate_a:g}**/season" if rate_a is not None else "",
+            f"{pb} rate: **{rate_b:g}**/season" if rate_b is not None else "",
+            f"Horizon: **{default_seasons}** seasons",
+            f"Ages: {pa} **{age_a:g}**, {pb} **{age_b:g}**" if age_a and age_b else "",
+        )
+        if x
+    ]
+
+    sens_rows: list[dict[str, str]] = []
+    if rate_a and rate_b and sa:
+        for s in (8, 10, 12):
+            ta = _accumulate_with_decline(rate_a, s, decline_a)
+            tb = _accumulate_with_decline(rate_b, s, decline_b)
+            out = pa if ta > tb else pb if tb > ta else "Tie"
+            sens_rows.append({"Parameter": f"{pa} seasons", "Scenario": str(s), "Outcome": f"{out} leads"})
+
+    return _coach_result(
+        question=question,
+        problem_type="Future stat accumulation forecast",
+        math_idea=math_idea,
+        variables=variables,
+        data_used=data_used,
+        calculation=calc or "Need per-season rates from the comparison chart.",
+        result=short_answer,
+        interpretation=why,
+        assumptions=[
+            "Decline rates are illustrative aging curves, not injury-adjusted.",
+            "Seasons remaining can differ by age and durability.",
+        ],
+        sensitivity_notes="More seasons for the younger player can flip the forecast even if their current rate is lower.",
+        missing_fields=missing,
+        partial=bool(missing),
+        problem_type_id=BASEBALL_FUTURE_ACCUMULATION,
+        computed={
+            "total_a": total_a,
+            "total_b": total_b,
+            "rate_a": rate_a,
+            "rate_b": rate_b,
+            "seasons_a": sa,
+            "seasons_b": sb,
+        },
+        default_controls={
+            "seasons_a": sa,
+            "seasons_b": sb,
+            "decline_a": decline_a,
+            "decline_b": decline_b,
+            "horizon_seasons": default_seasons,
+        },
+        conclusion=short_answer,
+        confidence_pct=76 if rate_a and rate_b else 44,
+        reasons=[why] if why else [],
+        short_answer=short_answer,
+        why=why,
+        sensitivity_plain="Adjust remaining seasons and decline rates — age advantage shows up in seasons, not just today's rate.",
+        live_metrics=live_metrics,
+        sensitivity_rows=sens_rows,
+    )
+
+
+def solve_investment_drawdown_attribution(
+    ctx: dict[str, Any],
+    question: str,
+    *,
+    focus_ticker: str = "",
+    market_decline: float = -20.0,
+    equity_correlation: float = 0.85,
+) -> SolverResult:
+    from components.applied_math_question_intent import classify_question_intent
+
+    intent = classify_question_intent(question)
+    ticker = (focus_ticker or intent.attribution_target or "VTI").strip().upper()
+    weights = _parse_weights_map(ctx.get("current_weights") if isinstance(ctx.get("current_weights"), dict) else {})
+    max_dd = _num(ctx.get("max_drawdown"))
+    holdings = _ctx_list(ctx.get("holdings"))
+
+    w = weights.get(ticker)
+    if w is None:
+        for k, v in weights.items():
+            if k.upper() == ticker:
+                w = v
+                ticker = k
+                break
+
+    missing: list[str] = []
+    if not weights:
+        missing.append("current_weights")
+    if w is None:
+        missing.append(f"weight for {ticker}")
+
+    math_idea = (
+        f"This is **drawdown attribution** — why **{ticker}** contributes to portfolio drawdown risk. "
+        f"Cause first: weight × exposure; stress scenarios come second."
+    )
+    variables = (
+        "weight_i = portfolio fraction\n"
+        "drawdown_contribution_i ≈ weight_i × market_decline × correlation\n"
+        "concentration amplifies when one holding dominates equity exposure"
+    )
+
+    calc_lines: list[str] = []
+    top_equity_share = 0.0
+    if weights:
+        sorted_w = sorted(weights.items(), key=lambda x: x[1], reverse=True)
+        top_equity_share = sum(x[1] for x in sorted_w[:3])
+
+    contrib_pct = 0.0
+    if w is not None:
+        contrib_pct = abs(w * market_decline * equity_correlation)
+        calc_lines.append(f"**{ticker} weight** = **{w * 100:.1f}%**")
+        calc_lines.append(f"Assumed market decline = **{market_decline:g}%**")
+        calc_lines.append(f"Equity correlation ≈ **{equity_correlation:.2f}**")
+        calc_lines.append(
+            f"\nDrawdown contribution ≈ weight × decline × correlation\n"
+            f"= {w * 100:.1f}% × {abs(market_decline):g}% × {equity_correlation:.2f} "
+            f"≈ **{contrib_pct:.1f}pp** portfolio drawdown"
+        )
+        if max_dd is not None:
+            calc_lines.append(f"\nObserved portfolio max drawdown: **{max_dd:g}%**")
+
+    short_answer = f"Explain why **{ticker}** adds drawdown risk once weights are attached."
+    why = ""
+    live_metrics: dict[str, str] = {}
+
+    if w is not None:
+        if w >= 0.25:
+            short_answer = (
+                f"**{ticker}** creates drawdown risk because it is **{w * 100:.0f}%** of the portfolio — "
+                f"a large equity slice moves the whole account when markets fall."
+            )
+        else:
+            short_answer = (
+                f"**{ticker}** contributes an estimated **{contrib_pct:.1f}pp** to drawdown "
+                f"at **{w * 100:.0f}%** weight when equities drop **{abs(market_decline):g}%**."
+            )
+        why_parts = [
+            f"High weight (**{w * 100:.1f}%**) means market moves hit a big share of assets.",
+        ]
+        if top_equity_share >= 0.6:
+            why_parts.append(
+                f"Top-3 holdings are **{top_equity_share * 100:.0f}%** of the book — equity concentration adds correlation risk."
+            )
+        why = " ".join(why_parts)
+        live_metrics = {
+            f"{ticker} weight": f"{w * 100:.1f}%",
+            "Est. drawdown contribution": f"{contrib_pct:.1f}pp",
+            "Top-3 weight share": f"{top_equity_share * 100:.0f}%",
+        }
+
+    stress_note = (
+        f"\n\n**Then (what-if):** If markets fall **{abs(market_decline):g}%**, "
+        f"this holding alone contributes roughly **{contrib_pct:.1f}pp** to portfolio drawdown."
+        if w is not None
+        else ""
+    )
+
+    data_used = [
+        x
+        for x in (
+            f"**{ticker}** weight: **{w * 100:.1f}%**" if w is not None else "",
+            f"Portfolio max drawdown: **{max_dd:g}%**" if max_dd is not None else "",
+            f"Holdings: {', '.join(holdings[:4])}" if holdings else "",
+        )
+        if x
+    ]
+
+    return _coach_result(
+        question=question,
+        problem_type="Drawdown risk attribution",
+        math_idea=math_idea,
+        variables=variables,
+        data_used=data_used,
+        calculation="\n".join(calc_lines) + stress_note,
+        result=short_answer,
+        interpretation=why,
+        assumptions=[
+            f"{ticker} behaves like broad equity for correlation purposes.",
+            "Attribution is illustrative — not a full factor decomposition.",
+        ],
+        sensitivity_notes=stress_note.strip() if stress_note else "Adjust market decline to see contribution change.",
+        missing_fields=missing,
+        partial=bool(missing),
+        problem_type_id=INVESTMENT_DRAWDOWN_ATTRIBUTION,
+        computed={
+            "ticker": ticker,
+            "weight": w,
+            "contribution_pp": contrib_pct,
+            "market_decline": market_decline,
+        },
+        default_controls={
+            "focus_ticker": ticker,
+            "market_decline": market_decline,
+            "equity_correlation": equity_correlation,
+        },
+        conclusion=short_answer,
+        confidence_pct=78 if w is not None else 42,
+        reasons=[why] if why else [],
+        short_answer=short_answer,
+        why=why,
+        sensitivity_plain=(
+            f"If {ticker} weight drops from **{w * 100:.0f}%** to **{max(5, int(w * 100) - 10)}%**, "
+            f"drawdown contribution falls roughly in proportion."
+            if w is not None
+            else "Attach portfolio weights to quantify contribution."
+        ),
+        live_metrics=live_metrics,
+    )
+
+
 def _generic_solver(route: ProblemRoute, question: str, ctx: dict[str, Any]) -> SolverResult:
     model_note = "We can model this as a threshold/decision problem once one measurable quantity is attached."
     data_improve = [f"**{f}**" for f in route.missing_fields[:4]]
@@ -2053,6 +2408,24 @@ def dispatch_solver(
             acceptable_volatility=p.get("acceptable_volatility"),
         )
 
+    if pid == BASEBALL_FUTURE_ACCUMULATION:
+        return solve_baseball_future_accumulation(
+            ctx,
+            question,
+            seasons_a=p.get("seasons_a"),
+            seasons_b=p.get("seasons_b"),
+            decline_a=float(p.get("decline_a", 0.02)),
+            decline_b=float(p.get("decline_b", 0.03)),
+            horizon_seasons=int(p.get("horizon_seasons", 10)),
+        )
+    if pid == INVESTMENT_DRAWDOWN_ATTRIBUTION:
+        return solve_investment_drawdown_attribution(
+            ctx,
+            question,
+            focus_ticker=str(p.get("focus_ticker", "")),
+            market_decline=float(p.get("market_decline", -20.0)),
+            equity_correlation=float(p.get("equity_correlation", 0.85)),
+        )
     if pid == NBA_INVERSE_STAT_CHASE:
         return solve_nba_inverse_stat_chase(
             ctx,

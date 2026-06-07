@@ -6,6 +6,17 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from components.applied_math_question_intent import (
+    INTENT_IS_MEANINGFUL,
+    INTENT_SHOULD_I,
+    INTENT_WHAT_IF,
+    INTENT_WHY,
+    INTENT_WILL_HAPPEN,
+    INTENT_WHO_IS_BETTER,
+    QuestionIntent,
+    classify_question_intent,
+)
+
 # Stable IDs consumed by solvers and tests.
 NBA_STAT_CHASE = "nba_stat_chase"
 NBA_INVERSE_STAT_CHASE = "nba_inverse_stat_chase"
@@ -16,6 +27,7 @@ NBA_GENERIC = "nba_generic"
 
 BASEBALL_TREND = "baseball_trend_significance"
 BASEBALL_PLAYER_COMPARE = "baseball_player_comparison"
+BASEBALL_FUTURE_ACCUMULATION = "baseball_future_accumulation"
 BASEBALL_HISTORICAL = "baseball_historical_comparison"
 BASEBALL_DRAFT = "baseball_draft_decision"
 BASEBALL_PROJECTION = "baseball_projection_realism"
@@ -24,6 +36,7 @@ BASEBALL_GENERIC = "baseball_generic"
 INVESTMENT_REBALANCE = "investment_rebalance"
 INVESTMENT_RISK_RETURN = "investment_risk_return"
 INVESTMENT_CONCENTRATION = "investment_concentration"
+INVESTMENT_DRAWDOWN_ATTRIBUTION = "investment_drawdown_attribution"
 INVESTMENT_MACRO = "investment_macro_sensitivity"
 INVESTMENT_GENERIC = "investment_generic"
 
@@ -111,6 +124,16 @@ class ProblemRoute:
     required_fields: list[str] = field(default_factory=list)
     available_fields: list[str] = field(default_factory=list)
     missing_fields: list[str] = field(default_factory=list)
+    question_intent: str = ""
+    intent_label: str = ""
+    intent_restatement: str = ""
+
+
+def _with_intent(route: ProblemRoute, intent: QuestionIntent) -> ProblemRoute:
+    route.question_intent = intent.intent_id
+    route.intent_label = intent.label
+    route.intent_restatement = intent.restatement
+    return route
 
 
 def route_suite_question(
@@ -125,14 +148,15 @@ def route_suite_question(
     workflow = str(ctx.get("workflow") or "").lower()
     page = str(ctx.get("page") or "").lower()
     low = question.lower()
+    intent = classify_question_intent(question)
 
     if "baseball" in app:
-        return _route_baseball(question, ctx, topics, workflow, page)
+        return _with_intent(_route_baseball(question, ctx, topics, workflow, page, intent), intent)
     if "nba" in app:
-        return _route_nba(question, ctx, topics, workflow, low)
+        return _with_intent(_route_nba(question, ctx, topics, workflow, low, intent), intent)
     if "investment" in app:
-        return _route_investment(question, ctx, topics, low)
-    return ProblemRoute(
+        return _with_intent(_route_investment(question, ctx, topics, low, intent), intent)
+    route = ProblemRoute(
         problem_type_id=GENERIC_FALLBACK,
         problem_type="Quantitative decision (generic)",
         confidence=0.3,
@@ -141,6 +165,7 @@ def route_suite_question(
         available_fields=["question"] if question.strip() else [],
         missing_fields=[] if question.strip() else ["question"],
     )
+    return _with_intent(route, intent)
 
 
 def _route_baseball(
@@ -149,8 +174,32 @@ def _route_baseball(
     topics: set[str],
     workflow: str,
     page: str,
+    intent: QuestionIntent,
 ) -> ProblemRoute:
-    if "trend" in topics or "trend" in workflow:
+    low = question.lower()
+    # Future accumulation beats static compare when user asks about next N seasons.
+    if intent.intent_id == INTENT_WILL_HAPPEN or (
+        intent.intent_id == INTENT_WHO_IS_BETTER and intent.horizon
+    ):
+        req = ("player_a", "player_b")
+        avail, miss = _audit_fields(ctx, req)
+        has_rates = bool(
+            ctx.get("_ami_comparison_context")
+            or ctx.get("comparison_stats")
+            or ctx.get("comparison_differences")
+        )
+        if not has_rates:
+            miss = list(miss) + ["comparison_stats (rate for focus stat)"]
+        return ProblemRoute(
+            problem_type_id=BASEBALL_FUTURE_ACCUMULATION,
+            problem_type="Future stat accumulation forecast",
+            confidence=0.82 if has_rates and not miss else 0.52,
+            source_app="baseball",
+            required_fields=list(req) + ["comparison_stats"],
+            available_fields=avail + (["comparison_stats"] if has_rates else []),
+            missing_fields=miss,
+        )
+    if "trend" in topics or "trend" in workflow or intent.intent_id == INTENT_IS_MEANINGFUL:
         req = FIELD_SPECS[BASEBALL_TREND]
         avail, miss = _audit_fields(ctx, req)
         conf = 0.9 if not miss else 0.55 if avail else 0.4
@@ -163,7 +212,7 @@ def _route_baseball(
             available_fields=avail,
             missing_fields=miss,
         )
-    if "compare" in topics or "comparison" in workflow:
+    if ("compare" in topics or "comparison" in workflow) and intent.intent_id == INTENT_WHO_IS_BETTER:
         req = ("player_a", "player_b", "comparison_stats")
         avail, miss = _audit_fields(ctx, req)
         return ProblemRoute(
@@ -188,7 +237,9 @@ def _route_baseball(
             available_fields=avail,
             missing_fields=miss,
         )
-    if "draft" in topics or "draft" in workflow:
+    if "draft" in topics or "draft" in workflow or (
+        intent.intent_id == INTENT_SHOULD_I and "draft" in low
+    ):
         req = ("player", "draft_projection")
         avail, miss = _audit_fields(ctx, req)
         return ProblemRoute(
@@ -232,6 +283,7 @@ def _route_nba(
     topics: set[str],
     workflow: str,
     low: str,
+    intent: QuestionIntent,
 ) -> ProblemRoute:
     chase_words = ("pass", "rebound", "record", "catch", "overtake", "reach")
     inverse_phrases = (
@@ -273,7 +325,9 @@ def _route_nba(
             missing_fields=miss,
         )
     matchup_adv = ctx.get("matchup_advantages")
-    if "matchup" in workflow or (isinstance(matchup_adv, list) and matchup_adv):
+    if "matchup" in workflow or (isinstance(matchup_adv, list) and matchup_adv) or (
+        intent.intent_id == INTENT_IS_MEANINGFUL and "edge" in low
+    ):
         req = ("team", "opponent", "matchup_advantages")
         avail, miss = _audit_fields(ctx, req)
         return ProblemRoute(
@@ -325,8 +379,28 @@ def _route_investment(
     ctx: dict[str, Any],
     topics: set[str],
     low: str,
+    intent: QuestionIntent,
 ) -> ProblemRoute:
-    if "rebalance" in topics or "rebalance" in low:
+    # WHY + drawdown/risk → attribution first, not stress test.
+    if intent.intent_id == INTENT_WHY and (
+        "drawdown" in low
+        or ("risk" in low and ("why" in low or "create" in low or "cause" in low))
+        or "expos" in low
+    ):
+        req = ("current_weights",)
+        avail, miss = _audit_fields(ctx, req)
+        return ProblemRoute(
+            problem_type_id=INVESTMENT_DRAWDOWN_ATTRIBUTION,
+            problem_type="Drawdown risk attribution",
+            confidence=0.8 if avail else 0.48,
+            source_app="investment",
+            required_fields=list(req),
+            available_fields=avail,
+            missing_fields=miss,
+        )
+    if "rebalance" in topics or "rebalance" in low or (
+        intent.intent_id == INTENT_SHOULD_I and "rebalance" in low
+    ):
         req = FIELD_SPECS[INVESTMENT_REBALANCE]
         avail, miss = _audit_fields(ctx, req)
         return ProblemRoute(
@@ -356,7 +430,10 @@ def _route_investment(
             available_fields=avail,
             missing_fields=miss,
         )
-    if "macro" in topics or ctx.get("macro_outlook") or ctx.get("macro_summary"):
+    if intent.intent_id == INTENT_WHAT_IF or (
+        ("macro" in topics or ctx.get("macro_outlook") or ctx.get("macro_summary"))
+        and intent.intent_id != INTENT_WHY
+    ):
         req = ("macro_outlook", "expected_return", "volatility")
         avail, miss = _audit_fields(ctx, req)
         return ProblemRoute(
