@@ -54,6 +54,9 @@ def render_applied_math_context_diagnostics(
         st.markdown(f"**Source page:** {source_page or '—'}")
         st.markdown(f"**Context size:** {ctx_size} chars ({hydration})")
         st.markdown(f"**Question:** {question[:200]}{'…' if len(question) > 200 else ''}")
+        st.caption(
+            "Normal view shows 3–5 key inputs only. This panel is the full transferred payload."
+        )
 
         if present:
             st.markdown("**Fields received**")

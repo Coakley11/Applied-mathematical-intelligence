@@ -477,7 +477,8 @@ def analyze_suite_question(
 
         route, result = solve_suite_question(question, source_app=source_app, context=context)
         sections = [
-            ("Problem detected", result.problem_detected),
+            ("Mathematical idea", result.math_idea),
+            ("Variables", result.variables),
             ("Calculation", result.calculation),
             ("Result", result.result),
             ("Interpretation", result.interpretation),
@@ -485,7 +486,7 @@ def analyze_suite_question(
         return FirstPassAnalysis(
             problem_type=route.problem_type,
             method=f"Rule-based solver ({route.problem_type_id}, confidence {route.confidence:.0%})",
-            sections=sections,
+            sections=[(h, b) for h, b in sections if b],
             answer=" ".join(
                 x
                 for x in (

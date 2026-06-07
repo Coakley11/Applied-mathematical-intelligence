@@ -85,26 +85,18 @@ def _render_area_hub() -> None:
                     pass
 
         st.markdown("#### Applied Math question")
-        st.markdown(f"**Question:** {preloaded}")
+        st.markdown(f"**{preloaded}**")
         try:
-            from suite_analytical_question import format_context_lines, source_app_label
+            from suite_analytical_question import source_app_label
 
-            ctx_lines = format_context_lines(ctx_dict)
-            if not ctx_lines and source:
-                ctx_lines = [
-                    f"Source app: {source_app_label(source)}",
-                    *( [f"Page: {source_page}"] if source_page else [] ),
-                ]
+            src_label = source_app_label(source) if source else ""
         except Exception:
-            ctx_lines = []
-            if source:
-                ctx_lines.append(f"Source app: {source}")
-            if source_page:
-                ctx_lines.append(f"Page: {source_page}")
-        if ctx_lines:
-            st.markdown("**Context:**")
-            for line in ctx_lines:
-                st.markdown(f"- {line}")
+            src_label = source or ""
+        if src_label or source_page:
+            st.caption(
+                f"From **{src_label or 'suite app'}**"
+                + (f" · {source_page}" if source_page else "")
+            )
 
         try:
             from components.applied_math_context_diagnostics import render_applied_math_context_diagnostics
@@ -120,33 +112,14 @@ def _render_area_hub() -> None:
         except Exception:
             pass
 
-        from components.applied_math_analysis_scaffold import render_applied_math_analysis_scaffold
         from components.applied_math_solver_ui import render_suite_solver_answer
 
-        render_applied_math_analysis_scaffold(
-            st,
-            question=preloaded,
-            source_app=source,
-            source_page=source_page,
-            context=ctx_dict,
-        )
         render_suite_solver_answer(
             st,
             question=preloaded,
             source_app=source,
             context=ctx_dict,
         )
-
-        area_ids = [a["id"] for a in QUANT_AREAS]
-        area_id = str(st.session_state.get("ps_area_id") or area_ids[0])
-        if area_id not in area_ids:
-            area_id = area_ids[0]
-        area = QUANT_AREA_BY_ID[area_id]
-        pattern_id = area["pattern_id"]
-        pattern = _match_pattern(preloaded, pattern_id)
-        slug = hashlib.md5(preloaded.encode("utf-8")).hexdigest()[:10]
-        key_prefix = f"ps_{area['id']}_{slug}"
-        render_quantitative_flow(preloaded, pattern, pattern_id, area, key_prefix)
         return
 
     area_ids = [a["id"] for a in QUANT_AREAS]

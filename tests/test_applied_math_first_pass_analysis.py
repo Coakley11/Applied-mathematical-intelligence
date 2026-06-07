@@ -29,7 +29,7 @@ class TestAppliedMathFirstPassAnalysis(unittest.TestCase):
             context={"player": "Lorenzo Cain", "metrics": ["HR"]},
         )
         self.assertTrue(analysis.data_needed)
-        self.assertIn("season-by-season", analysis.answer.lower())
+        self.assertIn("trend", analysis.answer.lower())
 
     def test_nba_stat_gap_uses_structured_context(self) -> None:
         analysis = analyze_suite_question(

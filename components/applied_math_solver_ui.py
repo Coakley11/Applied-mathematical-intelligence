@@ -27,6 +27,8 @@ def _fallback_solver_result(
     answer = ""
     assumptions: list[str] = []
     missing: list[str] = list(route.missing_fields)
+    problem = route.problem_type
+    calc = "Framework analysis"
     try:
         from components.applied_math_first_pass_analysis import analyze_suite_question
 
@@ -37,27 +39,25 @@ def _fallback_solver_result(
         problem = fp.problem_type
         calc = fp.method
     except Exception:
-        problem = route.problem_type
-        calc = "Framework analysis"
-        answer = "Attach numeric context from the source app for a computed answer."
+        answer = "We can model this once numeric context is attached from the source app."
 
     if error is not None:
         answer = f"{answer} (Solver unavailable: {error})".strip()
 
-    data_used = [f"{k}: {ctx[k]}" for k in route.available_fields[:8] if ctx.get(k) is not None]
     return route, SolverResult(
-        problem_detected=f"{problem}: {question.strip()}",
-        data_used=data_used,
+        question=question.strip(),
+        problem_type=problem,
+        math_idea="Define the measurable quantity, baseline, and decision threshold.",
+        variables="variable · baseline · threshold",
+        data_used=[f"Source: **{route.source_app}**"],
         calculation=calc,
         result="Fallback analysis — solver could not run",
         interpretation=answer,
         assumptions=assumptions or ["Context from the source app reflects the user's current view."],
-        sensitivity_notes="Retry after redeploy or add missing context fields from the source app.",
+        sensitivity_notes="Enable Developer Mode to inspect the full context payload.",
         missing_fields=missing,
         partial=True,
         problem_type_id=route.problem_type_id,
-        computed={},
-        default_controls={},
     )
 
 
@@ -141,15 +141,10 @@ def _seed_control_defaults(st: Any, route: ProblemRoute, defaults: dict[str, Any
 
 def _render_controls(st: Any, route: ProblemRoute) -> None:
     pid = route.problem_type_id
-    st.markdown("**7. Try changing this**")
+    st.markdown("**7. Try changing assumptions**")
 
     if pid == NBA_STAT_CHASE:
-        st.number_input(
-            "Games remaining",
-            min_value=1,
-            max_value=20,
-            key=_control_key(pid, "games"),
-        )
+        st.number_input("Games remaining", min_value=1, max_value=20, key=_control_key(pid, "games"))
         st.number_input(
             "Expected stat per game",
             min_value=0.0,
@@ -163,7 +158,7 @@ def _render_controls(st: Any, route: ProblemRoute) -> None:
             max_value=500.0,
             step=1.0,
             key=_control_key(pid, "target"),
-            help="Override leader total if not in context (0 = use context).",
+            help="0 = use value from context.",
         )
     elif pid == BASEBALL_TREND:
         st.slider(
@@ -209,47 +204,80 @@ def _render_controls(st: Any, route: ProblemRoute) -> None:
             key=_control_key(pid, "vol"),
         )
     else:
-        st.caption("No interactive controls for this problem type yet.")
+        st.caption("No assumption controls for this problem type yet.")
 
 
-def render_solver_sections(st: Any, route: ProblemRoute, result: SolverResult) -> None:
-    st.markdown("### Applied Math answer")
-    st.markdown(f"**1. Problem detected**  \n{result.problem_detected}")
-    st.caption(
-        f"Type: {route.problem_type} · confidence {route.confidence:.0%} · "
-        f"id `{route.problem_type_id}`"
-    )
+def render_solver_sections(
+    st: Any,
+    route: ProblemRoute,
+    result: SolverResult,
+    *,
+    question: str = "",
+) -> None:
+    st.markdown("### Mathematical coach")
+    q = (question or result.question or "").strip()
+    if q:
+        st.markdown(f"**1. The question**  \n{q}")
+    st.caption(f"Problem type: **{result.problem_type or route.problem_type}**")
 
-    st.markdown("**2. Data used**")
+    if result.math_idea:
+        st.markdown(f"**2. The mathematical idea**  \n{result.math_idea}")
+
+    if result.variables:
+        st.markdown("**3. Variables**")
+        st.markdown(f"```\n{result.variables.strip()}\n```")
+
+    st.markdown("**4. Data used**")
+    st.caption("Key inputs only — full context is in Developer Mode.")
     if result.data_used:
-        for line in result.data_used:
+        for line in result.data_used[:5]:
             st.markdown(f"- {line}")
     else:
-        st.markdown("- No numeric context attached yet.")
+        st.markdown("- No numeric inputs attached yet.")
 
     if result.calculation:
-        st.markdown("**3. Calculation**")
+        st.markdown("**5. Calculation**")
         st.markdown(result.calculation)
 
-    st.markdown("**4. Result**")
+    st.markdown("**6. Result**")
     st.success(result.result)
 
-    st.markdown("**5. Interpretation**")
+    st.markdown("**Interpretation**")
     st.markdown(result.interpretation)
 
-    st.markdown("**6. Assumptions**")
-    for a in result.assumptions:
-        st.markdown(f"- {a}")
+    if result.assumptions:
+        with st.expander("Assumptions", expanded=False):
+            for a in result.assumptions:
+                st.markdown(f"- {a}")
 
     if result.partial and result.missing_fields:
-        st.warning(
-            "**Partial analysis** — missing: "
+        st.info(
+            "Partial analysis — missing: "
             + ", ".join(result.missing_fields)
-            + ". Adjust controls below or return to the source app for full data."
+            + ". Adjust assumptions below or return to the source app."
         )
-        st.markdown("**What would strengthen this answer**")
-        for field in result.missing_fields:
-            st.markdown(f"- `{field}` from the source app")
+
+
+def render_solver_dev_diagnostics(
+    st: Any,
+    *,
+    route: ProblemRoute,
+    result: SolverResult,
+) -> None:
+    try:
+        from components.applied_math_context_diagnostics import applied_math_developer_mode_enabled
+    except Exception:
+        return
+    if not applied_math_developer_mode_enabled(st):
+        return
+    with st.expander("Solver diagnostics (Developer Mode)", expanded=False):
+        st.markdown(f"- **Route:** `{route.problem_type_id}` · confidence {route.confidence:.0%}")
+        st.markdown(f"- **Solver:** `{result.problem_type_id}`")
+        st.markdown(f"- **Partial:** {result.partial}")
+        if route.available_fields:
+            st.markdown(f"- **Fields used:** {', '.join(route.available_fields[:12])}")
+        if route.missing_fields:
+            st.markdown(f"- **Fields missing:** {', '.join(route.missing_fields)}")
 
 
 def render_suite_solver_answer(
@@ -270,11 +298,12 @@ def render_suite_solver_answer(
             context=ctx,
             params=params,
         )
-        render_solver_sections(st, route, result)
+        render_solver_sections(st, route, result, question=question)
         _render_controls(st, route)
-        st.markdown("**8. Sensitivity**")
-        st.markdown(result.sensitivity_notes or "_No sensitivity notes._")
+        st.markdown("**8. What changes the answer?**")
+        st.markdown(result.sensitivity_notes or "_Adjust the assumptions above to stress-test the conclusion._")
+        render_solver_dev_diagnostics(st, route=route, result=result)
     except Exception as exc:
         route, result = _fallback_solver_result(question, source_app, ctx, error=exc)
-        st.warning("Applied Math solver hit an error — showing fallback analysis instead of crashing.")
-        render_solver_sections(st, route, result)
+        st.warning("Showing fallback analysis — the solver hit an unexpected error.")
+        render_solver_sections(st, route, result, question=question)

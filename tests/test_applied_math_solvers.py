@@ -251,7 +251,31 @@ class TestResolveSuiteSolver(unittest.TestCase):
         self.assertIsInstance(result, SolverResult)
         self.assertAlmostEqual(result.computed.get("required_rate"), 3.0)
 
-    def test_resolve_fallback_on_dispatch_failure(self) -> None:
+    def test_rebalance_data_used_capped(self) -> None:
+        result = solve_investment_rebalance(
+            {
+                "rebalance_drift": {"VTI": "+6.0pp", "BND": "-4.0pp", "QQQ": "+8.0pp"},
+                "current_weights": {"QQQ": "35.0%", "VTI": "45.0%"},
+                "target_weights": {"QQQ": "25.0%", "VTI": "40.0%"},
+                "health_score": 78,
+                "objective": "Long-term growth",
+            },
+            "Should I rebalance?",
+        )
+        self.assertLessEqual(len(result.data_used), 5)
+        self.assertIn("drift", result.calculation.lower())
+        self.assertNotIn("holdings", " ".join(result.data_used).lower())
+
+    def test_coach_fields_present(self) -> None:
+        result = solve_nba_stat_chase(
+            {"stat_gap": {"gap": 12, "games_remaining": 4, "current_value": 8, "target_value": 20}},
+            "Will Brunson pass?",
+            games_remaining=4,
+            expected_rate=3.0,
+        )
+        self.assertTrue(result.math_idea)
+        self.assertTrue(result.variables)
+        self.assertLessEqual(len(result.data_used), 5)
         from components.applied_math_solver_ui import resolve_suite_solver
         from components.applied_math_solvers import dispatch_solver as real_dispatch
         import components.applied_math_solvers as solvers_mod

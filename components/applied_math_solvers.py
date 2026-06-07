@@ -30,7 +30,10 @@ from components.applied_math_problem_router import (
 
 @dataclass
 class SolverResult:
-    problem_detected: str
+    question: str = ""
+    problem_type: str = ""
+    math_idea: str = ""
+    variables: str = ""
     data_used: list[str] = field(default_factory=list)
     calculation: str = ""
     result: str = ""
@@ -42,6 +45,54 @@ class SolverResult:
     problem_type_id: str = ""
     computed: dict[str, Any] = field(default_factory=dict)
     default_controls: dict[str, Any] = field(default_factory=dict)
+
+    # Legacy alias — older code/tests referenced problem_detected
+    @property
+    def problem_detected(self) -> str:
+        if self.problem_type and self.question:
+            return f"{self.problem_type}: {self.question}"
+        return self.problem_type or self.question
+
+
+def _cap_data_used(lines: list[str], limit: int = 5) -> list[str]:
+    return [ln for ln in lines if ln][:limit]
+
+
+def _coach_result(
+    *,
+    question: str,
+    problem_type: str,
+    math_idea: str,
+    variables: str,
+    data_used: list[str],
+    calculation: str,
+    result: str,
+    interpretation: str,
+    assumptions: list[str],
+    sensitivity_notes: str,
+    problem_type_id: str,
+    computed: dict[str, Any] | None = None,
+    default_controls: dict[str, Any] | None = None,
+    missing_fields: list[str] | None = None,
+    partial: bool = False,
+) -> SolverResult:
+    return SolverResult(
+        question=question.strip(),
+        problem_type=problem_type,
+        math_idea=math_idea,
+        variables=variables,
+        data_used=_cap_data_used(data_used),
+        calculation=calculation,
+        result=result,
+        interpretation=interpretation,
+        assumptions=assumptions,
+        sensitivity_notes=sensitivity_notes,
+        missing_fields=missing_fields or [],
+        partial=partial,
+        problem_type_id=problem_type_id,
+        computed=computed or {},
+        default_controls=default_controls or {},
+    )
 
 
 def _num(val: Any) -> float | None:
@@ -113,75 +164,85 @@ def solve_nba_stat_chase(
     if games is None:
         missing.append("games_remaining")
 
-    data_used: list[str] = []
-    if current is not None:
-        data_used.append(f"{player} current {stat}: **{current:g}**")
-    if target is not None:
-        data_used.append(f"{target_name} target total: **{target:g}**")
-    if gap is not None:
-        data_used.append(f"Gap to close: **{gap:g}** {stat}")
-    if games is not None:
-        data_used.append(f"Games remaining: **{games}**")
-    if exp_rate is not None:
-        data_used.append(f"Expected {stat} per game: **{exp_rate:g}**")
+    data_used = [
+        x
+        for x in (
+            f"Gap: **{gap:g}** {stat}" if gap is not None else "",
+            f"Games remaining: **{games}**" if games is not None else "",
+            f"Expected {stat}/game: **{exp_rate:g}**" if exp_rate is not None else "",
+            f"Chase: **{player}** → **{target_name}**",
+        )
+        if x
+    ]
+
+    math_idea = "Rate-needed problem — can the challenger produce enough per game to close the gap?"
+    variables = (
+        "gap = target total − current total\n"
+        "games_remaining = g\n"
+        "required_rate = gap ÷ g\n"
+        "expected_rate = recent production per game"
+    )
 
     required_rate: float | None = None
     calc = ""
     if gap is not None and games and games > 0:
         required_rate = gap / games
         calc = (
-            f"**Required rate** = gap ÷ games remaining\n\n"
+            f"**required_rate** = gap ÷ games_remaining\n\n"
             f"= {gap:g} ÷ {games} = **{required_rate:.2f}** {stat}/game"
         )
+        if exp_rate is not None:
+            calc += f"\n\nCompare to expected **{exp_rate:g}** {stat}/game."
     elif gap is not None:
-        calc = f"Gap = **{gap:g}**. Set games remaining to compute required rate per game."
+        calc = f"gap = **{gap:g}**. Set games remaining to compute required_rate."
 
     verdict = "Insufficient data"
     interpretation = ""
     if required_rate is not None and exp_rate is not None:
         cushion = exp_rate - required_rate
-        pct = (exp_rate / required_rate * 100) if required_rate > 0 else 0
         if exp_rate >= required_rate * 1.05:
-            verdict = "**Likely** — expected rate exceeds required rate"
+            verdict = "Likely — on pace to pass"
         elif exp_rate >= required_rate * 0.85:
-            verdict = "**Toss-up** — expected rate is close to required rate"
+            verdict = "Toss-up — close to required pace"
         else:
-            verdict = "**Unlikely** — expected rate falls short of required rate"
+            verdict = "Unlikely — required pace is too high"
         interpretation = (
-            f"{player} needs **{required_rate:.2f}** {stat}/game vs an expected **{exp_rate:.2f}** "
-            f"(cushion **{cushion:+.2f}**/game, {pct:.0f}% of required pace). "
-            f"{verdict.split('—')[0].strip()}."
+            f"If only **{games}** games remain, {player} needs **{required_rate:.1f}** {stat}/game. "
+            f"At **{exp_rate:.1f}**/game (cushion **{cushion:+.1f}**), the chase looks **{verdict.split('—')[0].strip().lower()}**."
         )
     elif required_rate is not None:
         interpretation = (
             f"Required pace is **{required_rate:.2f}** {stat}/game. "
-            "Set expected rate per game below to compare likelihood."
+            "Adjust expected rate below to see if the chase is realistic."
         )
     elif missing:
         interpretation = (
-            "We can partially analyze this chase, but need the missing fields below "
-            "before computing required rate."
+            "We can model this as a rate-needed problem, but need gap and games remaining "
+            "before computing required_rate."
         )
 
     sensitivity = (
-        "If **games remaining** drops, required rate rises (harder). "
-        "If **expected rate** rises above required rate, conclusion shifts toward **Likely**."
+        "**Games remaining** is the strongest lever — fewer games means a higher required_rate. "
+        "**Expected rate** shifts the conclusion between Likely and Unlikely."
     )
     if required_rate and games:
         alt_games = max(1, games - 1)
         alt_req = gap / alt_games if gap else None
         if alt_req:
-            sensitivity += f" Example: at {alt_games} games, required rate = **{alt_req:.2f}**/game."
+            sensitivity += f" At {alt_games} games left, required_rate rises to **{alt_req:.2f}**/game."
 
-    return SolverResult(
-        problem_detected=f"NBA stat chase: {question.strip()}",
+    return _coach_result(
+        question=question,
+        problem_type="NBA stat chase",
+        math_idea=math_idea,
+        variables=variables,
         data_used=data_used,
         calculation=calc,
         result=verdict if not missing or required_rate else "Partial — set missing inputs",
         interpretation=interpretation,
         assumptions=[
             f"{player} maintains recent minutes and role.",
-            f"{target_name} may also add {stat} in remaining games (this model uses a static gap).",
+            f"{target_name} may also add {stat} in remaining games (static gap model).",
             "Injury/rest can reduce effective games below the games-remaining input.",
         ],
         sensitivity_notes=sensitivity,
@@ -228,18 +289,6 @@ def solve_baseball_trend(
     if r2 is None:
         missing.append("trend_summary.r2")
 
-    data_used = [f"Player: **{player}**", f"Metric: **{stat}**"]
-    if slope is not None:
-        data_used.append(f"Slope: **{slope:g}**/season")
-    if r2 is not None:
-        data_used.append(f"R²: **{r2:g}**")
-    if delta is not None:
-        data_used.append(f"Net change (delta): **{delta:g}**")
-    if direction != "unknown":
-        data_used.append(f"Direction: **{direction}**")
-    if latest is not None:
-        data_used.append(f"Latest value: **{latest}**")
-
     strength = "unknown"
     noise = "unknown"
     meaningful = False
@@ -256,50 +305,75 @@ def solve_baseball_trend(
             strength = "weak"
             noise = "moderate" if r2 >= min_r2 else "high"
 
-    calc = (
-        f"**Trend test:** |slope| ≥ {min_slope} and R² ≥ {min_r2}\n\n"
-        + (f"|slope| = **{abs(slope):g}**, R² = **{r2:g}**" if slope is not None and r2 is not None else "Need slope and R² from trend data.")
+    data_used = [
+        x
+        for x in (
+            f"Slope: **{slope:g}** {stat}/season" if slope is not None else "",
+            f"R²: **{r2:g}**" if r2 is not None else "",
+            f"Direction: **{direction}**" if direction != "unknown" else "",
+            f"Player: **{player}**",
+            f"Thresholds: slope ≥ {min_slope}, R² ≥ {min_r2}",
+        )
+        if x
+    ]
+
+    math_idea = "Trend strength vs noise — is the slope real or year-to-year randomness?"
+    variables = (
+        "slope = yearly change in the stat\n"
+        "R² = consistency of the linear fit (0–1)\n"
+        "delta = total change over the trend window"
     )
 
+    calc = (
+        f"Meaningful if |slope| ≥ **{min_slope}** and R² ≥ **{min_r2}**\n\n"
+        + (
+            f"|slope| = **{abs(slope):g}**, R² = **{r2:g}**"
+            if slope is not None and r2 is not None
+            else "Need slope and R² from the Trends page."
+        )
+    )
+    if delta is not None:
+        calc += f"\n\nNet change (delta) = **{delta:g}** over the window."
+
     if meaningful:
-        result = f"**Meaningful {direction} trend** on {stat}"
+        result = f"Meaningful {direction} trend on {stat}"
         interp = (
-            f"The {stat} trend for {player} looks **meaningful**: slope magnitude and fit exceed your thresholds. "
-            "Treat as signal, not noise — but confirm playing-time stability."
+            f"Slope **{slope:g}**/year with R² **{r2:g}** exceeds your thresholds — "
+            "more than a one-year spike, but confirm sample size and playing time."
         )
     elif strength == "noisy":
-        result = f"**Noisy trend** — slope present but low fit"
+        result = "Noisy trend — direction without consistent fit"
         interp = (
-            f"{player}'s {stat} shows direction ({direction}) but **R² is below {min_r2}**, "
-            "so year-to-year noise may dominate. **Monitor, don't overreact.**"
+            f"Direction is {direction}, but R² **{r2:g}** < **{min_r2}** — "
+            "year-to-year noise may dominate. Monitor, don't overreact."
         )
     elif strength == "weak":
-        result = f"**Weak trend** — not meaningful for decisions"
+        result = "Weak trend — not meaningful for decisions"
         interp = (
-            f"Slope and/or delta on {stat} are small relative to thresholds. "
-            "This is **not strong evidence** of a real change."
+            f"|slope| or delta on {stat} is small vs thresholds — not strong evidence of real change."
         )
     else:
-        result = "Partial — attach trend_summary with slope and R²"
+        result = "Partial — need slope and R²"
         interp = (
-            f"Without season-by-season {stat} regression output, we cannot score trend strength numerically. "
-            "Use the Baseball Trends page Advanced Trend Intelligence row."
+            f"We can model this as trend vs noise on {stat}, but need regression output from Baseball Trends."
         )
 
     sensitivity = (
-        f"Raising **min R²** toward 0.5 makes fewer trends count as meaningful. "
-        f"Raising **min slope** filters out gradual changes. "
-        "What would make it meaningful: |slope| above threshold **and** R² above threshold **and** stable playing time."
+        "**R² threshold** is the main filter for noise — raising it demands a cleaner fit. "
+        "**Slope threshold** filters gradual vs sharp trends."
     )
 
-    return SolverResult(
-        problem_detected=f"Baseball trend significance: {question.strip()}",
+    return _coach_result(
+        question=question,
+        problem_type="Trend significance",
+        math_idea=math_idea,
+        variables=variables,
         data_used=data_used,
         calculation=calc,
         result=result,
         interpretation=interp,
         assumptions=[
-            "Seasons in the trend window are comparable (role, health, league environment).",
+            "Seasons in the window are comparable (role, health, league environment).",
             f"{stat} is measured on similar playing-time opportunity each year.",
         ],
         sensitivity_notes=sensitivity,
@@ -325,6 +399,8 @@ def solve_investment_rebalance(
     risk_tolerance: str = "moderate",
 ) -> SolverResult:
     drift_raw = ctx.get("rebalance_drift") if isinstance(ctx.get("rebalance_drift"), dict) else {}
+    current_w = ctx.get("current_weights") if isinstance(ctx.get("current_weights"), dict) else {}
+    target_w = ctx.get("target_weights") if isinstance(ctx.get("target_weights"), dict) else {}
     parsed: dict[str, float] = {}
     for ticker, val in drift_raw.items():
         n = _parse_pp(val)
@@ -332,22 +408,11 @@ def solve_investment_rebalance(
             parsed[str(ticker)] = n
 
     health = ctx.get("health_score")
-    total_d = str(ctx.get("total_drift") or "").strip()
-    recs = _ctx_list(ctx.get("rebalance_recommendation"))
+    objective = str(ctx.get("objective") or ctx.get("portfolio_objective") or "").strip()
 
     missing: list[str] = []
     if not parsed:
         missing.append("rebalance_drift")
-
-    data_used: list[str] = []
-    if health is not None:
-        data_used.append(f"Health score: **{health}**")
-    if total_d:
-        data_used.append(f"Total drift: **{total_d}**")
-    for t, d in sorted(parsed.items(), key=lambda x: abs(x[1]), reverse=True)[:4]:
-        data_used.append(f"{t}: drift **{d:+.1f}pp**")
-    if recs:
-        data_used.append(f"Recommendations: {', '.join(recs[:2])}")
 
     overweight = underweight = None
     max_drift = 0.0
@@ -356,45 +421,72 @@ def solve_investment_rebalance(
         underweight = min(parsed.items(), key=lambda x: x[1])
         max_drift = max(abs(v) for v in parsed.values())
 
-    calc = (
-        f"**Drift** = current weight − target weight (pp)\n\n"
-        f"**Threshold** = {drift_threshold:g} pp\n\n"
-        + (f"Max |drift| = **{max_drift:.1f}pp**" if parsed else "No drift table attached.")
+    largest = ""
+    if overweight:
+        largest = f"Largest drift: **{overweight[0]}** {overweight[1]:+.1f}pp"
+    data_used = [
+        x
+        for x in (
+            f"Health score: **{health}**" if health is not None else "",
+            largest,
+            f"Rebalance threshold: **{drift_threshold:g}pp**",
+            f"Goal: **{objective}**" if objective else "",
+            f"Risk tolerance: **{risk_tolerance}**",
+        )
+        if x
+    ]
+
+    math_idea = "Threshold / drift problem — compare each holding's weight to its target."
+    variables = (
+        "current_weight_i = portfolio weight today\n"
+        "target_weight_i = policy target\n"
+        "drift_i = current_weight_i − target_weight_i\n"
+        "threshold = max acceptable |drift| before rebalancing"
     )
+
+    calc_lines = [f"**drift_i** = current − target (percentage points)", f"**threshold** = {drift_threshold:g}pp"]
+    for ticker, d in sorted(parsed.items(), key=lambda x: abs(x[1]), reverse=True)[:3]:
+        cur = current_w.get(ticker, "—")
+        tgt = target_w.get(ticker, "—")
+        calc_lines.append(f"**{ticker}**: {cur} current, {tgt} target → drift **{d:+.1f}pp**")
+    if parsed:
+        calc_lines.append(f"\nMax |drift| = **{max_drift:.1f}pp**")
+    calc = "\n".join(calc_lines)
 
     if max_drift >= drift_threshold:
-        action = "**Rebalance** — drift exceeds threshold"
+        action = "Rebalance — drift exceeds threshold"
     elif max_drift >= drift_threshold * 0.6:
-        action = "**Monitor** — drift is material but below threshold"
+        action = "Monitor — material drift but below threshold"
     else:
-        action = "**No action** — drift within tolerance"
+        action = "No action — within tolerance"
 
-    tol_note = f"Risk tolerance: **{risk_tolerance}**."
     if risk_tolerance.lower() in ("low", "conservative") and max_drift >= drift_threshold * 0.8:
-        action = "**Rebalance** — conservative tolerance lowers effective threshold"
-        tol_note += " Conservative profile triggers earlier."
+        action = "Rebalance — conservative tolerance lowers effective threshold"
 
-    interp_parts = [action + "."]
-    if overweight:
-        interp_parts.append(f"Most overweight: **{overweight[0]}** ({overweight[1]:+.1f}pp).")
-    if underweight:
-        interp_parts.append(f"Most underweight: **{underweight[0]}** ({underweight[1]:+.1f}pp).")
+    interp = action + "."
+    if overweight and underweight:
+        interp += (
+            f" **{overweight[0]}** is {overweight[1]:+.1f}pp overweight; "
+            f"**{underweight[0]}** is {underweight[1]:+.1f}pp underweight."
+        )
+    interp += " Taxes and trading costs may change the practical decision."
 
     sensitivity = (
-        f"Lower **drift threshold** → more frequent rebalance signals. "
-        f"Higher threshold → fewer trades. "
-        "Compare expected risk reduction to transaction costs and taxes before acting."
+        "**Drift threshold** is the main lever — lower threshold → rebalance sooner. "
+        "**Risk tolerance** shifts how aggressively you act on the same drift."
     )
 
-    return SolverResult(
-        problem_detected=f"Investment rebalance: {question.strip()}",
+    return _coach_result(
+        question=question,
+        problem_type="Portfolio drift / threshold decision",
+        math_idea=math_idea,
+        variables=variables,
         data_used=data_used,
         calculation=calc,
-        result=action.replace("**", ""),
-        interpretation=" ".join(interp_parts),
+        result=action,
+        interpretation=interp,
         assumptions=[
             "Target weights reflect your stated objective and horizon.",
-            tol_note,
             "Does not include tax lot or transaction cost analysis.",
         ],
         sensitivity_notes=sensitivity,
@@ -435,21 +527,26 @@ def solve_investment_risk_return(
     if vol is None:
         missing.append("volatility")
 
-    data_used: list[str] = []
-    if exp_ret is not None:
-        data_used.append(f"Expected return: **{exp_ret:g}%**")
-    if vol is not None:
-        data_used.append(f"Volatility: **{vol:g}%**")
-    if sharpe is not None:
-        data_used.append(f"Sharpe ratio: **{sharpe:g}**")
-    if drawdown is not None:
-        data_used.append(f"Max drawdown: **{drawdown:g}%**")
-    if health is not None:
-        data_used.append(f"Health score: **{health}**")
-    if holdings:
-        data_used.append(f"Holdings: {', '.join(holdings[:5])}")
+    data_used = [
+        x
+        for x in (
+            f"Expected return: **{exp_ret:g}%**" if exp_ret is not None else "",
+            f"Volatility: **{vol:g}%**" if vol is not None else "",
+            f"Sharpe ratio: **{sharpe:g}**" if sharpe is not None else "",
+            f"Max drawdown: **{drawdown:g}%**" if drawdown is not None else "",
+            f"Acceptable volatility: **{max_vol:g}%**",
+        )
+        if x
+    ]
 
-    calc_parts = ["**Return per unit risk** ≈ Sharpe = (return − risk-free) / volatility"]
+    math_idea = "Return per unit of risk — is the portfolio compensated for volatility?"
+    variables = (
+        "Sharpe ≈ (return − risk_free) / volatility\n"
+        "max_drawdown = worst peak-to-trough loss\n"
+        "acceptable_volatility = your risk ceiling"
+    )
+
+    calc_parts = ["**Sharpe** ≈ return / volatility (simplified, no risk-free rate subtracted)"]
     if sharpe is not None:
         calc_parts.append(f"Sharpe = **{sharpe:g}**")
     elif exp_ret is not None and vol and vol > 0:
@@ -465,34 +562,38 @@ def solve_investment_risk_return(
         warnings.append(f"Max drawdown **{drawdown:g}%** is severe.")
     if sharpe is not None:
         if sharpe >= min_sharpe and (vol is None or vol <= max_vol):
-            verdict = "**Yes — return appears worth the risk** for your thresholds"
+            verdict = "Yes — return appears worth the risk for your thresholds"
         elif sharpe >= min_sharpe * 0.8:
-            verdict = "**Borderline — return is close to your risk tolerance**"
+            verdict = "Borderline — return is close to your risk tolerance"
         else:
-            verdict = "**No — return does not compensate for volatility** at your Sharpe floor"
+            verdict = "No — return does not compensate for volatility at your Sharpe floor"
 
-    interp_parts = [verdict.replace("**", "")]
+    interp_parts = [verdict]
     if warnings:
         interp_parts.append(" ".join(warnings))
     if exp_ret is not None and vol is not None:
-        interp_parts.append(f"You earn **{exp_ret:g}%** expected return for **{vol:g}%** volatility ({risk_level} profile).")
+        interp_parts.append(
+            f"You earn **{exp_ret:g}%** expected return for **{vol:g}%** volatility ({risk_level} profile)."
+        )
 
     sensitivity = (
-        f"Lower **acceptable volatility** → harder to justify the portfolio. "
-        f"Higher **minimum Sharpe** → stricter return-per-risk requirement. "
-        "Macro shocks can raise volatility without changing long-run expected return."
+        "**Acceptable volatility** is the strongest filter — lower it and the same portfolio looks riskier. "
+        "**Minimum Sharpe** sets how much return per unit risk you demand."
     )
 
-    macro = ctx.get("macro_outlook") or ctx.get("macro_summary")
-    assumptions = [f"Risk profile: **{risk_level}**.", "Return/volatility are historical estimates unless noted forward."]
-    if macro:
-        assumptions.append(f"Macro outlook in context: {macro}")
+    assumptions = [
+        f"Risk profile: {risk_level}.",
+        "Return and volatility are historical estimates unless noted forward.",
+    ]
 
-    return SolverResult(
-        problem_detected=f"Investment risk-return: {question.strip()}",
+    return _coach_result(
+        question=question,
+        problem_type="Risk-return tradeoff",
+        math_idea=math_idea,
+        variables=variables,
         data_used=data_used,
         calculation="\n\n".join(calc_parts),
-        result=verdict.replace("**", ""),
+        result=verdict,
         interpretation=" ".join(interp_parts),
         assumptions=assumptions,
         sensitivity_notes=sensitivity,
@@ -515,31 +616,27 @@ def solve_investment_risk_return(
 
 
 def _generic_solver(route: ProblemRoute, question: str, ctx: dict[str, Any]) -> SolverResult:
-    data_used = [f"Source: **{route.source_app}**"]
-    for key in route.available_fields[:6]:
-        val = ctx.get(key.split(".")[0])
-        if val is not None:
-            data_used.append(f"{key}: {val}")
     missing_note = ""
     if route.missing_fields:
         missing_note = (
-            "We can partially analyze this, but the following data is missing: "
+            "We can model this as a threshold/decision problem, but need: "
             + ", ".join(route.missing_fields)
-            + ". State the claim as one measurable quantity and compare to a baseline."
+            + "."
         )
-    return SolverResult(
-        problem_detected=f"{route.problem_type}: {question.strip()}",
-        data_used=data_used,
-        calculation="Define **variable**, **baseline**, and **decision threshold** for this question.",
-        result="Framework answer — attach numeric context from the source app",
-        interpretation=missing_note or "Translate the question into a single number, then compare to what you'd give up.",
+    return _coach_result(
+        question=question,
+        problem_type=route.problem_type,
+        math_idea="Define the measurable quantity, baseline, and decision threshold.",
+        variables="variable = what you measure\nbaseline = comparison point\nthreshold = decision cutoff",
+        data_used=[f"Source: **{route.source_app}**"],
+        calculation="State the claim as one number, then compare to baseline ± uncertainty.",
+        result="Framework — attach numeric context from the source app",
+        interpretation=missing_note or "Translate the question into one measurable quantity.",
         assumptions=["Context from the source app reflects the user's current view."],
-        sensitivity_notes="Adding the missing fields enables a domain-specific solver instead of this fallback.",
+        sensitivity_notes="Adding missing fields enables a domain-specific solver.",
         missing_fields=list(route.missing_fields),
         partial=True,
         problem_type_id=route.problem_type_id,
-        computed={},
-        default_controls={},
     )
 
 
@@ -586,62 +683,62 @@ def dispatch_solver(
     # Non-primary types reuse closest solver or generic
     if pid in (NBA_WIN_PROBABILITY, NBA_LEGACY_COMPARISON):
         wp = ctx.get("win_probability") or ctx.get("series_probability")
-        return SolverResult(
-            problem_detected=f"{route.problem_type}: {question.strip()}",
-            data_used=[f"Probability: **{wp}**"] if wp else [],
-            calculation="Compare quoted probability to strength model ±10% injury/minutes sensitivity.",
-            result=str(wp) if wp else "Attach win/series probability from NBA page",
+        return _coach_result(
+            question=question,
+            problem_type=route.problem_type,
+            math_idea="Probability reasonableness — does the quoted chance match the setup?",
+            variables="p = quoted win/series probability\nprior = strength-model baseline",
+            data_used=[f"Quoted probability: **{wp}**"] if wp else [],
+            calculation="Compare p to prior ±10pp; list what must be true if gap is large.",
+            result=str(wp) if wp else "Attach win/series probability",
             interpretation=(
-                f"If **{wp}** is >15pp from a simple strength prior, list what must be true (injury edge, home court)."
+                f"If **{wp}** is >15pp from a simple strength prior, stress-test injuries and matchups."
                 if wp
                 else "Load Live Game Center or Matchup Intelligence for a numeric probability."
             ),
             assumptions=["Probability refers to the same event horizon (game vs series)."],
-            sensitivity_notes="Shift star minutes ±10% to stress-test the probability.",
+            sensitivity_notes="Star minutes ±10% shifts playoff probability materially.",
             missing_fields=route.missing_fields,
             partial=bool(route.missing_fields),
             problem_type_id=pid,
             computed={"probability": wp},
-            default_controls={},
         )
 
     if pid == NBA_MATCHUP_EDGE:
         team = str(ctx.get("team") or "").strip()
         opp = str(ctx.get("opponent") or "").strip()
         adv = ctx.get("matchup_advantages")
-        adv_text = str(adv[0])[:240] if isinstance(adv, list) and adv else ""
+        adv_text = str(adv[0])[:120] if isinstance(adv, list) and adv else ""
         inj = str(ctx.get("injury_summary") or "").strip()
-        series_rec = str(ctx.get("series_record") or "").strip()
         wp = ctx.get("win_probability") or ctx.get("series_probability")
-        data_used = [f"**{team}** vs **{opp}**"]
-        if series_rec:
-            data_used.append(f"Series record: **{series_rec}**")
-        if adv_text:
-            data_used.append(f"Edge: {adv_text}")
-        if inj:
-            data_used.append(f"Injuries: {inj}")
-        if wp:
-            data_used.append(f"Model probability: **{wp}**")
-        interp_parts = [f"Matchup edge analysis for **{team}** vs **{opp}**."]
-        if adv_text:
-            interp_parts.append(f"Scouting advantage: {adv_text}")
-        if inj:
-            interp_parts.append(f"Injury factor: {inj}")
-        if wp:
-            interp_parts.append(f"Compare model **{wp}** to the stated advantages — large gaps imply optimism.")
-        return SolverResult(
-            problem_detected=f"{route.problem_type}: {question.strip()}",
-            data_used=data_used,
-            calculation="Edge score = injury availability + positional mismatches − series margin deficit.",
-            result="Matchup edge assessed from scouting context" if adv_text or inj else "Load matchup advantages",
-            interpretation=" ".join(interp_parts),
+        return _coach_result(
+            question=question,
+            problem_type=route.problem_type,
+            math_idea="Matchup edge — weight injuries and schematic advantages vs model probability.",
+            variables="edge = injury + positional mismatches\np = model series probability",
+            data_used=_cap_data_used([
+                f"**{team}** vs **{opp}**",
+                f"Scouting edge: {adv_text}" if adv_text else "",
+                f"Injuries: {inj}" if inj else "",
+                f"Model probability: **{wp}**" if wp else "",
+            ]),
+            calculation="Large p without matching edge → optimism; injury downgrade → lower p.",
+            result="Matchup assessed" if adv_text or inj else "Load matchup advantages",
+            interpretation=" ".join(
+                x
+                for x in (
+                    f"Edge for **{team}** vs **{opp}**.",
+                    f"Advantage: {adv_text}" if adv_text else "",
+                    f"Injury: {inj}" if inj else "",
+                )
+                if x
+            ),
             assumptions=["Matchup summaries reflect the loaded scouting board."],
-            sensitivity_notes="Injury downgrades or hot shooting can swing series probability ±10–15 pp.",
+            sensitivity_notes="Injury downgrades or hot shooting swing probability ±10–15 pp.",
             missing_fields=route.missing_fields,
             partial=bool(route.missing_fields),
             problem_type_id=pid,
             computed={"advantages": adv},
-            default_controls={},
         )
 
     if pid == BASEBALL_HISTORICAL:
@@ -656,16 +753,18 @@ def dispatch_solver(
             name = str(row.get("player") or "").strip()
             val = row.get(sort_stat) or row.get(str(sort_stat))
             if name and val is not None:
-                row_bits.append(f"**{name}**: {sort_stat}={val}")
-        return SolverResult(
-            problem_detected=f"{route.problem_type}: {question.strip()}",
-            data_used=row_bits or [f"Player: **{player}**"],
-            calculation=f"Compare **{sort_stat}** to peer rows — outlier if >1.5× next rank or z-score > ~2.",
-            result=f"Snapshot rows on **{sort_stat}**" if row_bits else "Attach historical_snapshot.top_rows",
+                row_bits.append(f"{name}: {sort_stat}={val}")
+        calc_detail = "; ".join(row_bits[:3])
+        return _coach_result(
+            question=question,
+            problem_type=route.problem_type,
+            math_idea="Outlier check — is this row unusual vs peers in the filter window?",
+            variables="x = stat value\npeers = neighboring rows in the filtered table",
+            data_used=_cap_data_used([f"Sort stat: **{sort_stat}**", f"Player: **{player}**"] + row_bits[:2]),
+            calculation=f"Compare **{sort_stat}** to next-ranked rows. Outlier if >1.5× next rank.\n\n{calc_detail}",
+            result=f"Snapshot on **{sort_stat}**" if row_bits else "Attach historical_snapshot.top_rows",
             interpretation=(
-                "Top rows: " + "; ".join(row_bits) + "."
-                if row_bits
-                else f"Compare {player}'s row to neighbors in the Historical Explorer table."
+                f"Top rows: {calc_detail}." if row_bits else f"Compare {player}'s row to neighbors."
             ),
             assumptions=[f"Filters: {ctx.get('filters_applied') or snap.get('year_range') or 'see snapshot'}"],
             sensitivity_notes="Rate stats need playing-time context; counting stats need AB/PA.",
@@ -673,46 +772,44 @@ def dispatch_solver(
             partial=not row_bits,
             problem_type_id=pid,
             computed={"top_rows": rows[:3]},
-            default_controls={},
         )
 
     if pid == BASEBALL_PLAYER_COMPARE:
         pa, pb = ctx.get("player_a"), ctx.get("player_b")
-        return SolverResult(
-            problem_detected=f"Player comparison: {question.strip()}",
+        return _coach_result(
+            question=question,
+            problem_type="Player comparison",
+            math_idea="Value gap = rate-stat difference adjusted for playing time and scarcity.",
+            variables="value_i = rate stats per PA × playing-time projection",
             data_used=[f"**{pa}** vs **{pb}**"] if pa and pb else [],
-            calculation="Value gap ≈ rate-stat difference × playing-time projection, weighted by league scarcity.",
-            result="Compare rate stats per PA with replacement-level baseline.",
-            interpretation="If gaps are within one standard error of career rates, call it **too close to call**.",
+            calculation="Subtract rate-based value scores; weight scarce categories.",
+            result="Compare rate stats per PA with replacement baseline",
+            interpretation="If gaps are within one standard error, call it too close to call.",
             assumptions=["Same position eligibility matters for roster fit."],
             sensitivity_notes="Weight scarce categories (SB, HR) higher in category leagues.",
             missing_fields=route.missing_fields,
             partial=bool(route.missing_fields),
             problem_type_id=pid,
-            computed={},
-            default_controls={},
         )
 
     if pid == INVESTMENT_MACRO:
         macro = ctx.get("macro_outlook") or ctx.get("macro_summary")
         fwd = str(ctx.get("context_note_forward") or "").strip()
         hist = str(ctx.get("context_note_historical") or "").strip()
-        assumption = str(macro or "Macro assumptions not attached.")
-        if fwd:
-            assumption += f" Forward note: {fwd}"
-        return SolverResult(
-            problem_detected=f"Macro sensitivity: {question.strip()}",
-            data_used=[f"Macro: **{macro}**"] if macro else [],
-            calculation="Stress portfolio return/vol under macro scenario vs base case.",
-            result=str(macro) if macro else "Attach macro outlook from Macro tab",
+        return _coach_result(
+            question=question,
+            problem_type="Macro sensitivity",
+            math_idea="Stress-test return/vol assumptions under a macro scenario.",
+            variables="scenario = macro outlook\nforward_return vs historical_return",
+            data_used=_cap_data_used([f"Macro outlook: **{macro}**"] if macro else []),
+            calculation="Compare base-case return/vol to recession or rate-shock scenario.",
+            result=str(macro) if macro else "Attach macro outlook",
             interpretation=(fwd or "Forward returns may diverge from historical metrics.") + (f" {hist}" if hist else ""),
-            assumptions=[assumption],
-            sensitivity_notes="Recession probability shifts bond/equity correlation assumptions.",
+            assumptions=[str(macro or "Macro assumptions not attached.") + (f" {fwd}" if fwd else "")],
+            sensitivity_notes="Recession probability shifts bond/equity correlation.",
             missing_fields=route.missing_fields,
             partial=True,
             problem_type_id=pid,
-            computed={},
-            default_controls={},
         )
 
     return _generic_solver(route, question, ctx)
