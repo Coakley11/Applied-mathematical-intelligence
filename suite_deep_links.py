@@ -36,6 +36,7 @@ _NBA_PAGE_BY_RESUME: tuple[tuple[str, str], ...] = (
 
 _BASEBALL_PAGE_BY_RESUME: tuple[tuple[str, str], ...] = (
     ("compare:", "Comparison Tool"),
+    ("trendcompare:", "Trend Value"),
     ("trend:", "Trend Value"),
     ("baseball:draft", "Draft Simulation"),
     ("baseball:draft_prep", "Draft Simulation"),
@@ -90,6 +91,11 @@ def _normalize_music_page(page: str, resume_key: str) -> str:
 
 def _parse_compare_resume(resume_key: str) -> tuple[str, str]:
     rk = str(resume_key or "").strip()
+    if rk.startswith("trendcompare:"):
+        parts = rk.split(":", 2)
+        if len(parts) >= 3:
+            return parts[1].strip(), parts[2].strip()
+        return "", ""
     if not rk.startswith("compare:"):
         return "", ""
     parts = rk.split(":", 2)
@@ -269,6 +275,15 @@ def resume_metrics_from_item_key(app: str, item_key: str, *, subtitle: str = "")
         elif key.startswith("trend:"):
             metrics["player"] = key.split(":", 1)[-1].strip()
             page = "Trend Value"
+        elif key.startswith("trendcompare:"):
+            pa, pb = _parse_compare_resume(key)
+            if pa:
+                metrics["player_a"] = pa
+            if pb:
+                metrics["player_b"] = pb
+            if pa and pb:
+                metrics["players"] = [pa, pb]
+            page = "Trend Value"
         elif "proj" in key.lower():
             page = "ML Projections"
     elif app_key == "investment":
@@ -289,5 +304,57 @@ def resume_metrics_from_item_key(app: str, item_key: str, *, subtitle: str = "")
             page = "🧠 Matchup Intelligence"
         elif key.startswith("nba:playoff:"):
             page = "🏆 Playoff Bracket"
+    elif app_key == "applied_intelligence":
+        if key.startswith("ai:question:"):
+            page = "Solve a Problem"
+            qid = key.split(":", 2)[-1].strip() if key.count(":") >= 2 else ""
+            if qid:
+                metrics["question_id"] = qid
+                metrics["dedupe_fingerprint"] = qid
+            if subtitle:
+                if "__ctx_json__:" in subtitle:
+                    q_part, _, ctx_part = subtitle.partition("\n__ctx_json__:")
+                    metrics["question"] = q_part.strip()
+                    try:
+                        import json
+
+                        parsed = json.loads(ctx_part)
+                        if isinstance(parsed, dict):
+                            metrics["context"] = parsed
+                            metrics["context_json"] = ctx_part
+                    except Exception:
+                        pass
+                elif subtitle.startswith("Question:"):
+                    first_line, _, rest = subtitle.partition("\n")
+                    metrics["question"] = first_line.replace("Question:", "", 1).strip()
+                    metrics["context_summary"] = rest.strip() or subtitle
+                else:
+                    metrics["question"] = subtitle.split("\n", 1)[0].strip()[:500]
+                    if "\n" in subtitle:
+                        metrics["context_summary"] = subtitle
+                ctx: dict[str, Any] = dict(metrics.get("context") or {})
+                if not ctx:
+                    for line in subtitle.splitlines():
+                        stripped = line.strip().lstrip("•").strip()
+                        if ":" in stripped:
+                            label, _, val = stripped.partition(":")
+                            label_key = label.strip().lower().replace(" ", "_")
+                            val = val.strip()
+                            if label_key == "source_app":
+                                ctx["source_app"] = val
+                                metrics.setdefault("source_app", val.lower())
+                            elif label_key == "page":
+                                ctx["page"] = val
+                                metrics.setdefault("source_page", val)
+                            elif val:
+                                ctx[label_key] = val
+                if ctx and "context" not in metrics:
+                    metrics["context"] = ctx
+                    try:
+                        import json
+
+                        metrics["context_json"] = json.dumps(ctx, ensure_ascii=False)
+                    except Exception:
+                        pass
 
     return page, metrics

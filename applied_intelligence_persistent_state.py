@@ -67,6 +67,8 @@ def autosave_applied_intelligence_state(st: Any) -> None:
 
 
 def default_reset_applied_intelligence_session(st: Any) -> None:
+    from suite_user_persistence import finalize_suite_reset
+
     apply_applied_intelligence_session_defaults(st)
     fresh = build_applied_intelligence_disk_state(st)
-    finalize_suite_reset(st, APP_ID, fresh, summary="Reset to defaults")
+    finalize_suite_reset(st, APP_ID, fresh, page="Home", summary="Reset to defaults")
