@@ -33,6 +33,7 @@ st.set_page_config(
 
 PRIMARY_NAV = ["Home"] + PRIMARY_ACTIONS + ["Advanced reference"]
 
+_PERSISTENCE_OK = False
 try:
     from applied_intelligence_persistent_state import (
         VIEW_MODE_KEY,
@@ -42,20 +43,20 @@ try:
         ensure_applied_intelligence_view_mode,
         restore_applied_intelligence_disk_state_once,
     )
-    from suite_user_persistence import render_reset_controls, show_persistence_messages
 
-    restore_applied_intelligence_disk_state_once(st)
-    ensure_applied_intelligence_view_from_restore(st)
-    show_persistence_messages(st)
-    render_reset_controls(
-        st,
-        "applied_intelligence",
-        on_reset=default_reset_applied_intelligence_session,
-        help_text="Clears saved page, problem area, and suite preload state for this app.",
-        extra_reset_clear_prefixes=("_suite_ai_", "_ami_", "_cc_ai_"),
-    )
+    _PERSISTENCE_OK = True
 except Exception:
     VIEW_MODE_KEY = "view_mode"
+
+    def default_reset_applied_intelligence_session(st_obj: Any) -> None:
+        st_obj.session_state.clear()
+        st_obj.session_state[VIEW_MODE_KEY] = "Home"
+
+    def restore_applied_intelligence_disk_state_once(_st: Any) -> bool:
+        return False
+
+    def autosave_applied_intelligence_state(_st: Any) -> None:
+        return None
 
     def ensure_applied_intelligence_view_mode(st_obj: Any) -> None:
         if st_obj.session_state.get(VIEW_MODE_KEY) not in PRIMARY_NAV:
@@ -65,6 +66,13 @@ except Exception:
 
     def ensure_applied_intelligence_view_from_restore(st_obj: Any) -> None:
         ensure_applied_intelligence_view_mode(st_obj)
+
+if _PERSISTENCE_OK:
+    try:
+        restore_applied_intelligence_disk_state_once(st)
+        ensure_applied_intelligence_view_from_restore(st)
+    except Exception:
+        pass
 
 try:
     from suite_resume_launch import apply_suite_resume_launch
@@ -136,6 +144,20 @@ if view_mode == "Advanced reference":
 
 st.sidebar.markdown("---")
 st.sidebar.caption("Think first · simulate second · optional depth last")
+
+try:
+    from suite_user_persistence import render_reset_controls, show_persistence_messages
+
+    show_persistence_messages(st)
+    render_reset_controls(
+        st,
+        "applied_intelligence",
+        on_reset=default_reset_applied_intelligence_session,
+        help_text="Clears saved page, problem area, and suite preload state for this app.",
+        extra_reset_clear_prefixes=("_suite_ai_", "_ami_", "_cc_ai_"),
+    )
+except Exception:
+    pass
 
 # =====================================================
 # MAIN CONTENT
