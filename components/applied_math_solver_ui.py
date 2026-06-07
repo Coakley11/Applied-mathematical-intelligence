@@ -6,10 +6,16 @@ import json
 from typing import Any
 
 from components.applied_math_problem_router import (
+    BASEBALL_PLAYER_COMPARE,
+    BASEBALL_PROJECTION,
     BASEBALL_TREND,
+    INVESTMENT_CONCENTRATION,
+    INVESTMENT_MACRO,
     INVESTMENT_REBALANCE,
     INVESTMENT_RISK_RETURN,
+    NBA_INVERSE_STAT_CHASE,
     NBA_STAT_CHASE,
+    NBA_WIN_PROBABILITY,
     ProblemRoute,
     route_suite_question,
 )
@@ -152,6 +158,17 @@ def _seed_control_defaults(st: Any, route: ProblemRoute, defaults: dict[str, Any
         tv = float(st.session_state[tk])
         if tv > 0:
             params["target_value"] = tv
+    elif pid == NBA_INVERSE_STAT_CHASE:
+        rk = _control_key(pid, "rate")
+        tk = _control_key(pid, "target")
+        if rk not in st.session_state:
+            st.session_state[rk] = float(defaults.get("expected_rate", 4.0))
+        if tk not in st.session_state:
+            st.session_state[tk] = float(defaults.get("target_value", 0.0))
+        params["expected_rate"] = float(st.session_state[rk])
+        tv = float(st.session_state[tk])
+        if tv > 0:
+            params["target_value"] = tv
     elif pid == BASEBALL_TREND:
         sk = _control_key(pid, "slope")
         rk = _control_key(pid, "r2")
@@ -179,152 +196,275 @@ def _seed_control_defaults(st: Any, route: ProblemRoute, defaults: dict[str, Any
             st.session_state[vk] = float(defaults.get("acceptable_volatility", 15.0))
         params["min_sharpe"] = float(st.session_state[sk])
         params["acceptable_volatility"] = float(st.session_state[vk])
+    elif pid == INVESTMENT_CONCENTRATION:
+        sk = _control_key(pid, "single")
+        tk = _control_key(pid, "top3")
+        if sk not in st.session_state:
+            st.session_state[sk] = float(defaults.get("max_single_pct", 25.0))
+        if tk not in st.session_state:
+            st.session_state[tk] = float(defaults.get("max_top3_pct", 60.0))
+        params["max_single_pct"] = float(st.session_state[sk])
+        params["max_top3_pct"] = float(st.session_state[tk])
+    elif pid == BASEBALL_PLAYER_COMPARE:
+        for name, key in (
+            ("weight_rate", "wr"),
+            ("weight_power", "wp"),
+            ("weight_career", "wc"),
+            ("weight_peak", "wk"),
+        ):
+            ck = _control_key(pid, key)
+            if ck not in st.session_state:
+                st.session_state[ck] = float(defaults.get(name, 1.0 if "rate" in name or "power" in name else 0.5))
+            params[name] = float(st.session_state[ck])
+    elif pid == INVESTMENT_MACRO:
+        rk = _control_key(pid, "ret")
+        vk = _control_key(pid, "vsh")
+        pk = _control_key(pid, "prob")
+        if rk not in st.session_state:
+            st.session_state[rk] = float(defaults.get("return_shock", -3.0))
+        if vk not in st.session_state:
+            st.session_state[vk] = float(defaults.get("vol_shock", 4.0))
+        if pk not in st.session_state:
+            st.session_state[pk] = float(defaults.get("recession_prob", 30.0))
+        params["return_shock"] = float(st.session_state[rk])
+        params["vol_shock"] = float(st.session_state[vk])
+        params["recession_prob"] = float(st.session_state[pk])
+    elif pid == BASEBALL_PROJECTION:
+        rk = _control_key(pid, "recent")
+        ck = _control_key(pid, "career")
+        if rk not in st.session_state:
+            st.session_state[rk] = float(defaults.get("max_above_recent_pct", 25.0))
+        if ck not in st.session_state:
+            st.session_state[ck] = float(defaults.get("max_above_career_pct", 35.0))
+        params["max_above_recent_pct"] = float(st.session_state[rk])
+        params["max_above_career_pct"] = float(st.session_state[ck])
 
     return params
 
 
 def _render_controls(st: Any, route: ProblemRoute) -> None:
     pid = route.problem_type_id
-    st.markdown("**Try changing assumptions**")
 
     if pid == NBA_STAT_CHASE:
-        st.number_input("Games remaining", min_value=1, max_value=20, key=_control_key(pid, "games"))
-        st.number_input(
-            "Expected stat per game",
-            min_value=0.0,
-            max_value=30.0,
-            step=0.5,
-            key=_control_key(pid, "rate"),
-        )
-        st.number_input(
-            "Target total (leader)",
-            min_value=0.0,
-            max_value=500.0,
-            step=1.0,
-            key=_control_key(pid, "target"),
-            help="0 = use value from context.",
-        )
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.number_input("Games remaining", min_value=1, max_value=20, key=_control_key(pid, "games"))
+        with c2:
+            st.number_input(
+                "Expected stat per game",
+                min_value=0.0,
+                max_value=30.0,
+                step=0.5,
+                key=_control_key(pid, "rate"),
+            )
+        with c3:
+            st.number_input(
+                "Target total (leader)",
+                min_value=0.0,
+                max_value=500.0,
+                step=1.0,
+                key=_control_key(pid, "target"),
+                help="0 = use value from context.",
+            )
+    elif pid == NBA_INVERSE_STAT_CHASE:
+        c1, c2 = st.columns(2)
+        with c1:
+            st.number_input(
+                "Expected stat per game",
+                min_value=0.5,
+                max_value=30.0,
+                step=0.5,
+                key=_control_key(pid, "rate"),
+            )
+        with c2:
+            st.number_input(
+                "Target total (leader)",
+                min_value=0.0,
+                max_value=500.0,
+                step=1.0,
+                key=_control_key(pid, "target"),
+                help="0 = use value from context.",
+            )
     elif pid == BASEBALL_TREND:
-        st.slider(
-            "Minimum meaningful slope (per season)",
-            min_value=0.1,
-            max_value=3.0,
-            step=0.1,
-            key=_control_key(pid, "slope"),
-        )
-        st.slider(
-            "Minimum R² threshold",
-            min_value=0.05,
-            max_value=0.95,
-            step=0.05,
-            key=_control_key(pid, "r2"),
-        )
+        c1, c2 = st.columns(2)
+        with c1:
+            st.slider(
+                "Minimum meaningful slope (per season)",
+                min_value=0.1,
+                max_value=3.0,
+                step=0.1,
+                key=_control_key(pid, "slope"),
+            )
+        with c2:
+            st.slider(
+                "Minimum R² threshold",
+                min_value=0.05,
+                max_value=0.95,
+                step=0.05,
+                key=_control_key(pid, "r2"),
+            )
     elif pid == INVESTMENT_REBALANCE:
-        st.slider(
-            "Drift threshold (pp)",
-            min_value=1.0,
-            max_value=15.0,
-            step=0.5,
-            key=_control_key(pid, "drift"),
-        )
-        st.selectbox(
-            "Risk tolerance",
-            ["conservative", "moderate", "aggressive"],
-            key=_control_key(pid, "risk"),
-        )
+        c1, c2 = st.columns(2)
+        with c1:
+            st.slider(
+                "Drift threshold (pp)",
+                min_value=1.0,
+                max_value=15.0,
+                step=0.5,
+                key=_control_key(pid, "drift"),
+            )
+        with c2:
+            st.selectbox(
+                "Risk tolerance",
+                ["conservative", "moderate", "aggressive"],
+                key=_control_key(pid, "risk"),
+            )
     elif pid == INVESTMENT_RISK_RETURN:
-        st.slider(
-            "Minimum Sharpe ratio",
-            min_value=0.0,
-            max_value=2.0,
-            step=0.05,
-            key=_control_key(pid, "sharpe"),
-        )
-        st.slider(
-            "Acceptable volatility (%)",
-            min_value=5.0,
-            max_value=40.0,
-            step=0.5,
-            key=_control_key(pid, "vol"),
-        )
+        c1, c2 = st.columns(2)
+        with c1:
+            st.slider(
+                "Minimum Sharpe ratio",
+                min_value=0.0,
+                max_value=2.0,
+                step=0.05,
+                key=_control_key(pid, "sharpe"),
+            )
+        with c2:
+            st.slider(
+                "Acceptable volatility (%)",
+                min_value=5.0,
+                max_value=40.0,
+                step=0.5,
+                key=_control_key(pid, "vol"),
+            )
+    elif pid == INVESTMENT_CONCENTRATION:
+        c1, c2 = st.columns(2)
+        with c1:
+            st.slider(
+                "Max single holding (%)",
+                min_value=5.0,
+                max_value=50.0,
+                step=1.0,
+                key=_control_key(pid, "single"),
+            )
+        with c2:
+            st.slider(
+                "Max top-3 combined (%)",
+                min_value=20.0,
+                max_value=90.0,
+                step=1.0,
+                key=_control_key(pid, "top3"),
+            )
+    elif pid == BASEBALL_PLAYER_COMPARE:
+        c1, c2 = st.columns(2)
+        with c1:
+            st.slider("Weight rate stats", 0.0, 2.0, key=_control_key(pid, "wr"))
+            st.slider("Weight power stats", 0.0, 2.0, key=_control_key(pid, "wp"))
+        with c2:
+            st.slider("Weight career totals", 0.0, 2.0, key=_control_key(pid, "wc"))
+            st.slider("Weight peak seasons", 0.0, 2.0, key=_control_key(pid, "wk"))
+    elif pid == INVESTMENT_MACRO:
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.slider("Return shock (pp)", -10.0, 0.0, key=_control_key(pid, "ret"))
+        with c2:
+            st.slider("Volatility shock (pp)", 0.0, 15.0, key=_control_key(pid, "vsh"))
+        with c3:
+            st.slider("Recession probability (%)", 0.0, 80.0, key=_control_key(pid, "prob"))
+    elif pid == BASEBALL_PROJECTION:
+        c1, c2 = st.columns(2)
+        with c1:
+            st.slider(
+                "Max % above recent season",
+                min_value=5.0,
+                max_value=60.0,
+                step=1.0,
+                key=_control_key(pid, "recent"),
+            )
+        with c2:
+            st.slider(
+                "Max % above career avg",
+                min_value=10.0,
+                max_value=80.0,
+                step=1.0,
+                key=_control_key(pid, "career"),
+            )
     else:
         st.caption("No assumption controls for this problem type yet.")
 
 
-def render_conclusion_headline(st: Any, result: SolverResult) -> bool:
-    """Answer-first block — plain English, no internal solver labels."""
-    headline = (result.conclusion or "").strip()
-    if not headline:
-        headline = (result.result or "").strip()
-    if not headline or headline.lower().startswith("framework"):
-        st.error(
-            "We could not produce a clear conclusion for this question. "
-            "Enable Developer Mode to inspect routing and context."
-        )
-        return False
-
-    with st.container(border=True):
-        st.markdown(f"**Best conclusion:** {headline}")
-
-        if result.confidence_pct is not None:
-            label = result.confidence_label or ""
-            label_txt = f" ({label})" if label else ""
-            st.markdown(f"**Confidence:** {result.confidence_pct}%{label_txt}")
-
-        if result.reasons:
-            st.markdown(f"**Main reason:** {result.reasons[0]}")
-        elif result.interpretation:
-            first = result.interpretation.split(".")[0].strip()
-            if first:
-                st.markdown(f"**Main reason:** {first}.")
-
-        if result.pivot_assumption:
-            st.markdown(f"**What assumption matters most?** {result.pivot_assumption}")
-
-        if result.partial and result.data_would_improve:
-            st.markdown("**What would improve this answer:**")
-            for item in result.data_would_improve[:3]:
-                st.markdown(f"- {item}")
-
-    return True
+def _render_live_dashboard(st: Any, result: SolverResult) -> None:
+    """Show pass/fail and key computed values after hands-on controls."""
+    if not result.live_metrics:
+        return
+    st.markdown("**At these assumptions:**")
+    n = len(result.live_metrics)
+    cols = st.columns(min(n, 4))
+    for i, (label, value) in enumerate(result.live_metrics.items()):
+        with cols[i % len(cols)]:
+            st.metric(label, value)
 
 
-def render_solver_sections(
+def render_coach_answer(
     st: Any,
     route: ProblemRoute,
     result: SolverResult,
     *,
     question: str = "",
-) -> None:
-    if not render_conclusion_headline(st, result):
-        return
+) -> bool:
+    """Math-coach layout: question → short answer → why → math → calculation → controls → sensitivity."""
+    q = (question or result.question or "").strip()
+    short = (result.short_answer or result.conclusion or result.result or "").strip()
+    if not short or short.lower().startswith("framework"):
+        st.error(
+            "We could not produce a clear answer for this question. "
+            "Enable Developer Mode to inspect routing and context."
+        )
+        return False
 
-    st.markdown("---")
-    st.markdown("#### Supporting math")
+    with st.container(border=True):
+        st.markdown("#### 1. Your question")
+        if q:
+            st.markdown(f'*"{q}"*')
+        else:
+            st.caption("Question text unavailable.")
 
+        st.markdown("#### 2. Short answer")
+        st.markdown(short)
+
+        why = (result.why or "").strip()
+        if not why and result.reasons:
+            why = result.reasons[0]
+        if why:
+            st.markdown("#### 3. Why")
+            st.markdown(why)
+
+    st.markdown("#### 4. The math idea")
     if result.math_idea:
-        st.markdown("**Mathematical method**")
         st.markdown(result.math_idea)
 
     if result.variables:
-        st.markdown("**Variables**")
+        st.markdown("#### 5. Variables")
         st.markdown(f"```\n{result.variables.strip()}\n```")
 
     if result.calculation:
-        st.markdown("**Calculation**")
+        st.markdown("#### 6. Calculation")
         st.markdown(result.calculation)
 
-    if result.interpretation:
-        st.markdown("**Interpretation**")
-        st.markdown(result.interpretation)
+    if result.partial and result.data_would_improve:
+        for hint in result.data_would_improve[:2]:
+            st.info(hint)
 
-    if result.assumptions:
-        st.markdown("**Assumptions**")
-        for a in result.assumptions:
-            st.markdown(f"- {a}")
+    st.markdown("#### 7. Hands-on controls")
+    st.caption("Change an assumption — the answer and live result update automatically.")
+    _render_controls(st, route)
+    _render_live_dashboard(st, result)
 
+    st.markdown("#### 8. What changes the answer?")
+    sens = (result.sensitivity_plain or result.pivot_assumption or result.sensitivity_notes or "").strip()
+    if sens:
+        st.markdown(sens)
     if result.sensitivity_rows:
-        st.markdown("**Sensitivity**")
         try:
             import pandas as pd
 
@@ -338,9 +478,35 @@ def render_solver_sections(
                 st.markdown(
                     f"- **{row.get('Parameter', '')}** · {row.get('Scenario', '')} → {row.get('Outcome', '')}"
                 )
-    elif result.sensitivity_notes:
-        st.markdown("**What changes the answer?**")
-        st.markdown(result.sensitivity_notes)
+
+    if result.assumptions:
+        with st.expander("Assumptions behind this model", expanded=False):
+            for a in result.assumptions:
+                st.markdown(f"- {a}")
+
+    return True
+
+
+def render_conclusion_headline(st: Any, result: SolverResult) -> bool:
+    """Legacy wrapper — prefer render_coach_answer."""
+    short = (result.short_answer or result.conclusion or "").strip()
+    if not short:
+        return False
+    with st.container(border=True):
+        st.markdown(f"**Short answer:** {short}")
+        if result.why:
+            st.markdown(f"**Why:** {result.why}")
+    return True
+
+
+def render_solver_sections(
+    st: Any,
+    route: ProblemRoute,
+    result: SolverResult,
+    *,
+    question: str = "",
+) -> None:
+    render_coach_answer(st, route, result, question=question)
 
 
 def render_solver_dev_diagnostics(
@@ -473,6 +639,5 @@ def render_suite_solver_answer(
     st.session_state["_ami_last_solver_trace"] = trace.to_dict()
 
     render_solver_sections(st, route, result, question=question)
-    _render_controls(st, route)
     render_solver_dev_diagnostics(st, route=route, result=result, trace=trace, context=ctx)
     return trace

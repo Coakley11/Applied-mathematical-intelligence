@@ -102,8 +102,9 @@ class TestProductionExamples(unittest.TestCase):
             },
             "Is Lorenzo Cain's HR trend meaningful?",
         )
-        self.assertIn("noisy", result.conclusion.lower())
-        self.assertIn("slope", result.reasons[0].lower())
+        self.assertIn("meaningful if", (result.short_answer or result.conclusion).lower())
+        self.assertIn("Noisy", result.live_metrics.get("Trend verdict", ""))
+        self.assertIn("slope", (result.why or result.reasons[0]).lower())
 
     def test_investment_rebalance(self) -> None:
         route = route_suite_question(
@@ -116,7 +117,8 @@ class TestProductionExamples(unittest.TestCase):
             {"rebalance_drift": {"VTI": "+6.0pp", "BND": "-4.0pp"}},
             "Should I rebalance this portfolio?",
         )
-        self.assertIn("rebalancing", result.conclusion.lower())
+        self.assertIn("rebalance", (result.short_answer or result.conclusion).lower())
+        self.assertTrue(result.live_metrics)
         self.assertTrue(result.reasons)
 
     def test_soto_vs_judge(self) -> None:
@@ -132,7 +134,7 @@ class TestProductionExamples(unittest.TestCase):
             {"player_a": "Juan Soto", "player_b": "Aaron Judge"},
         )
         self.assertTrue(result.conclusion)
-        self.assertTrue(result.model_note)
+        self.assertTrue(result.math_idea)
         self.assertTrue(result.data_would_improve)
 
 

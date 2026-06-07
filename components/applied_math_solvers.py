@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass, field
 from typing import Any
@@ -11,6 +12,7 @@ from components.applied_math_problem_router import (
     BASEBALL_GENERIC,
     BASEBALL_HISTORICAL,
     BASEBALL_PLAYER_COMPARE,
+    BASEBALL_PROJECTION,
     BASEBALL_TREND,
     GENERIC_FALLBACK,
     INVESTMENT_CONCENTRATION,
@@ -19,6 +21,7 @@ from components.applied_math_problem_router import (
     INVESTMENT_REBALANCE,
     INVESTMENT_RISK_RETURN,
     NBA_GENERIC,
+    NBA_INVERSE_STAT_CHASE,
     NBA_LEGACY_COMPARISON,
     NBA_MATCHUP_EDGE,
     NBA_STAT_CHASE,
@@ -54,6 +57,11 @@ class SolverResult:
     sensitivity_rows: list[dict[str, str]] = field(default_factory=list)
     model_note: str = ""
     data_would_improve: list[str] = field(default_factory=list)
+    # Math coach — teach-and-solve UX
+    short_answer: str = ""
+    why: str = ""
+    sensitivity_plain: str = ""
+    live_metrics: dict[str, str] = field(default_factory=dict)
 
     # Legacy alias — older code/tests referenced problem_detected
     @property
@@ -128,6 +136,14 @@ def _finalize_result(route: ProblemRoute, result: SolverResult) -> SolverResult:
     """Fill conclusion-engine fields when solvers omit them."""
     if not result.conclusion and result.result:
         result.conclusion = _verdict_to_conclusion(result.result)
+    if not result.short_answer and result.conclusion:
+        result.short_answer = result.conclusion
+    if not result.why and result.reasons:
+        result.why = result.reasons[0]
+    if not result.sensitivity_plain and result.pivot_assumption:
+        result.sensitivity_plain = result.pivot_assumption
+    elif not result.sensitivity_plain and result.sensitivity_notes:
+        result.sensitivity_plain = result.sensitivity_notes
     if result.confidence_pct is None:
         result.confidence_pct = _route_confidence_pct(
             route, result.partial, len(result.missing_fields)
@@ -138,7 +154,7 @@ def _finalize_result(route: ProblemRoute, result: SolverResult) -> SolverResult:
         result.model_note = f"We can model this as: {result.math_idea[0].lower() + result.math_idea[1:] if result.math_idea else ''}"
     if result.partial and not result.data_would_improve and result.missing_fields:
         result.data_would_improve = [
-            f"Adding **{field}** would raise confidence above {result.confidence_pct}%."
+            f"Use the controls below to enter **{field.split('.')[-1]}** and solve hands-on."
             for field in result.missing_fields[:4]
         ]
     return result
@@ -169,7 +185,13 @@ def _coach_result(
     sensitivity_rows: list[dict[str, str]] | None = None,
     model_note: str = "",
     data_would_improve: list[str] | None = None,
+    short_answer: str = "",
+    why: str = "",
+    sensitivity_plain: str = "",
+    live_metrics: dict[str, str] | None = None,
 ) -> SolverResult:
+    resolved_conclusion = conclusion or _verdict_to_conclusion(result)
+    resolved_why = why or ((reasons or [""])[0] if reasons else "")
     return SolverResult(
         question=question.strip(),
         problem_type=problem_type,
@@ -186,7 +208,7 @@ def _coach_result(
         problem_type_id=problem_type_id,
         computed=computed or {},
         default_controls=default_controls or {},
-        conclusion=conclusion or _verdict_to_conclusion(result),
+        conclusion=resolved_conclusion,
         confidence_pct=confidence_pct,
         confidence_label=confidence_label,
         reasons=reasons or [],
@@ -194,6 +216,10 @@ def _coach_result(
         sensitivity_rows=sensitivity_rows or [],
         model_note=model_note,
         data_would_improve=data_would_improve or [],
+        short_answer=short_answer or resolved_conclusion,
+        why=resolved_why,
+        sensitivity_plain=sensitivity_plain or pivot_assumption or sensitivity_notes,
+        live_metrics=live_metrics or {},
     )
 
 
@@ -254,8 +280,10 @@ def solve_nba_stat_chase(
     games = games_remaining
     if games is None:
         gr = gap_ctx.get("games_remaining") if gap_ctx else None
-        games = int(gr) if gr is not None else _num(ctx.get("games_remaining"))
-        games = int(games) if games is not None else None
+        games = int(gr) if gr is not None else None
+        if games is None:
+            gr_num = _num(ctx.get("games_remaining"))
+            games = int(gr_num) if gr_num is not None else None
 
     context_rate = _parse_rate(gap_ctx.get("rate_needed") or ctx.get("rate_needed"))
     exp_rate = expected_rate if expected_rate is not None else context_rate
@@ -265,126 +293,134 @@ def solve_nba_stat_chase(
         missing.append("stat_gap.gap (or current_value and target_value)")
     if games is None:
         missing.append("games_remaining")
+        games = 4  # hands-on default so the user can still explore
 
+    # Only the numbers that matter for this question
     data_used = [
         x
         for x in (
-            f"Gap: **{gap:g}** {stat}" if gap is not None else "",
-            f"Games remaining: **{games}**" if games is not None else "",
-            f"Expected {stat}/game: **{exp_rate:g}**" if exp_rate is not None else "",
-            f"Chase: **{player}** → **{target_name}**",
+            f"Gap to close: **{gap:g}** {stat}" if gap is not None else "",
+            f"Games remaining: **{games}**" + (" _(adjust below)_" if "games_remaining" in missing else ""),
+            f"Expected pace: **{exp_rate:g}** {stat}/game" if exp_rate is not None else "",
+            f"Current total: **{current:g}** → target **{target:g}**"
+            if current is not None and target is not None
+            else "",
         )
         if x
     ]
 
-    math_idea = "Rate-needed problem — can the challenger produce enough per game to close the gap?"
+    math_idea = (
+        f"This is a **rate-needed** problem. We compare how many {stat} {player} still needs "
+        f"to how many games he has left."
+    )
     variables = (
-        "gap = target total − current total\n"
-        "games_remaining = g\n"
-        "required_rate = gap ÷ g\n"
-        "expected_rate = recent production per game"
+        f"gap = target {stat} − current {stat}\n"
+        f"games = games remaining\n"
+        f"required rate = gap ÷ games\n"
+        f"expected rate = recent {stat} per game"
     )
 
     required_rate: float | None = None
     calc = ""
+    projected_total: float | None = None
     if gap is not None and games and games > 0:
         required_rate = gap / games
         calc = (
-            f"**required_rate** = gap ÷ games_remaining\n\n"
+            f"gap = **{gap:g}** {stat}\n"
+            f"games = **{games}**\n\n"
+            f"required rate = gap ÷ games\n"
             f"= {gap:g} ÷ {games} = **{required_rate:.2f}** {stat}/game"
         )
         if exp_rate is not None:
-            calc += f"\n\nCompare to expected **{exp_rate:g}** {stat}/game."
+            calc += f"\n\nexpected rate = **{exp_rate:g}** {stat}/game"
+            if current is not None:
+                projected_total = current + exp_rate * games
+                calc += (
+                    f"\n\nprojected final = current + (expected rate × games)\n"
+                    f"= {current:g} + ({exp_rate:g} × {games}) = **{projected_total:.1f}** {stat}"
+                )
     elif gap is not None:
-        calc = f"gap = **{gap:g}**. Set games remaining to compute required_rate."
+        calc = f"gap = **{gap:g}** {stat}. Adjust **games remaining** below to compute required rate."
 
     verdict = "Insufficient data"
     interpretation = ""
+    short_answer = "Adjust the controls below to explore this chase."
+    why = ""
+    sensitivity_plain = ""
+    live_metrics: dict[str, str] = {}
+
     if required_rate is not None and exp_rate is not None:
         cushion = exp_rate - required_rate
         if exp_rate >= required_rate * 1.05:
             verdict = "Likely — on pace to pass"
+            short_answer = f"Probably yes, if he has about **{games}** games left."
         elif exp_rate >= required_rate * 0.85:
             verdict = "Toss-up — close to required pace"
+            short_answer = f"Uncertain — it depends on whether he keeps **{exp_rate:.1f}** {stat}/game."
         else:
             verdict = "Unlikely — required pace is too high"
-        interpretation = (
-            f"If only **{games}** games remain, {player} needs **{required_rate:.1f}** {stat}/game. "
-            f"At **{exp_rate:.1f}**/game (cushion **{cushion:+.1f}**), the chase looks **{verdict.split('—')[0].strip().lower()}**."
+            short_answer = f"Probably no — he would need **{required_rate:.1f}** {stat}/game but averages **{exp_rate:.1f}**."
+        why = (
+            f"He needs **{required_rate:.1f}** {stat}/game over **{games}** games; "
+            f"recent pace is **{exp_rate:.1f}** ({cushion:+.1f} vs required)."
         )
+        interpretation = why
+        live_metrics = {
+            "Required rate": f"{required_rate:.2f} {stat}/game",
+            "Expected rate": f"{exp_rate:.1f} {stat}/game",
+            "Pass at current pace?": "Yes ✓" if exp_rate >= required_rate * 0.85 else "No ✗",
+        }
+        if projected_total is not None and target is not None:
+            live_metrics["Projected final"] = f"{projected_total:.1f} {stat}"
+            live_metrics["Target to pass"] = f"{target:g} {stat}"
+        half_g = max(1, games // 2) if games else 1
+        if gap and half_g != games:
+            sensitivity_plain = (
+                f"If games remaining drops from **{games}** to **{half_g}**, "
+                f"required rate rises from **{required_rate:.1f}** to **{gap / half_g:.1f}** {stat}/game."
+            )
     elif required_rate is not None:
-        interpretation = (
-            f"Required pace is **{required_rate:.2f}** {stat}/game. "
-            "Adjust expected rate below to see if the chase is realistic."
-        )
-    elif missing:
-        interpretation = (
-            "We can model this as a rate-needed problem, but need gap and games remaining "
-            "before computing required_rate."
+        short_answer = f"Set expected {stat}/game below — required pace is **{required_rate:.1f}**/game."
+        why = f"With **{games}** games left, the math depends entirely on his per-game production."
+        interpretation = why
+        live_metrics = {"Required rate": f"{required_rate:.2f} {stat}/game"}
+    elif gap is None:
+        short_answer = "Enter a target value below — we can model this once the gap is known."
+        why = "This is a rate-needed problem; gap = target − current."
+        interpretation = why
+
+    if not sensitivity_plain:
+        sensitivity_plain = (
+            "Fewer games remaining raises the required rate. "
+            "Lower expected production makes passing less likely."
         )
 
-    sensitivity = (
-        "**Games remaining** is the strongest lever — fewer games means a higher required_rate. "
-        "**Expected rate** shifts the conclusion between Likely and Unlikely."
-    )
+    sensitivity = sensitivity_plain
     if required_rate and games:
         alt_games = max(1, games - 1)
         alt_req = gap / alt_games if gap else None
         if alt_req:
-            sensitivity += f" At {alt_games} games left, required_rate rises to **{alt_req:.2f}**/game."
+            sensitivity += f" At {alt_games} games left, required rate is **{alt_req:.2f}**/game."
 
-    conclusion = "Insufficient data to answer"
-    reasons: list[str] = []
-    pivot = ""
-    conf_pct: int | None = None
+    conclusion = short_answer
+    reasons = [why] if why else []
+    pivot = sensitivity_plain
+    conf_pct: int | None = _nba_pass_confidence(required_rate, exp_rate) if required_rate and exp_rate else 45
     sens_rows: list[dict[str, str]] = []
     data_improve: list[str] = []
-    model_note = "We can model this as a rate-needed chase — gap ÷ games remaining vs recent production."
-
-    if required_rate is not None and exp_rate is not None:
-        cushion = exp_rate - required_rate
-        if exp_rate >= required_rate * 1.05:
-            conclusion = f"Likely yes — {player} is on pace to pass {target_name} in {stat}."
-        elif exp_rate >= required_rate * 0.85:
-            conclusion = f"Uncertain — {player} is close to the pace needed to pass {target_name} in {stat}."
-        else:
-            conclusion = f"Unlikely — {player} would need an unsustainable {stat} pace to pass {target_name}."
-        reasons = [
-            f"He needs **{required_rate:.1f}** {stat}/game over **{games}** remaining games and is averaging **{exp_rate:.1f}**."
-        ]
-        if abs(cushion) >= 0.1:
-            reasons.append(
-                f"That is a **{cushion:+.1f}** {stat}/game cushion vs the required pace."
-            )
-        conf_pct = _nba_pass_confidence(required_rate, exp_rate)
-        if games is not None and games <= 5:
-            pivot = (
-                f"This answer changes dramatically if **games remaining** drops below **{games}** "
-                f"(required rate rises above **{required_rate:.1f}**/game)."
-            )
-        elif required_rate and exp_rate:
-            pivot = (
-                f"This answer flips if expected {stat}/game falls below **{required_rate:.1f}** "
-                f"(currently **{exp_rate:.1f}**)."
-            )
-    elif required_rate is not None:
-        reasons = [f"Required pace is **{required_rate:.1f}** {stat}/game — set expected rate to judge likelihood."]
-        conf_pct = 45
-    elif missing:
-        data_improve = [f"**{m}**" for m in missing]
+    if "games_remaining" in missing:
+        data_improve.append("Use the **games remaining** control below.")
+    if gap is None:
+        data_improve.append("Use the **target total** control below.")
 
     if gap is not None and games and games > 0:
         for g in range(max(1, games - 2), games + 3):
             req_g = gap / g
             if exp_rate is not None:
-                out = _verdict_to_conclusion(
-                    "Likely — on pace to pass"
+                out = (
+                    "Likely yes"
                     if exp_rate >= req_g * 1.05
-                    else (
-                        "Toss-up — close to required pace"
-                        if exp_rate >= req_g * 0.85
-                        else "Unlikely — required pace is too high"
-                    )
+                    else ("Uncertain" if exp_rate >= req_g * 0.85 else "Likely no")
                 )
             else:
                 out = f"Need {req_g:.1f}/game"
@@ -408,7 +444,7 @@ def solve_nba_stat_chase(
         ],
         sensitivity_notes=sensitivity,
         missing_fields=missing,
-        partial=bool(missing),
+        partial=bool(missing and (gap is None or "games_remaining" in missing)),
         problem_type_id=NBA_STAT_CHASE,
         computed={
             "gap": gap,
@@ -416,6 +452,7 @@ def solve_nba_stat_chase(
             "required_rate": required_rate,
             "expected_rate": exp_rate,
             "verdict": verdict,
+            "projected_total": projected_total,
         },
         default_controls={
             "games_remaining": games if games is not None else 4,
@@ -427,8 +464,12 @@ def solve_nba_stat_chase(
         reasons=reasons,
         pivot_assumption=pivot,
         sensitivity_rows=sens_rows,
-        model_note=model_note,
+        model_note=math_idea,
         data_would_improve=data_improve,
+        short_answer=short_answer,
+        why=why,
+        sensitivity_plain=sensitivity_plain,
+        live_metrics=live_metrics,
     )
 
 
@@ -473,35 +514,38 @@ def solve_baseball_trend(
             strength = "weak"
             noise = "moderate" if r2 >= min_r2 else "high"
 
-    data_used = [
-        x
-        for x in (
-            f"Slope: **{slope:g}** {stat}/season" if slope is not None else "",
-            f"R²: **{r2:g}**" if r2 is not None else "",
-            f"Direction: **{direction}**" if direction != "unknown" else "",
-            f"Player: **{player}**",
-            f"Thresholds: slope ≥ {min_slope}, R² ≥ {min_r2}",
-        )
-        if x
-    ]
 
-    math_idea = "Trend strength vs noise — is the slope real or year-to-year randomness?"
+    math_idea = (
+        f"This is a **trend vs noise** problem. We ask whether {player}'s {stat} slope is "
+        f"large enough and consistent enough (R²) to trust — or just year-to-year randomness."
+    )
     variables = (
-        "slope = yearly change in the stat\n"
-        "R² = consistency of the linear fit (0–1)\n"
+        "slope = change in stat per season\n"
+        "R² = how consistently the stat follows a line (0–1)\n"
         "delta = total change over the trend window"
     )
 
     calc = (
         f"Meaningful if |slope| ≥ **{min_slope}** and R² ≥ **{min_r2}**\n\n"
         + (
-            f"|slope| = **{abs(slope):g}**, R² = **{r2:g}**"
+            f"slope = **{slope:g}** {stat}/season\n"
+            f"R² = **{r2:g}**"
+            + (f"\ndelta = **{delta:g}** over the window" if delta is not None else "")
             if slope is not None and r2 is not None
-            else "Need slope and R² from the Trends page."
+            else "Enter slope and R² from Baseball Trends, or use the threshold sliders below."
         )
     )
-    if delta is not None:
-        calc += f"\n\nNet change (delta) = **{delta:g}** over the window."
+
+    data_used = [
+        x
+        for x in (
+            f"Slope: **{slope:g}** {stat}/season" if slope is not None else "",
+            f"R²: **{r2:g}**" if r2 is not None else "",
+            f"Direction: **{direction}**" if direction != "unknown" else "",
+            f"Net change (delta): **{delta:g}**" if delta is not None else "",
+        )
+        if x
+    ]
 
     if meaningful:
         result = f"Meaningful {direction} trend on {stat}"
@@ -531,43 +575,99 @@ def solve_baseball_trend(
         "**Slope threshold** filters gradual vs sharp trends."
     )
 
+    short_answer = "Adjust slope and R² thresholds below to see if this trend is meaningful."
+    why = ""
+    sensitivity_plain = sensitivity
+    live_metrics: dict[str, str] = {}
+
     conclusion = "Insufficient data to answer"
     reasons: list[str] = []
     pivot = ""
     conf_pct: int | None = None
     sens_rows: list[dict[str, str]] = []
     data_improve: list[str] = []
-    model_note = "We model this as a rate-needed chase: gap ÷ games remaining compared to recent production."
+    model_note = math_idea
 
     if slope is not None and r2 is not None:
         if meaningful:
-            conclusion = (
-                f"The {stat} trend looks meaningful for {player} — strong enough to factor into decisions."
+            short_answer = f"Yes — the {direction} {stat} trend looks meaningful at your thresholds."
+            why = (
+                f"|slope| = **{abs(slope):g}** ≥ **{min_slope}** and R² = **{r2:g}** ≥ **{min_r2}** — "
+                "the line fits consistently enough to trust."
             )
-            reasons = [
+            live_metrics = {
+                "Trend verdict": "Meaningful ✓",
+                "Noise level": "Low",
+                f"Slope ({stat}/season)": f"{slope:g}",
+                "R²": f"{r2:g}",
+            }
+        elif strength == "noisy":
+            short_answer = (
+                f"The trend is **{direction}**, but only meaningful if R² is high enough — "
+                f"currently **{r2:g}** vs your **{min_r2}** floor."
+            )
+            why = (
+                f"Slope is **{slope:g}** {stat}/season ({direction}), but R² **{r2:g}** "
+                f"is below **{min_r2}** — year-to-year noise may dominate."
+            )
+            live_metrics = {
+                "Trend verdict": "Noisy — direction only",
+                "Noise level": "High",
+                f"Slope ({stat}/season)": f"{slope:g}",
+                "R²": f"{r2:g}",
+            }
+        elif strength == "weak":
+            short_answer = f"No — the {stat} trend is too weak to rely on for decisions."
+            why = (
+                f"|slope| (**{abs(slope):g}**) or R² (**{r2:g}**) falls below your thresholds "
+                f"(slope ≥ **{min_slope}**, R² ≥ **{min_r2}**)."
+            )
+            live_metrics = {
+                "Trend verdict": "Weak ✗",
+                "Noise level": noise.capitalize(),
+                f"Slope ({stat}/season)": f"{slope:g}",
+                "R²": f"{r2:g}",
+            }
+        else:
+            short_answer = f"Inconclusive — review slope **{slope:g}** and R² **{r2:g}** against your thresholds."
+            why = f"Slope **{slope:g}**/season, R² **{r2:g}** — adjust thresholds below to see when the verdict flips."
+            live_metrics = {
+                "Trend verdict": "Inconclusive",
+                f"Slope ({stat}/season)": f"{slope:g}",
+                "R²": f"{r2:g}",
+            }
+
+        if meaningful:
+            conclusion = short_answer
+            reasons = [why] if why else [
                 f"Slope is **{slope:g}** {stat}/season with R² **{r2:g}**, above your thresholds (slope ≥ {min_slope}, R² ≥ {min_r2}).",
             ]
             if delta is not None:
                 reasons.append(f"Net change over the window (delta) is **{delta:g}** {stat}.")
         elif strength == "noisy":
-            conclusion = f"The {stat} trend looks moderately meaningful, but still noisy."
-            reasons = [
+            conclusion = short_answer
+            reasons = [why] if why else [
                 f"The slope is **{direction}** (**{slope:g}**/season) and R² is **{r2:g}**, but the fit is inconsistent — year-to-year noise may dominate.",
             ]
         elif strength == "weak":
-            conclusion = f"The {stat} trend looks weak — not strong enough to rely on for decisions."
-            reasons = [
+            conclusion = short_answer
+            reasons = [why] if why else [
                 f"|slope| (**{abs(slope):g}**) or R² (**{r2:g}**) falls below meaningful thresholds for {stat}.",
             ]
         else:
-            conclusion = f"The {stat} trend is inconclusive with the current data."
-            reasons = [
+            conclusion = short_answer
+            reasons = [why] if why else [
                 f"Slope **{slope:g}**/season, R² **{r2:g}** — review thresholds below.",
             ]
         conf_pct = 82 if meaningful else (58 if strength == "noisy" else 44)
         pivot = (
             f"This answer flips if R² falls below **{min_r2:.2f}** "
             f"(currently **{r2:g}**) or |slope| drops under **{min_slope}**."
+        )
+        sensitivity_plain = (
+            f"If you raise the R² threshold from **{min_r2}** to **{min(min_r2 + 0.15, 0.95):.2f}**, "
+            f"a trend with R² **{r2:g}** becomes "
+            f"{'meaningful' if r2 >= min(min_r2 + 0.15, 0.95) else 'not meaningful'}."
         )
         for r2_try in (0.25, 0.35, 0.50, 0.65):
             ok = abs(slope) >= min_slope and r2 >= r2_try
@@ -579,10 +679,16 @@ def solve_baseball_trend(
                 }
             )
     elif missing:
-        data_improve = [f"**{m}** from Baseball Trends (Advanced Trend Intelligence)" for m in missing]
+        data_improve = ["Use the **threshold sliders** below, or re-send from Baseball Trends with slope and R² attached."]
         conf_pct = 40
-        conclusion = f"We cannot judge whether {player}'s {stat} trend is meaningful without regression output."
-        reasons = ["Slope and R² from the Trends page are required before a quantitative verdict."]
+        short_answer = f"We can model {player}'s {stat} trend — enter slope and R² from Baseball Trends, or adjust thresholds below."
+        why = "This is a trend vs noise problem: meaningful if |slope| and R² both clear your thresholds."
+        conclusion = short_answer
+        reasons = [why]
+
+    conclusion = short_answer if short_answer else conclusion
+    if not reasons and why:
+        reasons = [why]
 
     return _coach_result(
         question=question,
@@ -616,6 +722,10 @@ def solve_baseball_trend(
         sensitivity_rows=sens_rows,
         model_note=model_note,
         data_would_improve=data_improve,
+        short_answer=short_answer,
+        why=why,
+        sensitivity_plain=sensitivity_plain,
+        live_metrics=live_metrics,
     )
 
 
@@ -655,16 +765,20 @@ def solve_investment_rebalance(
     data_used = [
         x
         for x in (
-            f"Health score: **{health}**" if health is not None else "",
             largest,
-            f"Rebalance threshold: **{drift_threshold:g}pp**",
-            f"Goal: **{objective}**" if objective else "",
-            f"Risk tolerance: **{risk_tolerance}**",
+            f"Drift threshold: **{drift_threshold:g}pp**",
+            *[
+                f"**{t}**: drift **{d:+.1f}pp**"
+                for t, d in sorted(parsed.items(), key=lambda x: abs(x[1]), reverse=True)[:4]
+            ],
         )
         if x
     ]
 
-    math_idea = "Threshold / drift problem — compare each holding's weight to its target."
+    math_idea = (
+        "This is a **threshold / drift** problem. For each holding, "
+        "drift = current weight − target weight; rebalance when |drift| exceeds your threshold."
+    )
     variables = (
         "current_weight_i = portfolio weight today\n"
         "target_weight_i = policy target\n"
@@ -704,18 +818,54 @@ def solve_investment_rebalance(
         "**Risk tolerance** shifts how aggressively you act on the same drift."
     )
 
+    short_answer = "Adjust the drift threshold below — we need holding drift data to compute a verdict."
+    why = "Rebalance when any holding's |drift| exceeds your threshold."
+    sensitivity_plain = sensitivity
+    live_metrics: dict[str, str] = {}
+
     conclusion = "We need drift data from Portfolio Health before answering."
     reasons: list[str] = []
     pivot = ""
     conf_pct: int | None = None
     sens_rows: list[dict[str, str]] = []
     data_improve: list[str] = []
-    model_note = "We model drift as current weight minus target weight, compared to your rebalance threshold."
+    model_note = math_idea
 
     if parsed:
         n_over_thresh = sum(1 for v in parsed.values() if abs(v) >= drift_threshold)
+        over_list = ", ".join(t for t, v in parsed.items() if abs(v) >= drift_threshold)
         if max_drift >= drift_threshold:
-            conclusion = f"Yes — rebalancing is mathematically justified at your **{drift_threshold:g}%** drift threshold."
+            short_answer = f"Yes — rebalance if your threshold is **{drift_threshold:g}pp** (max drift **{max_drift:.1f}pp**)."
+            why = (
+                f"Max |drift| is **{max_drift:.1f}pp**, above your **{drift_threshold:g}pp** threshold"
+                + (f" — **{n_over_thresh}** holding(s) over limit." if n_over_thresh else "")
+                + "."
+            )
+            live_metrics = {
+                "Action": "Rebalance ✓",
+                "Max |drift|": f"{max_drift:.1f}pp",
+                "Holdings over threshold": str(n_over_thresh) if n_over_thresh else over_list or "—",
+                "Threshold": f"{drift_threshold:g}pp",
+            }
+        elif max_drift >= drift_threshold * 0.6:
+            short_answer = f"Monitor — drift is **{max_drift:.1f}pp**, below your **{drift_threshold:g}pp** rebalance threshold."
+            why = f"Noticeable drift but not yet over **{drift_threshold:g}pp** — watch before trading."
+            live_metrics = {
+                "Action": "Monitor",
+                "Max |drift|": f"{max_drift:.1f}pp",
+                "Threshold": f"{drift_threshold:g}pp",
+            }
+        else:
+            short_answer = f"No — holdings are within **{drift_threshold:g}pp** drift tolerance."
+            why = f"Max |drift| is **{max_drift:.1f}pp**, below the **{drift_threshold:g}pp** threshold."
+            live_metrics = {
+                "Action": "No action",
+                "Max |drift|": f"{max_drift:.1f}pp",
+                "Threshold": f"{drift_threshold:g}pp",
+            }
+
+        if max_drift >= drift_threshold:
+            conclusion = short_answer
             if overweight and underweight:
                 reasons = [
                     f"**{overweight[0]}** is **{abs(overweight[1]):.0f}** percentage points above target and "
@@ -729,19 +879,21 @@ def solve_investment_rebalance(
             else:
                 reasons = [f"Max drift is **{max_drift:.1f}pp**, above the **{drift_threshold:g}pp** threshold."]
         elif max_drift >= drift_threshold * 0.6:
-            conclusion = "Monitor — drift is noticeable but still below your rebalance threshold."
-            reasons = [
-                f"Max drift is **{max_drift:.1f}pp** vs a **{drift_threshold:g}pp** threshold — watch before acting.",
-            ]
+            conclusion = short_answer
+            reasons = [why]
         else:
-            conclusion = "No — holdings are within your drift tolerance; rebalancing is not required yet."
-            reasons = [
-                f"Max drift is **{max_drift:.1f}pp**, below the **{drift_threshold:g}pp** threshold.",
-            ]
+            conclusion = short_answer
+            reasons = [why]
         conf_pct = 86 if max_drift >= drift_threshold else (64 if max_drift >= drift_threshold * 0.6 else 72)
         pivot = (
             f"This answer changes if drift threshold is raised above **{max_drift:.1f}pp** "
             f"(current max drift) or lowered below **{drift_threshold:g}pp**."
+        )
+        alt_thresh = max(1.0, drift_threshold - 2.0)
+        sensitivity_plain = (
+            f"If drift threshold drops from **{drift_threshold:g}pp** to **{alt_thresh:g}pp**, "
+            f"max drift **{max_drift:.1f}pp** → "
+            f"{'rebalance' if max_drift >= alt_thresh else 'hold/monitor'}."
         )
         for thresh in (3.0, 5.0, 7.0, 10.0):
             out = "Rebalance" if max_drift >= thresh else "Hold / monitor"
@@ -749,10 +901,15 @@ def solve_investment_rebalance(
                 {"Parameter": "Drift threshold (pp)", "Scenario": f"{thresh:g}", "Outcome": out}
             )
     elif missing:
-        data_improve = ["**rebalance_drift** from Portfolio Health (run Analyze if needed)"]
+        data_improve = ["Use the **drift threshold** slider below, or re-send from Portfolio Health with drift attached."]
         conf_pct = 38
-        conclusion = "Unclear — rebalance drift data is missing from the transferred context."
-        reasons = ["Run Portfolio Health in the Investment app, then re-send the question."]
+        short_answer = "We can model this as drift vs threshold — enter drift from Portfolio Health or adjust the threshold below."
+        why = "drift = current weight − target weight; rebalance when |drift| exceeds threshold."
+        conclusion = short_answer
+        reasons = [why]
+
+    if not reasons and why:
+        reasons = [why]
 
     return _coach_result(
         question=question,
@@ -785,6 +942,10 @@ def solve_investment_rebalance(
         sensitivity_rows=sens_rows,
         model_note=model_note,
         data_would_improve=data_improve,
+        short_answer=short_answer,
+        why=why,
+        sensitivity_plain=sensitivity_plain,
+        live_metrics=live_metrics,
     )
 
 
@@ -818,13 +979,16 @@ def solve_investment_risk_return(
             f"Expected return: **{exp_ret:g}%**" if exp_ret is not None else "",
             f"Volatility: **{vol:g}%**" if vol is not None else "",
             f"Sharpe ratio: **{sharpe:g}**" if sharpe is not None else "",
-            f"Max drawdown: **{drawdown:g}%**" if drawdown is not None else "",
-            f"Acceptable volatility: **{max_vol:g}%**",
+            f"Your Sharpe floor: **{min_sharpe:g}**",
+            f"Your volatility cap: **{max_vol:g}%**",
         )
         if x
     ]
 
-    math_idea = "Return per unit of risk — is the portfolio compensated for volatility?"
+    math_idea = (
+        "This is a **risk-return tradeoff** problem. Sharpe ≈ return ÷ volatility — "
+        "does the portfolio earn enough return per unit of risk for your thresholds?"
+    )
     variables = (
         "Sharpe ≈ (return − risk_free) / volatility\n"
         "max_drawdown = worst peak-to-trough loss\n"
@@ -866,6 +1030,11 @@ def solve_investment_risk_return(
         "**Minimum Sharpe** sets how much return per unit risk you demand."
     )
 
+    short_answer = "Adjust Sharpe and volatility thresholds below to judge whether return is worth the risk."
+    why = ""
+    sensitivity_plain = sensitivity
+    live_metrics: dict[str, str] = {}
+
     conclusion = "We need return and volatility from Portfolio Health before answering."
     reasons: list[str] = []
     pivot = ""
@@ -875,27 +1044,47 @@ def solve_investment_risk_return(
     model_note = "We model return per unit of risk — Sharpe ratio vs your volatility ceiling."
 
     if exp_ret is not None and vol is not None and sharpe is not None:
-        if sharpe >= min_sharpe and vol <= max_vol:
-            conclusion = (
-                f"Yes — the **{exp_ret:g}%** expected return appears worth **{vol:g}%** volatility at your goal."
-            )
+        passes = sharpe >= min_sharpe and vol <= max_vol
+        if passes:
+            short_answer = f"Yes — **{exp_ret:g}%** return looks worth **{vol:g}%** volatility at your thresholds."
+            why = f"Sharpe **{sharpe:g}** ≥ **{min_sharpe:g}** and volatility **{vol:g}%** ≤ **{max_vol:g}%** cap."
+            live_metrics = {
+                "Verdict": "Pass ✓",
+                "Sharpe": f"{sharpe:g}",
+                "Volatility": f"{vol:g}%",
+                f"Sharpe floor ({min_sharpe:g})": "Met" if sharpe >= min_sharpe else "Not met",
+                f"Vol cap ({max_vol:g}%)": "Met" if vol <= max_vol else "Exceeded",
+            }
         elif sharpe >= min_sharpe * 0.8:
-            conclusion = (
-                f"Unclear — **{exp_ret:g}%** return vs **{vol:g}%** volatility is borderline for your risk tolerance."
-            )
+            short_answer = f"Borderline — **{exp_ret:g}%** return vs **{vol:g}%** volatility is close to your limits."
+            why = f"Sharpe **{sharpe:g}** is near your **{min_sharpe:g}** floor; volatility **{vol:g}%** vs **{max_vol:g}%** cap."
+            live_metrics = {
+                "Verdict": "Borderline",
+                "Sharpe": f"{sharpe:g}",
+                "Volatility": f"{vol:g}%",
+            }
         else:
-            conclusion = (
-                f"Too risky — **{vol:g}%** volatility is not justified by **{exp_ret:g}%** expected return at your Sharpe floor."
-            )
-        reasons = [
-            f"Sharpe ratio is **{sharpe:g}** (your minimum is **{min_sharpe:g}**).",
-        ]
+            short_answer = f"No — **{vol:g}%** volatility is not justified by **{exp_ret:g}%** return at your Sharpe floor."
+            why = f"Sharpe **{sharpe:g}** < **{min_sharpe:g}** — not enough return per unit of risk."
+            live_metrics = {
+                "Verdict": "Fail ✗",
+                "Sharpe": f"{sharpe:g}",
+                "Volatility": f"{vol:g}%",
+            }
+
+        conclusion = short_answer
+        reasons = [why]
         if drawdown is not None:
             reasons.append(f"Worst peak-to-trough drawdown is **{drawdown:g}%**.")
-        conf_pct = 84 if sharpe >= min_sharpe and vol <= max_vol else (55 if sharpe >= min_sharpe * 0.8 else 48)
+        conf_pct = 84 if passes else (55 if sharpe >= min_sharpe * 0.8 else 48)
         pivot = (
             f"This answer becomes negative if volatility exceeds **{max_vol:g}%** "
             f"(currently **{vol:g}%**) or Sharpe falls below **{min_sharpe:g}**."
+        )
+        tighter_vol = max(5.0, max_vol - 3.0)
+        sensitivity_plain = (
+            f"If acceptable volatility drops from **{max_vol:g}%** to **{tighter_vol:g}%**, "
+            f"**{vol:g}%** actual volatility → {'pass' if vol <= tighter_vol else 'fail'}."
         )
         for vol_cap in (12.0, 15.0, 18.0, 22.0):
             if sharpe is not None:
@@ -907,10 +1096,15 @@ def solve_investment_risk_return(
                 {"Parameter": "Volatility cap (%)", "Scenario": f"{vol_cap:g}", "Outcome": out}
             )
     elif missing:
-        data_improve = [f"**{m}** from Portfolio Health" for m in missing]
+        data_improve = ["Use the **Sharpe / volatility sliders** below, or re-send from Portfolio Health with return and volatility attached."]
         conf_pct = 40
-        conclusion = "Unclear — expected return and volatility are not in the transferred context."
-        reasons = ["Run Analyze Portfolio in the Investment app, then re-send the question."]
+        short_answer = "We can model return vs risk — enter return and volatility from Portfolio Health, or set thresholds below."
+        why = "Sharpe ≈ return ÷ volatility compared to your minimum Sharpe and volatility cap."
+        conclusion = short_answer
+        reasons = [why]
+
+    if not reasons and why:
+        reasons = [why]
 
     assumptions = [
         f"Risk profile: {risk_level}.",
@@ -950,6 +1144,834 @@ def solve_investment_risk_return(
         sensitivity_rows=sens_rows,
         model_note=model_note,
         data_would_improve=data_improve,
+        short_answer=short_answer,
+        why=why,
+        sensitivity_plain=sensitivity_plain,
+        live_metrics=live_metrics,
+    )
+
+
+def _parse_pct(val: Any) -> float | None:
+    """Parse probability as 0–100 percent."""
+    n = _num(val)
+    if n is None:
+        return None
+    if 0 <= n <= 1:
+        return n * 100.0
+    return n
+
+
+def _parse_weight_fraction(val: Any) -> float | None:
+    """Parse portfolio weight to 0–1 fraction."""
+    n = _num(val)
+    if n is None:
+        return None
+    if n > 1.0:
+        return n / 100.0
+    return n
+
+
+def _parse_weights_map(raw: dict[str, Any]) -> dict[str, float]:
+    out: dict[str, float] = {}
+    for ticker, val in raw.items():
+        w = _parse_weight_fraction(val)
+        if w is not None and w >= 0:
+            out[str(ticker)] = w
+    return out
+
+
+def _win_prob_edge_label(pct: float) -> tuple[str, str]:
+    """Return (edge label, coach phrase) for win probability pct (0–100)."""
+    if pct >= 75:
+        return "heavy favorite", "They are a heavy favorite — but upsets still happen."
+    if pct >= 65:
+        return "strong edge", "They have a strong edge, but it is not a lock."
+    if pct >= 55:
+        return "solid edge", "The model says they are favored, but not a lock."
+    if pct >= 50:
+        return "slight edge", "They have a slight edge — essentially a toss-up with a lean."
+    if pct >= 45:
+        return "slight underdog", "They are a slight underdog — close enough that small swings matter."
+    if pct >= 35:
+        return "underdog", "They are an underdog; the model gives them a real but minority chance."
+    return "long shot", "They are a long shot — would need several breaks to go their way."
+
+
+def _extract_pair_values(text: str) -> tuple[float | None, float | None]:
+    nums = [float(x) for x in re.findall(r"-?\d+\.?\d*", str(text))]
+    if len(nums) >= 2:
+        return nums[0], nums[1]
+    if len(nums) == 1:
+        return nums[0], None
+    return None, None
+
+
+def _stat_category(stat: str) -> str:
+    s = stat.lower()
+    if any(k in s for k in ("hr", "slg", "power", "iso", "home run")):
+        return "power"
+    if any(k in s for k in ("ops", "wrc", "war", "obp", "avg", "rate", "woba")):
+        return "rate"
+    if any(k in s for k in ("career", "total", "counting", "rbi", "hit", "sb")):
+        return "career"
+    if any(k in s for k in ("peak", "season", "best")):
+        return "peak"
+    return "rate"
+
+
+def _collect_comparison_rows(
+    ctx: dict[str, Any],
+    pa: str,
+    pb: str,
+) -> list[tuple[str, float, float]]:
+    """Parse comparison stats into (name, value_a, value_b) rows."""
+    rows: list[tuple[str, float, float]] = []
+    cmp_extra = ctx.get("_ami_comparison_context") or ctx.get("comparison_differences")
+    if isinstance(cmp_extra, dict):
+        for stat, val in cmp_extra.items():
+            a, b = _extract_pair_values(str(val))
+            if a is not None and b is not None:
+                rows.append((str(stat), a, b))
+    elif isinstance(cmp_extra, list):
+        for item in cmp_extra:
+            if isinstance(item, dict):
+                stat = str(item.get("stat") or item.get("metric") or "stat")
+                a = _num(item.get(pa) or item.get("player_a") or item.get("a"))
+                b = _num(item.get(pb) or item.get("player_b") or item.get("b"))
+                if a is None or b is None:
+                    a2, b2 = _extract_pair_values(str(item))
+                    a = a if a is not None else a2
+                    b = b if b is not None else b2
+                if a is not None and b is not None:
+                    rows.append((stat, a, b))
+            else:
+                a, b = _extract_pair_values(str(item))
+                if a is not None and b is not None:
+                    rows.append(("stat", a, b))
+    stats_block = ctx.get("comparison_stats")
+    if isinstance(stats_block, dict):
+        for stat, val in stats_block.items():
+            if isinstance(val, dict):
+                a = _num(val.get(pa) or val.get("player_a"))
+                b = _num(val.get(pb) or val.get("player_b"))
+                if a is not None and b is not None:
+                    rows.append((str(stat), a, b))
+    return rows
+
+
+def solve_nba_win_probability(ctx: dict[str, Any], question: str) -> SolverResult:
+    team = str(ctx.get("team") or "Team").strip()
+    wp_raw = ctx.get("win_probability") or ctx.get("series_probability")
+    pct = _parse_pct(wp_raw)
+    horizon = "series" if ctx.get("series_probability") and not ctx.get("win_probability") else "game"
+
+    missing: list[str] = []
+    if pct is None:
+        missing.append("win_probability")
+
+    edge = ""
+    math_idea = (
+        "This is a **probability calibration** problem. A win probability tells you how favored "
+        "a team is — we classify the edge and note what would make the number look too high or low."
+    )
+    variables = (
+        "p = quoted win probability (%)\n"
+        "edge band: slight (50–55) · solid (55–65) · strong (65–75) · heavy (75+)"
+    )
+
+    short_answer = "Enter a win probability from Live Game Center to evaluate."
+    why = ""
+    calc = ""
+    live_metrics: dict[str, str] = {}
+    sens_rows: list[dict[str, str]] = []
+
+    if pct is not None:
+        edge, phrase = _win_prob_edge_label(pct)
+        short_answer = f"At **{pct:g}%**, {phrase}"
+        why = (
+            f"**{pct:g}%** falls in the **{edge}** band "
+            f"(50–55% slight · 55–65% solid · 65–75% strong · 75%+ heavy favorite)."
+        )
+        calc = (
+            f"p = **{pct:g}%** ({horizon} win probability for **{team}**)\n\n"
+            f"Edge classification: **{edge}**"
+        )
+        questionable = []
+        if pct >= 70:
+            questionable.append("Injuries, foul trouble, or cold shooting could pull this below 60%.")
+        elif pct <= 40:
+            questionable.append("Home court, star hot streak, or opponent foul trouble could push this up 10–15 pp.")
+        else:
+            questionable.append("A 10 pp swing in either direction is normal over a small sample of games.")
+        calc += f"\n\nWhat could make this questionable: {questionable[0]}"
+        live_metrics = {
+            "Win probability": f"{pct:g}%",
+            "Edge band": edge.replace("_", " ").title(),
+            "Horizon": horizon,
+        }
+        for try_p in (45, 55, 62, 72):
+            lbl, _ = _win_prob_edge_label(float(try_p))
+            sens_rows.append({"Parameter": "Win probability", "Scenario": f"{try_p}%", "Outcome": lbl})
+
+    data_used = [x for x in (f"Win probability: **{pct:g}%**" if pct else "", f"Team: **{team}**") if x]
+
+    return _coach_result(
+        question=question,
+        problem_type="Win probability reasonableness",
+        math_idea=math_idea,
+        variables=variables,
+        data_used=data_used,
+        calculation=calc or "Load win_probability from Live Game Center.",
+        result=short_answer,
+        interpretation=why,
+        assumptions=[f"Probability refers to the same {horizon} horizon as the source page."],
+        sensitivity_notes="Star minutes ±10% or a key injury can shift playoff probability 10–15 percentage points.",
+        missing_fields=missing,
+        partial=bool(missing),
+        problem_type_id=NBA_WIN_PROBABILITY,
+        computed={"probability_pct": pct, "edge": edge if pct else None},
+        conclusion=short_answer,
+        confidence_pct=72 if pct else 40,
+        reasons=[why] if why else [],
+        short_answer=short_answer,
+        why=why,
+        sensitivity_plain=(
+            f"If the true strength gap is smaller than the model assumes, **{pct:g}%** may be 5–10 pp too high."
+            if pct and pct >= 60
+            else (
+                f"If **{team}** catches a hot stretch, a **{pct:g}%** line could rise toward 50%."
+                if pct and pct < 50
+                else "Attach a numeric probability to classify the edge band."
+            )
+        ),
+        live_metrics=live_metrics,
+        sensitivity_rows=sens_rows,
+    )
+
+
+def solve_nba_inverse_stat_chase(
+    ctx: dict[str, Any],
+    question: str,
+    *,
+    expected_rate: float | None = None,
+    target_value: float | None = None,
+) -> SolverResult:
+    gap_ctx = ctx.get("stat_gap") if isinstance(ctx.get("stat_gap"), dict) else {}
+    player = str(gap_ctx.get("player") or ctx.get("player") or "Player").strip()
+    target_name = str(gap_ctx.get("comparison") or "Leader").strip()
+    stat = str(gap_ctx.get("stat") or "stat").strip()
+
+    current = _num(gap_ctx.get("current_value"))
+    target = _num(target_value if target_value is not None else gap_ctx.get("target_value"))
+    gap = _num(gap_ctx.get("gap"))
+    if gap is None and current is not None and target is not None:
+        gap = target - current
+
+    exp_rate = expected_rate if expected_rate is not None else _parse_rate(
+        gap_ctx.get("rate_needed") or ctx.get("rate_needed")
+    )
+    if exp_rate is None:
+        exp_rate = 4.0
+
+    missing: list[str] = []
+    if gap is None:
+        missing.append("stat_gap.gap")
+
+    games_needed: int | None = None
+    if gap is not None and exp_rate and exp_rate > 0:
+        games_needed = max(1, math.ceil(gap / exp_rate))
+
+    math_idea = (
+        f"This is an **inverse rate** problem. Given the gap and expected {stat}/game, "
+        f"how many games are needed to catch {target_name}?"
+    )
+    variables = (
+        f"gap = target − current\n"
+        f"expected rate = {stat} per game\n"
+        f"games needed = ceil(gap ÷ expected rate)"
+    )
+
+    calc = ""
+    if gap is not None and games_needed:
+        calc = (
+            f"gap = **{gap:g}** {stat}\n"
+            f"expected rate = **{exp_rate:g}** {stat}/game\n\n"
+            f"games needed = ceil(gap ÷ expected rate)\n"
+            f"= ceil({gap:g} ÷ {exp_rate:g}) = **{games_needed}** games"
+        )
+
+    short_answer = (
+        f"About **{games_needed}** games at **{exp_rate:g}** {stat}/game."
+        if games_needed
+        else "Set gap and expected rate below."
+    )
+    why = (
+        f"To close a **{gap:g}**-{stat} gap at **{exp_rate:g}**/game, he needs at least **{games_needed}** games."
+        if games_needed and gap
+        else "games needed = ceil(gap ÷ expected rate)."
+    )
+
+    live_metrics: dict[str, str] = {}
+    if games_needed:
+        live_metrics = {
+            "Games needed": str(games_needed),
+            "Expected rate": f"{exp_rate:g} {stat}/game",
+            "Gap": f"{gap:g} {stat}" if gap else "—",
+        }
+
+    sens_rows: list[dict[str, str]] = []
+    if gap and gap > 0:
+        for rate in (2.0, 3.0, 4.0, 5.0, 6.0):
+            g = max(1, math.ceil(gap / rate))
+            sens_rows.append(
+                {"Parameter": "Expected rate", "Scenario": f"{rate:g}/game", "Outcome": f"{g} games needed"}
+            )
+
+    data_used = [
+        x
+        for x in (
+            f"Gap: **{gap:g}** {stat}" if gap is not None else "",
+            f"Expected rate: **{exp_rate:g}** {stat}/game",
+            f"Target: **{target_name}** ({target:g})" if target is not None else "",
+        )
+        if x
+    ]
+
+    return _coach_result(
+        question=question,
+        problem_type="NBA inverse stat chase",
+        math_idea=math_idea,
+        variables=variables,
+        data_used=data_used,
+        calculation=calc or "Enter gap and expected rate.",
+        result=short_answer,
+        interpretation=why,
+        assumptions=[
+            f"{player} maintains **{exp_rate:g}** {stat}/game.",
+            f"{target_name}'s total is held fixed (static gap model).",
+        ],
+        sensitivity_notes="Higher expected rate → fewer games needed; lower rate → more games.",
+        missing_fields=missing,
+        partial=bool(missing),
+        problem_type_id=NBA_INVERSE_STAT_CHASE,
+        computed={"gap": gap, "games_needed": games_needed, "expected_rate": exp_rate},
+        default_controls={"expected_rate": exp_rate, "target_value": target or 0.0},
+        conclusion=short_answer,
+        confidence_pct=80 if games_needed else 45,
+        reasons=[why],
+        short_answer=short_answer,
+        why=why,
+        sensitivity_plain=(
+            f"If expected rate drops from **{exp_rate:g}** to **{max(0.5, exp_rate - 1):g}**, "
+            f"games needed rises from **{games_needed}** to **{max(1, math.ceil(gap / max(0.5, exp_rate - 1))) if gap else '?'}**."
+            if games_needed and gap
+            else "Lower expected production increases games needed."
+        ),
+        live_metrics=live_metrics,
+        sensitivity_rows=sens_rows,
+    )
+
+
+def solve_investment_concentration(
+    ctx: dict[str, Any],
+    question: str,
+    *,
+    max_single_pct: float = 25.0,
+    max_top3_pct: float = 60.0,
+) -> SolverResult:
+    weights_raw = ctx.get("current_weights") if isinstance(ctx.get("current_weights"), dict) else {}
+    weights = _parse_weights_map(weights_raw)
+    holdings = _ctx_list(ctx.get("holdings"))
+
+    missing: list[str] = []
+    if not weights:
+        missing.append("current_weights")
+
+    math_idea = (
+        "This is a **concentration** problem. HHI = Σ(weight²) measures diversification; "
+        "also check largest holding and top-3 weight sum vs your limits."
+    )
+    variables = (
+        "weight_i = portfolio fraction (0–1)\n"
+        "HHI = Σ weight_i²\n"
+        "top1 = max weight · top3 = sum of 3 largest weights"
+    )
+
+    hhi = top1 = top3 = 0.0
+    top_name = ""
+    sorted_w: list[tuple[str, float]] = []
+    if weights:
+        sorted_w = sorted(weights.items(), key=lambda x: x[1], reverse=True)
+        top_name, top1 = sorted_w[0]
+        top1_pct = top1 * 100
+        top3_pct = sum(w for _, w in sorted_w[:3]) * 100
+        hhi = sum(w * w for w in weights.values())
+        top3 = top3_pct
+        top1 = top1_pct
+
+    calc = ""
+    verdict = "Insufficient data"
+    short_answer = "Enter weights below or re-send from Portfolio Health."
+    why = ""
+    live_metrics: dict[str, str] = {}
+
+    if weights:
+        calc_lines = [f"HHI = Σ(weight²) = **{hhi:.3f}**"]
+        for ticker, w in sorted_w[:4]:
+            calc_lines.append(f"**{ticker}**: {w * 100:.1f}% → contributes {w * w:.4f} to HHI")
+        calc_lines.append(f"\nTop holding: **{top_name}** at **{top1:.1f}%**")
+        calc_lines.append(f"Top 3 combined: **{top3:.1f}%**")
+        calc = "\n".join(calc_lines)
+
+        over_single = top1 > max_single_pct
+        over_top3 = top3 > max_top3_pct
+        if over_single and over_top3:
+            verdict = "Highly concentrated"
+            short_answer = f"Yes — **{top_name}** at **{top1:.0f}%** and top-3 at **{top3:.0f}%** exceed your limits."
+        elif over_single or over_top3:
+            verdict = "Moderately concentrated"
+            short_answer = f"Somewhat — {'top holding' if over_single else 'top-3 sum'} exceeds your **{max_single_pct if over_single else max_top3_pct:g}%** threshold."
+        else:
+            verdict = "Diversified"
+            short_answer = f"No — top holding **{top1:.0f}%** and top-3 **{top3:.0f}%** are within your thresholds."
+        why = (
+            f"HHI **{hhi:.3f}** · top holding **{top1:.1f}%** (limit **{max_single_pct:g}%**) · "
+            f"top-3 **{top3:.1f}%** (limit **{max_top3_pct:g}%)."
+        )
+        live_metrics = {
+            "Verdict": verdict,
+            "HHI": f"{hhi:.3f}",
+            "Top holding": f"{top_name} {top1:.1f}%",
+            "Top 3 sum": f"{top3:.1f}%",
+        }
+
+    data_used = [
+        x
+        for x in (
+            *[f"**{t}**: {w * 100:.1f}%" for t, w in sorted_w[:4]],
+            f"Holdings count: **{len(weights) or len(holdings)}**",
+        )
+        if x
+    ]
+
+    sens_rows: list[dict[str, str]] = []
+    if weights:
+        for thresh in (15.0, 20.0, 25.0, 30.0):
+            out = "Over limit" if top1 > thresh else "OK"
+            sens_rows.append({"Parameter": "Max single (%)", "Scenario": f"{thresh:g}", "Outcome": out})
+
+    return _coach_result(
+        question=question,
+        problem_type="Portfolio concentration",
+        math_idea=math_idea,
+        variables=variables,
+        data_used=data_used,
+        calculation=calc or "Need current_weights from Portfolio Health.",
+        result=verdict,
+        interpretation=why,
+        assumptions=["Weights reflect current market values.", "Thresholds are policy choices, not universal rules."],
+        sensitivity_notes="Lowering max single-name % makes the same portfolio look more concentrated.",
+        missing_fields=missing,
+        partial=bool(missing),
+        problem_type_id=INVESTMENT_CONCENTRATION,
+        computed={"hhi": hhi, "top1_pct": top1, "top3_pct": top3, "verdict": verdict},
+        default_controls={"max_single_pct": max_single_pct, "max_top3_pct": max_top3_pct},
+        conclusion=short_answer,
+        confidence_pct=78 if weights else 38,
+        reasons=[why] if why else [],
+        short_answer=short_answer,
+        why=why,
+        sensitivity_plain=(
+            f"If max single holding drops from **{max_single_pct:g}%** to **{max(10, max_single_pct - 5):g}%**, "
+            f"**{top_name}** at **{top1:.0f}%** → {'over limit' if top1 > max(10, max_single_pct - 5) else 'OK'}."
+            if weights
+            else "Adjust max single and top-3 thresholds below."
+        ),
+        live_metrics=live_metrics,
+        sensitivity_rows=sens_rows,
+        data_would_improve=["**current_weights** from Portfolio Health"] if missing else [],
+    )
+
+
+def solve_baseball_player_compare(
+    ctx: dict[str, Any],
+    question: str,
+    *,
+    weight_rate: float = 1.0,
+    weight_power: float = 1.0,
+    weight_career: float = 0.5,
+    weight_peak: float = 0.5,
+) -> SolverResult:
+    pa = str(ctx.get("player_a") or "").strip()
+    pb = str(ctx.get("player_b") or "").strip()
+    rows = _collect_comparison_rows(ctx, pa, pb)
+
+    cat_weights = {
+        "rate": weight_rate,
+        "power": weight_power,
+        "career": weight_career,
+        "peak": weight_peak,
+    }
+
+    math_idea = (
+        "This is a **weighted stat comparison**. For each category, normalize who leads, "
+        "then sum weighted points — higher total wins under your current weights."
+    )
+    variables = (
+        "score_a = Σ weight_category × (stat_a / (stat_a + stat_b))\n"
+        "score_b = Σ weight_category × (stat_b / (stat_a + stat_b))"
+    )
+
+    score_a = score_b = 0.0
+    drivers: list[str] = []
+    calc_lines: list[str] = []
+
+    for stat, va, vb in rows:
+        cat = _stat_category(stat)
+        w = cat_weights.get(cat, weight_rate)
+        share_a = va / (va + vb) if (va + vb) > 0 else 0.5
+        share_b = vb / (va + vb) if (va + vb) > 0 else 0.5
+        pts_a = w * share_a
+        pts_b = w * share_b
+        score_a += pts_a
+        score_b += pts_b
+        leader = pa if va > vb else pb if vb > va else "Tie"
+        calc_lines.append(
+            f"**{stat}**: {pa} **{va:g}** vs {pb} **{vb:g}** → {leader} (+{w:.1f}× {cat} weight)"
+        )
+        if abs(va - vb) / max(va, vb, 0.001) > 0.05:
+            drivers.append(f"{stat} ({leader})")
+
+    missing: list[str] = []
+    if not pa or not pb:
+        missing.append("player_a/player_b")
+    if not rows:
+        missing.append("comparison_stats")
+
+    partial = bool(missing)
+    short_answer = "Attach OPS/WAR/HR comparison from the Comparison Tool."
+    why = ""
+    live_metrics: dict[str, str] = {}
+
+    if rows:
+        if score_a > score_b * 1.02:
+            winner, loser = pa, pb
+            margin = score_a - score_b
+        elif score_b > score_a * 1.02:
+            winner, loser = pb, pa
+            margin = score_b - score_a
+        else:
+            winner = ""
+            margin = abs(score_a - score_b)
+        if winner:
+            short_answer = f"**{winner}** leads under current weights (score **{max(score_a, score_b):.2f}** vs **{min(score_a, score_b):.2f}**)."
+            why = f"Driven by: {', '.join(drivers[:3]) or 'attached stats'}."
+        else:
+            short_answer = f"Too close to call — weighted scores **{score_a:.2f}** vs **{score_b:.2f}**."
+            why = "Neither player leads by more than 2% on the weighted score."
+        live_metrics = {
+            f"{pa} score": f"{score_a:.2f}",
+            f"{pb} score": f"{score_b:.2f}",
+            "Leader": winner or "Toss-up",
+        }
+
+    calc = "\n".join(calc_lines) if calc_lines else "Subtract rate-based value scores with your category weights."
+
+    return _coach_result(
+        question=question,
+        problem_type="Player comparison",
+        math_idea=math_idea,
+        variables=variables,
+        data_used=[f"**{pa}** vs **{pb}**"] + [f"{s}: {va:g} vs {vb:g}" for s, va, vb in rows[:4]],
+        calculation=calc,
+        result=short_answer,
+        interpretation=why,
+        assumptions=["Rate stats are per-PA unless labeled as counting/career.", "Surpass questions need projection inputs not in this snapshot."],
+        sensitivity_notes="Raising power weight shifts toward HR/SLG; raising rate weight favors OPS/WAR.",
+        missing_fields=missing,
+        partial=partial,
+        problem_type_id=BASEBALL_PLAYER_COMPARE,
+        computed={"score_a": score_a, "score_b": score_b, "rows": len(rows)},
+        default_controls={
+            "weight_rate": weight_rate,
+            "weight_power": weight_power,
+            "weight_career": weight_career,
+            "weight_peak": weight_peak,
+        },
+        conclusion=short_answer,
+        confidence_pct=72 if rows and abs(score_a - score_b) > 0.15 else (58 if rows else 40),
+        reasons=[why] if why else [],
+        short_answer=short_answer,
+        why=why,
+        sensitivity_plain="Increase rate-stat weight to favor OPS/WAR leaders; increase power weight for HR/SLG.",
+        live_metrics=live_metrics,
+        model_note=math_idea,
+        data_would_improve=["**comparison_stats** (OPS, WAR, HR) from Comparison Tool"] if not rows else [],
+    )
+
+
+def solve_investment_macro_stress(
+    ctx: dict[str, Any],
+    question: str,
+    *,
+    return_shock: float = -3.0,
+    vol_shock: float = 4.0,
+    recession_prob: float = 30.0,
+) -> SolverResult:
+    exp_ret = _num(ctx.get("expected_return"))
+    vol = _num(ctx.get("volatility"))
+    health = _num(ctx.get("health_score"))
+    macro = str(ctx.get("macro_outlook") or ctx.get("macro_summary") or "").strip()
+
+    missing: list[str] = []
+    if exp_ret is None:
+        missing.append("expected_return")
+    if vol is None:
+        missing.append("volatility")
+
+    math_idea = (
+        "This is a **scenario stress test**. Start from base return/volatility, "
+        "then apply recession shocks to see how far metrics move."
+    )
+    variables = (
+        "return_stressed = return + return_shock\n"
+        "vol_stressed = volatility + vol_shock\n"
+        "recession_prob = your assigned recession probability (%)"
+    )
+
+    base_ret = exp_ret if exp_ret is not None else 8.0
+    base_vol = vol if vol is not None else 12.0
+    mild_ret_shock = return_shock * 0.5
+    mild_vol_shock = vol_shock * 0.5
+    severe_ret_shock = return_shock * 1.5
+    severe_vol_shock = vol_shock * 1.5
+
+    scenarios = [
+        ("Base case", 0.0, 0.0),
+        ("Mild recession", mild_ret_shock, mild_vol_shock),
+        ("Severe recession", severe_ret_shock, severe_vol_shock),
+    ]
+
+    calc_lines: list[str] = []
+    sens_rows: list[dict[str, str]] = []
+    for name, r_sh, v_sh in scenarios:
+        r_out = base_ret + r_sh
+        v_out = base_vol + v_sh
+        sharpe_approx = r_out / v_out if v_out > 0 else 0
+        calc_lines.append(
+            f"**{name}**: return **{r_out:.1f}%**, vol **{v_out:.1f}%**, Sharpe≈**{sharpe_approx:.2f}**"
+        )
+        sens_rows.append(
+            {"Parameter": name, "Scenario": f"Δret {r_sh:+.1f}pp", "Outcome": f"vol {v_out:.1f}%"}
+        )
+    calc_lines.append(
+        f"\n**Your shock settings**: return **{base_ret + return_shock:.1f}%**, vol **{base_vol + vol_shock:.1f}%**"
+    )
+
+    short_answer = (
+        f"A **{abs(return_shock):g}pp** return hit and **+{vol_shock:g}pp** vol would bring return to "
+        f"**{base_ret + return_shock:.1f}%** and vol to **{base_vol + vol_shock:.1f}**."
+        if exp_ret is not None
+        else "Set return/vol shocks below — base case uses portfolio Health metrics when attached."
+    )
+    why = (
+        f"Base **{base_ret:g}%** return / **{base_vol:g}%** vol; "
+        f"recession scenario applies **{return_shock:+.1f}pp** return and **+{vol_shock:g}pp** volatility."
+    )
+    health_note = ""
+    if health is not None:
+        stressed_health = max(0, health - abs(return_shock) * 2 - vol_shock)
+        health_note = f" Qualitative health impact: **{health:.0f}** → ~**{stressed_health:.0f}** under severe stress."
+        why += health_note
+
+    live_metrics = {
+        "Base return": f"{base_ret:g}%",
+        "Stressed return": f"{base_ret + return_shock:.1f}%",
+        "Base vol": f"{base_vol:g}%",
+        "Stressed vol": f"{base_vol + vol_shock:.1f}%",
+    }
+
+    data_used = [
+        x
+        for x in (
+            f"Base return: **{base_ret:g}%**",
+            f"Base volatility: **{base_vol:g}%**",
+            f"Macro: **{macro[:80]}**" if macro else "",
+            f"Health score: **{health:g}**" if health is not None else "",
+        )
+        if x
+    ]
+
+    return _coach_result(
+        question=question,
+        problem_type="Macro sensitivity",
+        math_idea=math_idea,
+        variables=variables,
+        data_used=data_used,
+        calculation="\n".join(calc_lines),
+        result=short_answer,
+        interpretation=why,
+        assumptions=[
+            f"Recession probability assumption: **{recession_prob:g}%**.",
+            "Shocks are illustrative — not a full factor model.",
+        ],
+        sensitivity_notes="Larger return shock or vol shock makes the portfolio look worse in recession.",
+        missing_fields=missing,
+        partial=bool(missing and exp_ret is None),
+        problem_type_id=INVESTMENT_MACRO,
+        computed={
+            "base_return": base_ret,
+            "stressed_return": base_ret + return_shock,
+            "base_vol": base_vol,
+            "stressed_vol": base_vol + vol_shock,
+        },
+        default_controls={
+            "return_shock": return_shock,
+            "vol_shock": vol_shock,
+            "recession_prob": recession_prob,
+        },
+        conclusion=short_answer,
+        confidence_pct=70 if exp_ret is not None else 48,
+        reasons=[why],
+        short_answer=short_answer,
+        why=why,
+        sensitivity_plain=(
+            f"If return shock deepens from **{return_shock:g}pp** to **{return_shock * 1.5:g}pp**, "
+            f"stressed return falls to **{base_ret + return_shock * 1.5:.1f}%**."
+        ),
+        live_metrics=live_metrics,
+        sensitivity_rows=sens_rows,
+        data_would_improve=["**expected_return** and **volatility** from Portfolio Health"] if missing else [],
+    )
+
+
+def solve_baseball_projection_realism(
+    ctx: dict[str, Any],
+    question: str,
+    *,
+    max_above_recent_pct: float = 25.0,
+    max_above_career_pct: float = 35.0,
+) -> SolverResult:
+    player = str(ctx.get("player") or "Player").strip()
+    proj = ctx.get("projection") if isinstance(ctx.get("projection"), dict) else {}
+    trend = ctx.get("trend_summary") if isinstance(ctx.get("trend_summary"), dict) else {}
+
+    projected = _num(proj.get("projected") or proj.get("value"))
+    recent = _num(proj.get("previous") or proj.get("latest") or trend.get("latest"))
+    career = _num(proj.get("career_avg") or proj.get("career_average"))
+    stat = str(proj.get("stat") or trend.get("stat") or "stat").strip()
+    slope = _num(trend.get("slope"))
+
+    if projected is None and trend:
+        projected = _num(trend.get("projected"))
+
+    missing: list[str] = []
+    if projected is None:
+        missing.append("projection.projected")
+
+    trend_implied = None
+    if recent is not None and slope is not None:
+        trend_implied = recent + slope
+
+    baselines: list[tuple[str, float]] = []
+    if recent is not None:
+        baselines.append(("recent season", recent))
+    if career is not None:
+        baselines.append(("career average", career))
+    if trend_implied is not None:
+        baselines.append(("trend-implied", trend_implied))
+
+    math_idea = (
+        f"This is a **projection sanity check**. Compare the projected {stat} to recent average, "
+        f"career baseline, and trend-implied value — large gaps need a story."
+    )
+    variables = (
+        "projection = stated forecast\n"
+        "baseline = recent / career / trend-implied\n"
+        "gap_pct = (projection − baseline) ÷ baseline × 100"
+    )
+
+    calc_lines: list[str] = []
+    verdict = "Insufficient data"
+    short_answer = "Enter a projection value — we compare it to baselines from context."
+    why = ""
+    live_metrics: dict[str, str] = {}
+    max_gap_pct = 0.0
+    worst_baseline = ""
+
+    if projected is not None and baselines:
+        for label, base in baselines:
+            if base <= 0:
+                continue
+            gap_pct = (projected - base) / base * 100
+            calc_lines.append(
+                f"vs **{label}** ({base:g}): projection **{projected:g}** → **{gap_pct:+.0f}%**"
+            )
+            if abs(gap_pct) > abs(max_gap_pct):
+                max_gap_pct = gap_pct
+                worst_baseline = label
+
+        if max_gap_pct <= max_above_recent_pct * 0.5:
+            verdict = "Realistic"
+            short_answer = f"**Realistic** — projection **{projected:g}** {stat} is close to baselines."
+        elif max_gap_pct <= max_above_recent_pct:
+            verdict = "Aggressive"
+            short_answer = f"**Aggressive** — **{projected:g}** {stat} is **{max_gap_pct:+.0f}%** above {worst_baseline}."
+        else:
+            verdict = "Unlikely"
+            short_answer = f"**Unlikely** — **{projected:g}** {stat} is **{max_gap_pct:+.0f}%** above {worst_baseline} (>{max_above_recent_pct:g}% tolerance)."
+        why = f"Largest gap vs **{worst_baseline}** is **{max_gap_pct:+.0f}%**; tolerance is **{max_above_recent_pct:g}%** above recent."
+        live_metrics = {
+            "Verdict": verdict,
+            f"Projected {stat}": f"{projected:g}",
+            "Largest gap": f"{max_gap_pct:+.0f}% vs {worst_baseline}",
+        }
+
+    calc = "\n".join(calc_lines) if calc_lines else "Compare projection to recent, career, and trend baselines."
+
+    data_used = [
+        x
+        for x in (
+            f"Projection: **{projected:g}** {stat}" if projected is not None else "",
+            f"Recent: **{recent:g}**" if recent is not None else "",
+            f"Career avg: **{career:g}**" if career is not None else "",
+            f"Trend slope: **{slope:g}**/season" if slope is not None else "",
+        )
+        if x
+    ]
+
+    return _coach_result(
+        question=question,
+        problem_type="Projection realism",
+        math_idea=math_idea,
+        variables=variables,
+        data_used=data_used,
+        calculation=calc,
+        result=verdict,
+        interpretation=why,
+        assumptions=[f"{player} playing time similar to recent seasons.", "Breakouts can exceed baselines — but need evidence."],
+        sensitivity_notes="Tighter % tolerance above recent → more projections flagged unlikely.",
+        missing_fields=missing,
+        partial=bool(missing),
+        problem_type_id=BASEBALL_PROJECTION,
+        computed={"projected": projected, "max_gap_pct": max_gap_pct, "verdict": verdict},
+        default_controls={
+            "max_above_recent_pct": max_above_recent_pct,
+            "max_above_career_pct": max_above_career_pct,
+        },
+        conclusion=short_answer,
+        confidence_pct=74 if projected and baselines else 42,
+        reasons=[why] if why else [],
+        short_answer=short_answer,
+        why=why,
+        sensitivity_plain=(
+            f"If tolerance drops from **{max_above_recent_pct:g}%** to **{max(10, max_above_recent_pct - 10):g}%**, "
+            f"a **{max_gap_pct:+.0f}%** gap → {'unlikely' if max_gap_pct > max(10, max_above_recent_pct - 10) else 'aggressive'}."
+            if projected
+            else "Adjust tolerance sliders below."
+        ),
+        live_metrics=live_metrics,
+        data_would_improve=["**projection.projected** from ML Projections page"] if missing else [],
     )
 
 
@@ -1031,8 +2053,31 @@ def dispatch_solver(
             acceptable_volatility=p.get("acceptable_volatility"),
         )
 
-    # Non-primary types reuse closest solver or generic
+    if pid == NBA_INVERSE_STAT_CHASE:
+        return solve_nba_inverse_stat_chase(
+            ctx,
+            question,
+            expected_rate=p.get("expected_rate"),
+            target_value=p.get("target_value"),
+        )
+    if pid == INVESTMENT_CONCENTRATION:
+        return solve_investment_concentration(
+            ctx,
+            question,
+            max_single_pct=float(p.get("max_single_pct", 25.0)),
+            max_top3_pct=float(p.get("max_top3_pct", 60.0)),
+        )
+    if pid == BASEBALL_PROJECTION:
+        return solve_baseball_projection_realism(
+            ctx,
+            question,
+            max_above_recent_pct=float(p.get("max_above_recent_pct", 25.0)),
+            max_above_career_pct=float(p.get("max_above_career_pct", 35.0)),
+        )
+
     if pid in (NBA_WIN_PROBABILITY, NBA_LEGACY_COMPARISON):
+        if pid == NBA_WIN_PROBABILITY:
+            return solve_nba_win_probability(ctx, question)
         wp = ctx.get("win_probability") or ctx.get("series_probability")
         return _coach_result(
             question=question,
@@ -1126,91 +2171,22 @@ def dispatch_solver(
         )
 
     if pid == BASEBALL_PLAYER_COMPARE:
-        pa = str(ctx.get("player_a") or "").strip()
-        pb = str(ctx.get("player_b") or "").strip()
-        cmp_extra = ctx.get("_ami_comparison_context") or ctx.get("comparison_differences")
-        diff_bits: list[str] = []
-        if isinstance(cmp_extra, dict):
-            for k, v in list(cmp_extra.items())[:4]:
-                diff_bits.append(f"{k}: {v}")
-        elif isinstance(cmp_extra, list):
-            diff_bits = [str(x) for x in cmp_extra[:4]]
-
-        surpass = any(w in question.lower() for w in ("surpass", "pass", "better", "beat"))
-        model_note = "We can model this as rate-stat value gap per plate appearance, adjusted for playing time."
-        if diff_bits:
-            conclusion = f"**{pa}** leads on attached comparison stats" if pa else "Comparison favors one side on attached stats"
-            reasons = diff_bits[:3]
-            conf_pct = 68
-            result_text = conclusion
-            interp = " ".join(diff_bits)
-            partial = False
-        elif pa and pb:
-            conclusion = "Possible but uncertain — rate stats not attached"
-            reasons = [
-                f"Comparing **{pa}** vs **{pb}** — rate production may be similar; projection depends on playing time and career length.",
-            ]
-            conf_pct = 58 if surpass else 52
-            result_text = "Too close to call without rate comparison"
-            interp = (
-                f"For “{pa} vs {pb}”, attach OPS/SLG/WAR comparison from the Comparison Tool "
-                "for a sharper quantitative verdict."
-            )
-            partial = bool(route.missing_fields)
-        else:
-            conclusion = "Need both players selected"
-            reasons = []
-            conf_pct = 35
-            result_text = "Select two players in Comparison Tool"
-            interp = "Open Comparison Tool, select both players, then re-send the question."
-            partial = True
-
-        data_improve = []
-        if not diff_bits:
-            data_improve = [
-                "**comparison_stats** (OPS, SLG, WAR) from Comparison Tool",
-                "**projections** for playing-time / career length questions",
-            ]
-
-        return _coach_result(
-            question=question,
-            problem_type="Player comparison",
-            math_idea="Value gap = rate-stat difference adjusted for playing time and scarcity.",
-            variables="value_i = rate stats per PA × playing-time projection",
-            data_used=[f"**{pa}** vs **{pb}**"] if pa and pb else [],
-            calculation="Subtract rate-based value scores; weight scarce categories.",
-            result=result_text,
-            interpretation=interp,
-            assumptions=["Same position eligibility matters for roster fit."],
-            sensitivity_notes="Weight scarce categories (SB, HR) higher in category leagues; career-length questions need projection inputs.",
-            missing_fields=route.missing_fields,
-            partial=partial,
-            problem_type_id=pid,
-            conclusion=conclusion,
-            confidence_pct=conf_pct,
-            reasons=reasons,
-            model_note=model_note,
-            data_would_improve=data_improve,
+        return solve_baseball_player_compare(
+            ctx,
+            question,
+            weight_rate=float(p.get("weight_rate", 1.0)),
+            weight_power=float(p.get("weight_power", 1.0)),
+            weight_career=float(p.get("weight_career", 0.5)),
+            weight_peak=float(p.get("weight_peak", 0.5)),
         )
 
     if pid == INVESTMENT_MACRO:
-        macro = ctx.get("macro_outlook") or ctx.get("macro_summary")
-        fwd = str(ctx.get("context_note_forward") or "").strip()
-        hist = str(ctx.get("context_note_historical") or "").strip()
-        return _coach_result(
-            question=question,
-            problem_type="Macro sensitivity",
-            math_idea="Stress-test return/vol assumptions under a macro scenario.",
-            variables="scenario = macro outlook\nforward_return vs historical_return",
-            data_used=_cap_data_used([f"Macro outlook: **{macro}**"] if macro else []),
-            calculation="Compare base-case return/vol to recession or rate-shock scenario.",
-            result=str(macro) if macro else "Attach macro outlook",
-            interpretation=(fwd or "Forward returns may diverge from historical metrics.") + (f" {hist}" if hist else ""),
-            assumptions=[str(macro or "Macro assumptions not attached.") + (f" {fwd}" if fwd else "")],
-            sensitivity_notes="Recession probability shifts bond/equity correlation.",
-            missing_fields=route.missing_fields,
-            partial=True,
-            problem_type_id=pid,
+        return solve_investment_macro_stress(
+            ctx,
+            question,
+            return_shock=float(p.get("return_shock", -3.0)),
+            vol_shock=float(p.get("vol_shock", 4.0)),
+            recession_prob=float(p.get("recession_prob", 30.0)),
         )
 
     return _generic_solver(route, question, ctx)

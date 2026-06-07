@@ -206,7 +206,8 @@ class TestConclusionEngine(unittest.TestCase):
             games_remaining=4,
             expected_rate=4.8,
         )
-        self.assertIn("Likely yes", result.conclusion)
+        self.assertIn("probably yes", (result.short_answer or result.conclusion).lower())
+        self.assertTrue(result.live_metrics.get("Required rate"))
         self.assertGreaterEqual(result.confidence_pct or 0, 50)
         self.assertTrue(result.reasons)
         self.assertTrue(result.sensitivity_rows)
@@ -218,7 +219,8 @@ class TestConclusionEngine(unittest.TestCase):
             "Should I rebalance?",
             drift_threshold=5.0,
         )
-        self.assertIn("rebalancing", result.conclusion.lower())
+        self.assertIn("rebalance", (result.short_answer or result.conclusion).lower())
+        self.assertIn("Rebalance", result.live_metrics.get("Action", ""))
         self.assertGreaterEqual(result.confidence_pct or 0, 75)
         self.assertTrue(result.sensitivity_rows)
 
@@ -233,8 +235,7 @@ class TestConclusionEngine(unittest.TestCase):
             "Is Soto likely to surpass Judge?",
             {"player_a": "Juan Soto", "player_b": "Aaron Judge"},
         )
-        self.assertIn("uncertain", result.conclusion.lower())
-        self.assertTrue(result.model_note)
+        self.assertIn("attach", result.conclusion.lower())
         self.assertTrue(result.data_would_improve)
 
     def test_finalize_fills_confidence_from_route(self) -> None:

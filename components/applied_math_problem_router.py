@@ -8,6 +8,7 @@ from typing import Any
 
 # Stable IDs consumed by solvers and tests.
 NBA_STAT_CHASE = "nba_stat_chase"
+NBA_INVERSE_STAT_CHASE = "nba_inverse_stat_chase"
 NBA_WIN_PROBABILITY = "nba_win_probability"
 NBA_MATCHUP_EDGE = "nba_matchup_edge"
 NBA_LEGACY_COMPARISON = "nba_legacy_comparison"
@@ -17,6 +18,7 @@ BASEBALL_TREND = "baseball_trend_significance"
 BASEBALL_PLAYER_COMPARE = "baseball_player_comparison"
 BASEBALL_HISTORICAL = "baseball_historical_comparison"
 BASEBALL_DRAFT = "baseball_draft_decision"
+BASEBALL_PROJECTION = "baseball_projection_realism"
 BASEBALL_GENERIC = "baseball_generic"
 
 INVESTMENT_REBALANCE = "investment_rebalance"
@@ -40,6 +42,17 @@ FIELD_SPECS: dict[str, tuple[str, ...]] = {
 }
 
 
+# Tokens that must match as whole words (avoid "rate" inside "concentrated").
+_WHOLE_WORD_TOPICS: frozenset[str] = frozenset({"rate"})
+
+
+def _contains_term(text: str, term: str) -> bool:
+    low = text.lower()
+    if term in _WHOLE_WORD_TOPICS:
+        return bool(re.search(rf"\b{re.escape(term)}\b", low))
+    return term in low
+
+
 def _topics(question: str) -> set[str]:
     low = question.lower()
     out: set[str] = set()
@@ -52,9 +65,10 @@ def _topics(question: str) -> set[str]:
         "risk": ("risk", "volatil", "concentration", "diversif", "sharpe", "drawdown", "worth"),
         "macro": ("recession", "macro", "rate", "inflation"),
         "record": ("record", "rebound", "pass", "catch", "overtake"),
+        "projection": ("project", "realistic", "believable", "breakout", "forecast"),
     }
     for name, words in keys.items():
-        if any(w in low for w in words):
+        if any(_contains_term(low, w) for w in words):
             out.add(name)
     return out
 
@@ -186,6 +200,21 @@ def _route_baseball(
             available_fields=avail,
             missing_fields=miss,
         )
+    proj = ctx.get("projection")
+    if "projection" in topics or (isinstance(proj, dict) and proj):
+        req = ("player", "projection")
+        avail, miss = _audit_fields(ctx, ("player", "projection"))
+        if not isinstance(proj, dict):
+            miss = list(miss) + ["projection"]
+        return ProblemRoute(
+            problem_type_id=BASEBALL_PROJECTION,
+            problem_type="Projection realism",
+            confidence=0.72 if not miss else 0.48,
+            source_app="baseball",
+            required_fields=list(req),
+            available_fields=avail,
+            missing_fields=miss,
+        )
     return ProblemRoute(
         problem_type_id=BASEBALL_GENERIC,
         problem_type="Baseball decision analysis",
@@ -205,6 +234,27 @@ def _route_nba(
     low: str,
 ) -> ProblemRoute:
     chase_words = ("pass", "rebound", "record", "catch", "overtake", "reach")
+    inverse_phrases = (
+        "how many games",
+        "games would",
+        "games does",
+        "games needed",
+        "games to pass",
+        "games to catch",
+    )
+    has_gap = isinstance(ctx.get("stat_gap"), dict) and _has_value(ctx.get("stat_gap"))
+    if any(p in low for p in inverse_phrases) and (has_gap or "record" in topics):
+        req = FIELD_SPECS[NBA_STAT_CHASE]
+        avail, miss = _audit_fields(ctx, req)
+        return ProblemRoute(
+            problem_type_id=NBA_INVERSE_STAT_CHASE,
+            problem_type="NBA inverse stat chase (games needed)",
+            confidence=0.88 if has_gap else 0.55,
+            source_app="nba",
+            required_fields=list(req),
+            available_fields=avail,
+            missing_fields=miss,
+        )
     if "record" in topics or any(w in low for w in chase_words):
         req = FIELD_SPECS[NBA_STAT_CHASE]
         avail, miss = _audit_fields(ctx, req)
@@ -288,6 +338,24 @@ def _route_investment(
             available_fields=avail,
             missing_fields=miss,
         )
+    if (
+        "concentration" in low
+        or "concentrated" in low
+        or "diversified" in low
+        or "diversification" in low
+        or "too heavy" in low
+    ):
+        req = ("holdings", "current_weights")
+        avail, miss = _audit_fields(ctx, req)
+        return ProblemRoute(
+            problem_type_id=INVESTMENT_CONCENTRATION,
+            problem_type="Portfolio concentration",
+            confidence=0.65 if avail else 0.4,
+            source_app="investment",
+            required_fields=list(req),
+            available_fields=avail,
+            missing_fields=miss,
+        )
     if "macro" in topics or ctx.get("macro_outlook") or ctx.get("macro_summary"):
         req = ("macro_outlook", "expected_return", "volatility")
         avail, miss = _audit_fields(ctx, req)
@@ -295,18 +363,6 @@ def _route_investment(
             problem_type_id=INVESTMENT_MACRO,
             problem_type="Macro sensitivity",
             confidence=0.7 if avail else 0.45,
-            source_app="investment",
-            required_fields=list(req),
-            available_fields=avail,
-            missing_fields=miss,
-        )
-    if "concentration" in low or "concentrated" in low:
-        req = ("holdings", "current_weights")
-        avail, miss = _audit_fields(ctx, req)
-        return ProblemRoute(
-            problem_type_id=INVESTMENT_CONCENTRATION,
-            problem_type="Portfolio concentration",
-            confidence=0.65 if avail else 0.4,
             source_app="investment",
             required_fields=list(req),
             available_fields=avail,
