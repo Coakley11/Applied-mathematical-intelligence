@@ -142,17 +142,26 @@ def expected_fields_for_page(source_app: str, source_page: str) -> tuple[tuple[s
             return (("player_a", "player_b", "comparison_differences"), {})
     if "nba" in app:
         if "matchup" in page:
-            return (("team", "opponent", "workflow"), {})
+            return (
+                ("team", "opponent", "matchup_advantages", "injury_summary"),
+                {"stat_gap": ("gap", "comparison")},
+            )
         if "live" in page or "game" in page:
             return (("team", "win_probability"), {})
-        if "legacy" in page:
-            return (("player", "stat_gap"), {"stat_gap": ("gap", "comparison")})
+        if "legacy" in page or "playoff tracker" in page:
+            return (
+                ("player", "stat_gap"),
+                {"stat_gap": ("gap", "comparison", "current_value", "target_value")},
+            )
         return (("team",), {})
     if "investment" in app:
         if "macro" in page:
             return (("macro_outlook", "context_note_forward", "context_note_historical"), {})
-        if "rebalance" in page:
-            return (("rebalance_drift", "target_weights", "current_weights"), {})
+        if "rebalance" in page or "health" in page:
+            return (
+                ("rebalance_drift", "target_weights", "current_weights", "rebalance_recommendation"),
+                {},
+            )
         return (
             ("holdings", "current_weights", "health_score", "sharpe_ratio", "max_drawdown"),
             {},
@@ -182,7 +191,7 @@ VALIDATION_SCENARIOS: tuple[ValidationScenario, ...] = (
         },
         required_keys=("player", "metrics", "filters_applied", "historical_snapshot"),
         nested_required={"historical_snapshot": ("top_rows", "sort_stat", "year_range")},
-        answer_must_contain=("Mike Trout",),
+        answer_must_contain=("Mike Trout", "45"),
     ),
     ValidationScenario(
         name="Baseball Trend Value",
@@ -231,10 +240,14 @@ VALIDATION_SCENARIOS: tuple[ValidationScenario, ...] = (
             "team": "New York Knicks",
             "opponent": "Boston Celtics",
             "workflow": "Matchup intelligence",
-            "model_assumptions": "Knicks +4 health index",
+            "series_record": "2-1",
+            "matchup_advantages": ["Knicks rebounding edge in Games 1-3"],
+            "injury_summary": "Anunoby: questionable",
+            "key_players": ["Jalen Brunson", "Jayson Tatum"],
+            "series_probability": "62%",
         },
-        required_keys=("team", "opponent", "workflow"),
-        answer_must_contain=("Knicks",),
+        required_keys=("team", "opponent", "matchup_advantages", "injury_summary"),
+        answer_must_contain=("Knicks", "rebounding"),
     ),
     ValidationScenario(
         name="NBA Probability",
@@ -299,10 +312,12 @@ VALIDATION_SCENARIOS: tuple[ValidationScenario, ...] = (
             "rebalance_drift": {"VTI": "+5.0pp", "BND": "-5.0pp"},
             "target_weights": {"VTI": "55%", "BND": "45%"},
             "current_weights": {"VTI": "60.0%", "BND": "40.0%"},
+            "rebalance_recommendation": ["Trim VTI toward 55% target"],
+            "total_drift": "4.2pp avg category drift",
             "health_score": 72,
         },
-        required_keys=("rebalance_drift", "target_weights", "current_weights"),
-        answer_must_contain=("72",),
+        required_keys=("rebalance_drift", "target_weights", "current_weights", "rebalance_recommendation"),
+        answer_must_contain=("VTI", "5.0pp"),
     ),
     ValidationScenario(
         name="Investment Macro",

@@ -165,6 +165,48 @@ def _baseball_analysis(question: str, ctx: dict[str, Any]) -> FirstPassAnalysis:
             data_needed=[] if (pa and pb) else ["Both player names and comparison stats"],
         )
 
+    snap = ctx.get("historical_snapshot")
+    page_low = str(ctx.get("page") or workflow).lower()
+    if isinstance(snap, dict) and snap and ("historical" in page_low or snap.get("top_rows")):
+        sort_stat = str(snap.get("sort_stat") or (metrics[0] if metrics else "stat"))
+        year_range = str(snap.get("year_range") or ctx.get("filters_applied") or "")
+        rows = snap.get("top_rows") if isinstance(snap.get("top_rows"), list) else []
+        row_bits = []
+        for row in rows[:3]:
+            if not isinstance(row, dict):
+                continue
+            name = str(row.get("player") or "").strip()
+            yr = row.get("year")
+            val = row.get(sort_stat) or row.get(str(sort_stat))
+            if name and val is not None:
+                row_bits.append(f"**{name}** ({yr}): {sort_stat}={val}")
+        answer = (
+            f"From the Historical Explorer snapshot ({year_range}), the table highlights **{sort_stat}**. "
+            + ("Top rows: " + "; ".join(row_bits) + ". " if row_bits else "")
+            + f"For **{player or 'the selected player'}**, compare their row to neighbors on {sort_stat} — "
+            "an outlier is typically >1.5× the next rank or a z-score above ~2 vs the filtered sample."
+        )
+        if row_bits and player:
+            player_rows = [b for b in row_bits if player.split()[0] in b or player in b]
+            if player_rows:
+                answer += f" Your player line: {player_rows[0]}."
+        return FirstPassAnalysis(
+            problem_type="Historical table / outlier check",
+            method="Compare displayed stat to peer rows in the filtered snapshot",
+            sections=[
+                ("Problem type", f"Is a season or player row unusual on **{sort_stat}** in the current filter window?"),
+                (
+                    "Mathematical approach",
+                    "Use the visible table — compare the row's stat to the next-ranked rows and to the filter mean. "
+                    "Rate stats need playing-time context; counting stats need AB/PA.",
+                ),
+            ],
+            answer=answer,
+            assumptions=[f"Filters applied: {ctx.get('filters_applied') or 'see snapshot'}"],
+            limitations=["Snapshot is top rows only — not full population statistics."],
+            data_needed=[] if row_bits else ["historical_snapshot.top_rows with stat values"],
+        )
+
     return FirstPassAnalysis(
         problem_type="Baseball decision analysis",
         method="Define metric, baseline, and opportunity cost",
@@ -203,8 +245,15 @@ def _nba_analysis(question: str, ctx: dict[str, Any]) -> FirstPassAnalysis:
             target = str(gap_ctx.get("comparison") or target)
             games_rem = gap_ctx.get("games_remaining") or games_rem
             rate_needed = gap_ctx.get("rate_needed") or rate_needed
+            cur_v = gap_ctx.get("current_value")
+            tgt_v = gap_ctx.get("target_value")
+            gap_n = gap_ctx.get("gap")
+            stat_name = gap_ctx.get("stat") or "stat"
         elif gap_ctx:
+            cur_v = tgt_v = gap_n = stat_name = None
             gap_note = str(gap_ctx).strip()
+        else:
+            cur_v = tgt_v = gap_n = stat_name = None
         sections = [
             (
                 "Problem type",
@@ -220,8 +269,13 @@ def _nba_analysis(question: str, ctx: dict[str, Any]) -> FirstPassAnalysis:
             ),
         ]
         answer = (
-            f"Set **Gap** = {target} total − {challenger} total (playoff stat from context). "
-            f"Estimate **E[remaining]** = (games left) × (challenger rate per game). "
+            f"**{challenger}** has **{cur_v}** {stat_name if cur_v is not None else ''} vs **{target}** at **{tgt_v}** "
+            f"(gap **{gap_n}**)."
+            if cur_v is not None and tgt_v is not None and gap_n is not None
+            else f"Set **Gap** = {target} total − {challenger} total (playoff stat from context)."
+        )
+        answer += (
+            " Estimate **E[remaining]** = (games left) × (challenger rate per game). "
             "If Gap > E[remaining] + margin for volatility, **unlikely**; if Gap is small relative to "
             "2–3 games at usual rate, **plausible but not certain**."
         )
@@ -244,7 +298,45 @@ def _nba_analysis(question: str, ctx: dict[str, Any]) -> FirstPassAnalysis:
                 "Does not model matchups or blowouts that reduce fourth-quarter minutes.",
                 "Single-rate estimate ignores game-to-game variance without variance data.",
             ],
-            data_needed=[] if gap_note else ["Current playoff rebound totals for both players", "Games remaining"],
+            data_needed=[] if (isinstance(gap_ctx, dict) and gap_ctx.get("gap") is not None) else ["Current playoff rebound totals for both players", "Games remaining"],
+        )
+
+    workflow = str(ctx.get("workflow") or "").lower()
+    matchup_adv = ctx.get("matchup_advantages")
+    if "matchup" in workflow or (isinstance(matchup_adv, list) and matchup_adv):
+        opp = str(ctx.get("opponent") or "").strip()
+        series_rec = str(ctx.get("series_record") or "").strip()
+        inj = str(ctx.get("injury_summary") or "").strip()
+        keys = _ctx_list(ctx.get("key_players"))
+        adv_text = ""
+        if isinstance(matchup_adv, list) and matchup_adv:
+            adv_text = str(matchup_adv[0])[:240]
+        edge = f"series record **{series_rec}**" if series_rec else "series record not in context"
+        answer_parts = [f"**{team}** vs **{opp}** — {edge}."]
+        if adv_text:
+            answer_parts.append(f"Scouting edge from context: {adv_text}")
+        if inj:
+            answer_parts.append(f"Injury note: {inj}")
+        if keys:
+            answer_parts.append(f"Key players: {', '.join(keys[:3])}.")
+        wp = ctx.get("win_probability") or ctx.get("series_probability")
+        if wp:
+            answer_parts.append(f"Model probability in context: **{wp}** — stress-test vs injury and matchup gaps above.")
+        return FirstPassAnalysis(
+            problem_type="Matchup intelligence / series edge",
+            method="Compare team strengths, injuries, and series record to model probability",
+            sections=[
+                ("Problem type", f"Who has the schematic edge in **{team} vs {opp}**?"),
+                (
+                    "Mathematical approach",
+                    "Weight **injury availability**, **positional mismatches**, and **series margin** against the quoted win/series probability. "
+                    "Large probability without matching matchup advantages suggests optimism.",
+                ),
+            ],
+            answer=" ".join(answer_parts),
+            assumptions=["Matchup summaries reflect the loaded scouting board.", "Probabilities refer to the same series horizon."],
+            limitations=["Does not simulate possession-level matchups without full box-score data."],
+            data_needed=[] if adv_text or inj else ["matchup_advantages or injury_summary from Matchup page"],
         )
 
     if "probability" in topics or ctx.get("win_probability") or ctx.get("series_probability"):
@@ -287,6 +379,16 @@ def _investment_analysis(question: str, ctx: dict[str, Any]) -> FirstPassAnalysi
     pv = ctx.get("portfolio_value")
 
     if "rebalance" in topics or "rebalance" in question.lower():
+        drift = ctx.get("rebalance_drift")
+        drift_note = ""
+        if isinstance(drift, dict) and drift:
+            top = list(drift.items())[:4]
+            drift_note = " Largest drift: " + ", ".join(f"{t} {v}" for t, v in top) + "."
+        recs = ctx.get("rebalance_recommendation")
+        rec_note = ""
+        if isinstance(recs, list) and recs:
+            rec_note = " Recommendations: " + "; ".join(str(r) for r in recs[:2]) + "."
+        total_d = ctx.get("total_drift")
         sections = [
             ("Problem type", "**Portfolio rebalance decision** — is drift large enough to justify trades?"),
             (
@@ -304,19 +406,23 @@ def _investment_analysis(question: str, ctx: dict[str, Any]) -> FirstPassAnalysi
             parts.append(f"Holdings in context: {', '.join(holdings[:6])}.")
         if exp_ret and vol:
             parts.append(f"Expected return **{exp_ret}** vs volatility **{vol}** — check Sharpe-like tradeoff.")
+        if total_d:
+            parts.append(f"**{total_d}**.")
         answer = (
             " ".join(parts)
+            + drift_note
+            + rec_note
             + " **First-pass rule:** rebalance when any position exceeds target by >5 pp *or* "
             "top-3 holdings exceed ~60% of risk contribution, unless costs exceed expected risk reduction."
         )
-        if not parts:
+        if not parts and not drift_note:
             answer = (
                 "Without weights attached, compare each holding's **current weight − target weight**. "
                 "Rebalance when max drift > 5 percentage points or health score flags concentration."
             )
             data_needed_list = ["Current vs target weights", "Health score breakdown"]
         else:
-            data_needed_list = []
+            data_needed_list = [] if drift_note else []
         return FirstPassAnalysis(
             problem_type="Rebalance decision",
             method="Drift + risk contribution vs cost",

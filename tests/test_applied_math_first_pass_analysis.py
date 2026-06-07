@@ -64,6 +64,51 @@ class TestAppliedMathFirstPassAnalysis(unittest.TestCase):
         self.assertIn("forward", analysis.assumptions[0].lower())
         self.assertIn("historical", analysis.answer.lower())
 
+    def test_historical_snapshot_used_in_first_pass(self) -> None:
+        analysis = analyze_suite_question(
+            "Is Mike Trout's 2019 season an outlier?",
+            source_app="baseball",
+            context={
+                "player": "Mike Trout",
+                "page": "Historical Explorer",
+                "historical_snapshot": {
+                    "sort_stat": "HR",
+                    "year_range": "2015-2019",
+                    "top_rows": [{"player": "Mike Trout", "year": 2019, "HR": 45}],
+                },
+            },
+        )
+        self.assertIn("45", analysis.answer)
+        self.assertIn("Mike Trout", analysis.answer)
+
+    def test_nba_matchup_uses_advantages(self) -> None:
+        analysis = analyze_suite_question(
+            "Who wins the series?",
+            source_app="nba",
+            context={
+                "team": "New York Knicks",
+                "opponent": "Boston Celtics",
+                "workflow": "Matchup intelligence",
+                "matchup_advantages": ["Knicks control offensive rebounds"],
+                "injury_summary": "Anunoby questionable",
+            },
+        )
+        self.assertIn("rebound", analysis.answer.lower())
+        self.assertIn("Anunoby", analysis.answer)
+
+    def test_rebalance_drift_referenced(self) -> None:
+        analysis = analyze_suite_question(
+            "Should I rebalance?",
+            source_app="investment",
+            context={
+                "rebalance_drift": {"VTI": "+5.0pp"},
+                "rebalance_recommendation": ["Trim VTI"],
+                "health_score": 70,
+            },
+        )
+        self.assertIn("VTI", analysis.answer)
+        self.assertIn("5.0pp", analysis.answer)
+
 
 if __name__ == "__main__":
     unittest.main()
