@@ -1,5 +1,7 @@
 # streamlit_app.py — Applied Mathematical Intelligence Platform
 
+from typing import Any
+
 import streamlit as st
 
 from components.home import render_home
@@ -29,15 +31,21 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+PRIMARY_NAV = ["Home"] + PRIMARY_ACTIONS + ["Advanced reference"]
+
 try:
     from applied_intelligence_persistent_state import (
+        VIEW_MODE_KEY,
         autosave_applied_intelligence_state,
         default_reset_applied_intelligence_session,
+        ensure_applied_intelligence_view_from_restore,
+        ensure_applied_intelligence_view_mode,
         restore_applied_intelligence_disk_state_once,
     )
     from suite_user_persistence import render_reset_controls, show_persistence_messages
 
     restore_applied_intelligence_disk_state_once(st)
+    ensure_applied_intelligence_view_from_restore(st)
     show_persistence_messages(st)
     render_reset_controls(
         st,
@@ -47,25 +55,29 @@ try:
         extra_reset_clear_prefixes=("_suite_ai_", "_ami_", "_cc_ai_"),
     )
 except Exception:
-    pass
+    VIEW_MODE_KEY = "view_mode"
+
+    def ensure_applied_intelligence_view_mode(st_obj: Any) -> None:
+        if st_obj.session_state.get(VIEW_MODE_KEY) not in PRIMARY_NAV:
+            st_obj.session_state[VIEW_MODE_KEY] = "Home"
+        if st_obj.session_state.get("_suite_ai_question"):
+            st_obj.session_state[VIEW_MODE_KEY] = "Solve a Problem"
+
+    def ensure_applied_intelligence_view_from_restore(st_obj: Any) -> None:
+        ensure_applied_intelligence_view_mode(st_obj)
 
 try:
     from suite_resume_launch import apply_suite_resume_launch
 
     apply_suite_resume_launch(st, "applied_intelligence")
+    ensure_applied_intelligence_view_from_restore(st)
 except Exception:
     pass
 
 inject_platform_styles()
 pp.inject_polish_css(st, app_slug="applied-math")
 
-PRIMARY_NAV = ["Home"] + PRIMARY_ACTIONS + ["Advanced reference"]
-
-if "view_mode" not in st.session_state:
-    st.session_state.view_mode = "Home"
-
-if st.session_state.get("_suite_ai_question"):
-    st.session_state.view_mode = "Solve a Problem"
+ensure_applied_intelligence_view_mode(st)
 
 # =====================================================
 # SIDEBAR
@@ -83,20 +95,12 @@ pp.render_sidebar_toggle(st)
 st.sidebar.title("Applied Mathematical Intelligence")
 st.sidebar.caption(f"Applied Mathematical Intelligence · v{VERSION}")
 
-nav_index = (
-    PRIMARY_NAV.index(st.session_state.view_mode)
-    if st.session_state.view_mode in PRIMARY_NAV
-    else 0
-)
-
 view_mode = st.sidebar.radio(
     "Choose",
     PRIMARY_NAV,
-    index=nav_index,
+    key=VIEW_MODE_KEY,
     label_visibility="collapsed",
 )
-
-st.session_state.view_mode = view_mode
 
 help_text = NAV_HELP.get(view_mode, "")
 if help_text and not pp.is_screenshot_mode(st):
