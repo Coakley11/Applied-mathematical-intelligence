@@ -91,6 +91,7 @@ def apply_applied_intelligence_session_defaults(st: Any) -> None:
     ss[VIEW_MODE_KEY] = "Home"
     ss.pop("ps_library_problem", None)
     ss.pop("ps_area_id", None)
+    ss.pop("_suite_ami_persistence_bootstrapped", None)
 
 
 def restore_applied_intelligence_disk_state_once(st: Any) -> bool:

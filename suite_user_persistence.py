@@ -343,7 +343,7 @@ def render_reset_controls(
     extra_reset_clear_prefixes: tuple[str, ...] = (),
 ) -> None:
     pending = bool(st.session_state.get(reset_confirm_session_key(app_id)))
-    with st.sidebar.expander("Saved session", expanded=pending):
+    with st.sidebar.expander("Saved Session", expanded=pending):
         st.caption("Your last page, filters, and inputs reload automatically.")
         if pending:
             st.warning("This clears saved preferences for this app. Continue?")

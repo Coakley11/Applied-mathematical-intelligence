@@ -69,10 +69,27 @@ except Exception:
 
 if _PERSISTENCE_OK:
     try:
-        restore_applied_intelligence_disk_state_once(st)
-        ensure_applied_intelligence_view_from_restore(st)
+        if not st.session_state.get("_suite_ami_persistence_bootstrapped"):
+            restore_applied_intelligence_disk_state_once(st)
+            ensure_applied_intelligence_view_from_restore(st)
+            st.session_state["_suite_ami_persistence_bootstrapped"] = True
     except Exception:
         pass
+
+try:
+    from suite_user_persistence import render_reset_controls, show_persistence_messages
+
+    show_persistence_messages(st)
+    render_reset_controls(
+        st,
+        "applied_intelligence",
+        on_reset=default_reset_applied_intelligence_session,
+        label="Reset to default",
+        help_text="Clears saved page, problem area, and suite preload state for this app.",
+        extra_reset_clear_prefixes=("_suite_ai_", "_ami_", "_cc_ai_"),
+    )
+except Exception:
+    pass
 
 try:
     from suite_resume_launch import apply_suite_resume_launch
@@ -144,20 +161,6 @@ if view_mode == "Advanced reference":
 
 st.sidebar.markdown("---")
 st.sidebar.caption("Think first · simulate second · optional depth last")
-
-try:
-    from suite_user_persistence import render_reset_controls, show_persistence_messages
-
-    show_persistence_messages(st)
-    render_reset_controls(
-        st,
-        "applied_intelligence",
-        on_reset=default_reset_applied_intelligence_session,
-        help_text="Clears saved page, problem area, and suite preload state for this app.",
-        extra_reset_clear_prefixes=("_suite_ai_", "_ami_", "_cc_ai_"),
-    )
-except Exception:
-    pass
 
 # =====================================================
 # MAIN CONTENT
