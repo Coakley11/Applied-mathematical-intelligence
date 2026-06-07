@@ -10,9 +10,11 @@ from components.applied_math_problem_router import (
     INVESTMENT_RISK_RETURN,
     NBA_STAT_CHASE,
     GENERIC_FALLBACK,
+    ProblemRoute,
     route_suite_question,
 )
 from components.applied_math_solvers import (
+    SolverResult,
     dispatch_solver,
     solve_baseball_trend,
     solve_investment_rebalance,
@@ -204,8 +206,70 @@ class TestDispatch(unittest.TestCase):
             source_app="investment",
             context={"rebalance_drift": {"VTI": "+5.0pp"}},
         )
-        result = dispatch_solver(route, "Should I rebalance?", route and {"rebalance_drift": {"VTI": "+5.0pp"}})
+        result = dispatch_solver(route, "Should I rebalance?", {"rebalance_drift": {"VTI": "+5.0pp"}})
         self.assertEqual(result.problem_type_id, INVESTMENT_REBALANCE)
+
+    def test_dispatch_returns_solver_result_not_tuple(self) -> None:
+        route = route_suite_question(
+            "Should I rebalance?",
+            source_app="investment",
+            context={"rebalance_drift": {"VTI": "+5.0pp"}},
+        )
+        out = dispatch_solver(route, "Should I rebalance?", {"rebalance_drift": {"VTI": "+5.0pp"}})
+        self.assertIsInstance(out, SolverResult)
+        self.assertFalse(isinstance(out, tuple))
+
+
+class TestResolveSuiteSolver(unittest.TestCase):
+    def test_resolve_returns_route_and_solver_result(self) -> None:
+        from components.applied_math_solver_ui import resolve_suite_solver
+
+        route, result = resolve_suite_solver(
+            "Should I rebalance?",
+            source_app="investment",
+            context={"rebalance_drift": {"VTI": "+6.0pp", "BND": "-4.0pp"}},
+        )
+        self.assertEqual(route.problem_type_id, INVESTMENT_REBALANCE)
+        self.assertIsInstance(result, SolverResult)
+        self.assertIn("Rebalance", result.result)
+
+    def test_solve_suite_question_matches_ui_path(self) -> None:
+        route, result = solve_suite_question(
+            "Will Jalen Brunson pass Allan Houston in playoff rebounds?",
+            source_app="nba",
+            context={
+                "stat_gap": {
+                    "gap": 12,
+                    "current_value": 8,
+                    "target_value": 20,
+                    "games_remaining": 4,
+                }
+            },
+            params={"games_remaining": 4, "expected_rate": 3.0},
+        )
+        self.assertIsInstance(route, ProblemRoute)
+        self.assertIsInstance(result, SolverResult)
+        self.assertAlmostEqual(result.computed.get("required_rate"), 3.0)
+
+    def test_resolve_fallback_on_dispatch_failure(self) -> None:
+        from components.applied_math_solver_ui import resolve_suite_solver
+        from components.applied_math_solvers import dispatch_solver as real_dispatch
+        import components.applied_math_solvers as solvers_mod
+
+        def _boom(*_args, **_kwargs):
+            raise RuntimeError("simulated dispatch failure")
+
+        solvers_mod.dispatch_solver = _boom
+        try:
+            route, result = resolve_suite_solver(
+                "Is this trend meaningful?",
+                source_app="baseball",
+                context={"player": "Test", "metrics": ["HR"]},
+            )
+            self.assertTrue(result.partial)
+            self.assertIn("Fallback", result.result)
+        finally:
+            solvers_mod.dispatch_solver = real_dispatch
 
 
 if __name__ == "__main__":

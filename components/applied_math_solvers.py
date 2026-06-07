@@ -728,4 +728,6 @@ def solve_suite_question(
     ctx = dict(context or {})
     route = route_suite_question(question, source_app=source_app, context=ctx)
     result = dispatch_solver(route, question, ctx, params)
+    if result is None:
+        raise ValueError("dispatch_solver returned None")
     return route, result

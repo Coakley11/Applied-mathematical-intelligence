@@ -12,7 +12,76 @@ from components.applied_math_problem_router import (
     ProblemRoute,
     route_suite_question,
 )
-from components.applied_math_solvers import SolverResult, dispatch_solver
+from components.applied_math_solvers import SolverResult, solve_suite_question
+
+
+def _fallback_solver_result(
+    question: str,
+    source_app: str,
+    ctx: dict[str, Any],
+    *,
+    error: Exception | None = None,
+) -> tuple[ProblemRoute, SolverResult]:
+    """Safe fallback when routing/dispatch fails — never raises."""
+    route = route_suite_question(question, source_app=source_app, context=ctx)
+    answer = ""
+    assumptions: list[str] = []
+    missing: list[str] = list(route.missing_fields)
+    try:
+        from components.applied_math_first_pass_analysis import analyze_suite_question
+
+        fp = analyze_suite_question(question, source_app=source_app, context=ctx)
+        answer = fp.answer or ""
+        assumptions = list(fp.assumptions)
+        missing = list(fp.data_needed) or missing
+        problem = fp.problem_type
+        calc = fp.method
+    except Exception:
+        problem = route.problem_type
+        calc = "Framework analysis"
+        answer = "Attach numeric context from the source app for a computed answer."
+
+    if error is not None:
+        answer = f"{answer} (Solver unavailable: {error})".strip()
+
+    data_used = [f"{k}: {ctx[k]}" for k in route.available_fields[:8] if ctx.get(k) is not None]
+    return route, SolverResult(
+        problem_detected=f"{problem}: {question.strip()}",
+        data_used=data_used,
+        calculation=calc,
+        result="Fallback analysis — solver could not run",
+        interpretation=answer,
+        assumptions=assumptions or ["Context from the source app reflects the user's current view."],
+        sensitivity_notes="Retry after redeploy or add missing context fields from the source app.",
+        missing_fields=missing,
+        partial=True,
+        problem_type_id=route.problem_type_id,
+        computed={},
+        default_controls={},
+    )
+
+
+def resolve_suite_solver(
+    question: str,
+    *,
+    source_app: str,
+    context: dict[str, Any] | None = None,
+    params: dict[str, Any] | None = None,
+) -> tuple[ProblemRoute, SolverResult]:
+    """Route + dispatch — same path as the UI; returns fallback on failure."""
+    ctx = dict(context or {})
+    try:
+        route, result = solve_suite_question(
+            question,
+            source_app=source_app,
+            context=ctx,
+            params=params,
+        )
+        if not isinstance(result, SolverResult):
+            raise TypeError(f"expected SolverResult, got {type(result)!r}")
+        return route, result
+    except Exception as exc:
+        return _fallback_solver_result(question, source_app, ctx, error=exc)
 
 
 def _control_key(problem_type_id: str, name: str) -> str:
@@ -192,13 +261,20 @@ def render_suite_solver_answer(
 ) -> None:
     """Route, solve, render interactive Applied Math answer for suite questions."""
     ctx = dict(context or {})
-    route = route_suite_question(question, source_app=source_app, context=ctx)
-    _, seed_result = dispatch_solver(route, question, ctx, {})
-    params = _seed_control_defaults(st, route, seed_result.default_controls)
-    result = dispatch_solver(route, question, ctx, params)
-
-    render_solver_sections(st, route, result)
-    _render_controls(st, route)
-
-    st.markdown("**8. Sensitivity**")
-    st.markdown(result.sensitivity_notes)
+    try:
+        route, seed_result = resolve_suite_solver(question, source_app=source_app, context=ctx)
+        params = _seed_control_defaults(st, route, seed_result.default_controls)
+        route, result = resolve_suite_solver(
+            question,
+            source_app=source_app,
+            context=ctx,
+            params=params,
+        )
+        render_solver_sections(st, route, result)
+        _render_controls(st, route)
+        st.markdown("**8. Sensitivity**")
+        st.markdown(result.sensitivity_notes or "_No sensitivity notes._")
+    except Exception as exc:
+        route, result = _fallback_solver_result(question, source_app, ctx, error=exc)
+        st.warning("Applied Math solver hit an error — showing fallback analysis instead of crashing.")
+        render_solver_sections(st, route, result)
