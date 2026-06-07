@@ -44,6 +44,9 @@ PRIMARY_NAV = ["Home"] + PRIMARY_ACTIONS + ["Advanced reference"]
 if "view_mode" not in st.session_state:
     st.session_state.view_mode = "Home"
 
+if st.session_state.get("_suite_ai_question"):
+    st.session_state.view_mode = "Solve a Problem"
+
 # =====================================================
 # SIDEBAR
 # =====================================================

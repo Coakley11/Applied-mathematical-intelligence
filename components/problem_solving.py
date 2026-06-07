@@ -63,35 +63,49 @@ def _render_area_hub() -> None:
         source = str(st.session_state.get("_suite_ai_source_app") or "").strip()
         source_page = str(st.session_state.get("_suite_ai_source_page") or "").strip()
         ctx_raw = str(st.session_state.get("_suite_ai_context") or "").strip()
-        st.markdown("#### Applied Math question (from suite app)")
-        st.markdown(f"**{preloaded}**")
-        banner = f"From **{source or 'suite app'}**"
-        if source_page:
-            banner += f" · {source_page}"
-        st.caption(banner)
+        ctx_dict: dict = {}
         if ctx_raw:
             try:
                 import json
 
                 parsed = json.loads(ctx_raw)
                 if isinstance(parsed, dict):
-                    try:
-                        from suite_analytical_question import format_context_lines
-
-                        lines = format_context_lines(parsed)
-                    except Exception:
-                        lines = [f"{k}: {v}" for k, v in parsed.items() if v][:8]
-                    if lines:
-                        st.markdown("**Context**")
-                        for line in lines:
-                            st.markdown(f"- {line}")
-                else:
-                    st.caption(ctx_raw[:400])
+                    ctx_dict = parsed
             except Exception:
-                if ctx_raw.startswith("Question:") or ctx_raw.startswith("Context:"):
-                    st.markdown(ctx_raw.replace(" · ", "\n\n"))
-                else:
-                    st.caption(ctx_raw[:400])
+                pass
+
+        st.markdown("#### Applied Math question")
+        st.markdown(f"**Question:** {preloaded}")
+        try:
+            from suite_analytical_question import format_context_lines, source_app_label
+
+            ctx_lines = format_context_lines(ctx_dict)
+            if not ctx_lines and source:
+                ctx_lines = [
+                    f"Source app: {source_app_label(source)}",
+                    *( [f"Page: {source_page}"] if source_page else [] ),
+                ]
+        except Exception:
+            ctx_lines = []
+            if source:
+                ctx_lines.append(f"Source app: {source}")
+            if source_page:
+                ctx_lines.append(f"Page: {source_page}")
+        if ctx_lines:
+            st.markdown("**Context:**")
+            for line in ctx_lines:
+                st.markdown(f"- {line}")
+
+        from components.applied_math_analysis_scaffold import render_applied_math_analysis_scaffold
+
+        render_applied_math_analysis_scaffold(
+            st,
+            question=preloaded,
+            source_app=source,
+            source_page=source_page,
+            context=ctx_dict,
+        )
+
         area_ids = [a["id"] for a in QUANT_AREAS]
         area_id = str(st.session_state.get("ps_area_id") or area_ids[0])
         if area_id not in area_ids:
@@ -101,7 +115,6 @@ def _render_area_hub() -> None:
         pattern = _match_pattern(preloaded, pattern_id)
         slug = hashlib.md5(preloaded.encode("utf-8")).hexdigest()[:10]
         key_prefix = f"ps_{area['id']}_{slug}"
-        st.markdown("---")
         render_quantitative_flow(preloaded, pattern, pattern_id, area, key_prefix)
         return
 
