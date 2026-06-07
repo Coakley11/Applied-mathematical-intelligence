@@ -16,6 +16,12 @@ from components.applied_math_question_intent import (
     QuestionIntent,
     classify_question_intent,
 )
+from components.applied_math_problem_interpreter import (
+    PURPOSE_ATTRIBUTE,
+    PURPOSE_FORECAST,
+    ProblemInterpretation,
+    interpret_suite_question,
+)
 
 # Stable IDs consumed by solvers and tests.
 NBA_STAT_CHASE = "nba_stat_chase"
@@ -41,6 +47,7 @@ INVESTMENT_MACRO = "investment_macro_sensitivity"
 INVESTMENT_GENERIC = "investment_generic"
 
 GENERIC_FALLBACK = "generic_fallback"
+GENERIC_INTERACTIVE = "generic_interactive"
 
 FIELD_SPECS: dict[str, tuple[str, ...]] = {
     NBA_STAT_CHASE: (
@@ -52,6 +59,30 @@ FIELD_SPECS: dict[str, tuple[str, ...]] = {
     BASEBALL_TREND: ("trend_summary.slope", "trend_summary.r2", "player", "metrics"),
     INVESTMENT_REBALANCE: ("rebalance_drift",),
     INVESTMENT_RISK_RETURN: ("expected_return", "volatility"),
+}
+
+
+MODEL_ID_TO_ROUTE: dict[str, tuple[str, str, tuple[str, ...]]] = {
+    BASEBALL_FUTURE_ACCUMULATION: ("Future stat accumulation forecast", "baseball", ("player_a", "player_b")),
+    BASEBALL_PLAYER_COMPARE: ("Player comparison", "baseball", ("player_a", "player_b")),
+    BASEBALL_TREND: ("Trend significance", "baseball", FIELD_SPECS[BASEBALL_TREND]),
+    BASEBALL_HISTORICAL: ("Historical stat comparison", "baseball", ("historical_snapshot", "player")),
+    BASEBALL_DRAFT: ("Draft decision", "baseball", ("player", "draft_projection")),
+    BASEBALL_PROJECTION: ("Projection realism", "baseball", ("player", "projection")),
+    BASEBALL_GENERIC: ("Baseball decision analysis", "baseball", ("player", "metrics")),
+    NBA_STAT_CHASE: ("NBA stat chase / rate needed", "nba", FIELD_SPECS[NBA_STAT_CHASE]),
+    NBA_INVERSE_STAT_CHASE: ("NBA inverse stat chase (games needed)", "nba", FIELD_SPECS[NBA_STAT_CHASE]),
+    NBA_WIN_PROBABILITY: ("Win probability reasonableness", "nba", ("win_probability", "team")),
+    NBA_MATCHUP_EDGE: ("Matchup edge", "nba", ("team", "opponent", "matchup_advantages")),
+    NBA_LEGACY_COMPARISON: ("Legacy / historical comparison", "nba", ("stat_gap",)),
+    NBA_GENERIC: ("NBA quantitative decision", "nba", ("team", "player")),
+    INVESTMENT_REBALANCE: ("Rebalance decision", "investment", FIELD_SPECS[INVESTMENT_REBALANCE]),
+    INVESTMENT_RISK_RETURN: ("Risk-return tradeoff", "investment", FIELD_SPECS[INVESTMENT_RISK_RETURN]),
+    INVESTMENT_CONCENTRATION: ("Portfolio concentration", "investment", ("holdings", "current_weights")),
+    INVESTMENT_DRAWDOWN_ATTRIBUTION: ("Drawdown risk attribution", "investment", ("current_weights",)),
+    INVESTMENT_MACRO: ("Macro sensitivity", "investment", ("macro_outlook", "expected_return", "volatility")),
+    INVESTMENT_GENERIC: ("Portfolio analysis", "investment", ("holdings", "health_score")),
+    GENERIC_INTERACTIVE: ("Interactive partial model", "unknown", ("question",)),
 }
 
 
@@ -127,13 +158,89 @@ class ProblemRoute:
     question_intent: str = ""
     intent_label: str = ""
     intent_restatement: str = ""
+    math_purpose: str = ""
+    purpose_label: str = ""
+    model_name: str = ""
+    model_rationale: str = ""
+    model_variables: str = ""
+    solvability: str = "partial"
+    data_relevant: list[str] = field(default_factory=list)
+    data_missing_interp: list[str] = field(default_factory=list)
 
 
 def _with_intent(route: ProblemRoute, intent: QuestionIntent) -> ProblemRoute:
     route.question_intent = intent.intent_id
     route.intent_label = intent.label
-    route.intent_restatement = intent.restatement
+    if not route.intent_restatement:
+        route.intent_restatement = intent.restatement
     return route
+
+
+def _attach_interpretation(route: ProblemRoute, interp: ProblemInterpretation) -> ProblemRoute:
+    route = _with_intent(route, interp.intent)
+    route.intent_restatement = interp.restatement
+    route.math_purpose = interp.math_purpose
+    route.purpose_label = interp.purpose_label
+    route.model_name = interp.model_name
+    route.model_rationale = interp.model_rationale
+    route.model_variables = interp.model_variables
+    route.solvability = interp.solvability
+    route.data_relevant = list(interp.data_relevant)
+    route.data_missing_interp = list(interp.data_missing)
+    if interp.confidence > route.confidence:
+        route.confidence = interp.confidence
+    return route
+
+
+def _route_from_model_id(
+    model_id: str,
+    *,
+    source_app: str,
+    ctx: dict[str, Any],
+    interp: ProblemInterpretation,
+) -> ProblemRoute:
+    spec = MODEL_ID_TO_ROUTE.get(model_id)
+    if spec:
+        label, default_app, req = spec
+        avail, miss = _audit_fields(ctx, req)
+        app = source_app or default_app
+        conf = 0.75 if not miss else 0.5 if avail else 0.4
+        if model_id == GENERIC_INTERACTIVE:
+            conf = max(0.35, interp.confidence - 0.1)
+        return ProblemRoute(
+            problem_type_id=model_id,
+            problem_type=label,
+            confidence=conf,
+            source_app=app,
+            required_fields=list(req),
+            available_fields=avail,
+            missing_fields=miss,
+        )
+    return ProblemRoute(
+        problem_type_id=GENERIC_INTERACTIVE,
+        problem_type="Interactive partial model",
+        confidence=0.35,
+        source_app=source_app or "unknown",
+        required_fields=["question"],
+        available_fields=["question"] if interp.question else [],
+        missing_fields=[] if interp.question else ["question"],
+    )
+
+
+def _route_aligns(domain: ProblemRoute, interp: ProblemInterpretation) -> bool:
+    if domain.problem_type_id.endswith("_generic"):
+        return False
+    if domain.problem_type_id in (GENERIC_FALLBACK, GENERIC_INTERACTIVE):
+        return False
+    if domain.problem_type_id == interp.model_id:
+        return True
+    if interp.math_purpose == PURPOSE_FORECAST and domain.problem_type_id == BASEBALL_PLAYER_COMPARE:
+        return False
+    if interp.math_purpose == PURPOSE_ATTRIBUTE and domain.problem_type_id == INVESTMENT_MACRO:
+        return False
+    if interp.intent.intent_id == INTENT_WHY and domain.problem_type_id == INVESTMENT_MACRO:
+        return False
+    return domain.confidence >= 0.65
 
 
 def route_suite_question(
@@ -141,6 +248,7 @@ def route_suite_question(
     *,
     source_app: str = "",
     context: dict[str, Any] | None = None,
+    purpose_override: str = "",
 ) -> ProblemRoute:
     ctx = dict(context or {})
     app = str(source_app or ctx.get("source_app") or "").strip().lower()
@@ -148,24 +256,54 @@ def route_suite_question(
     workflow = str(ctx.get("workflow") or "").lower()
     page = str(ctx.get("page") or "").lower()
     low = question.lower()
-    intent = classify_question_intent(question)
+    interp = interpret_suite_question(
+        question,
+        source_app=app,
+        context=ctx,
+        purpose_override=purpose_override,
+    )
+
+    if purpose_override:
+        route = _route_from_model_id(
+            interp.model_id,
+            source_app=app,
+            ctx=ctx,
+            interp=interp,
+        )
+        return _attach_interpretation(route, interp)
 
     if "baseball" in app:
-        return _with_intent(_route_baseball(question, ctx, topics, workflow, page, intent), intent)
-    if "nba" in app:
-        return _with_intent(_route_nba(question, ctx, topics, workflow, low, intent), intent)
-    if "investment" in app:
-        return _with_intent(_route_investment(question, ctx, topics, low, intent), intent)
-    route = ProblemRoute(
-        problem_type_id=GENERIC_FALLBACK,
-        problem_type="Quantitative decision (generic)",
-        confidence=0.3,
-        source_app=app or "unknown",
-        required_fields=["question"],
-        available_fields=["question"] if question.strip() else [],
-        missing_fields=[] if question.strip() else ["question"],
-    )
-    return _with_intent(route, intent)
+        domain = _route_baseball(question, ctx, topics, workflow, page, interp.intent)
+    elif "nba" in app:
+        domain = _route_nba(question, ctx, topics, workflow, low, interp.intent)
+    elif "investment" in app:
+        domain = _route_investment(question, ctx, topics, low, interp.intent)
+    else:
+        domain = ProblemRoute(
+            problem_type_id=GENERIC_INTERACTIVE,
+            problem_type="Interactive partial model",
+            confidence=0.3,
+            source_app=app or "unknown",
+            required_fields=["question"],
+            available_fields=["question"] if question.strip() else [],
+            missing_fields=[] if question.strip() else ["question"],
+        )
+
+    if _route_aligns(domain, interp):
+        route = domain
+    elif interp.model_id in MODEL_ID_TO_ROUTE and not interp.model_id.endswith("_generic"):
+        route = _route_from_model_id(interp.model_id, source_app=app, ctx=ctx, interp=interp)
+    elif domain.problem_type_id.endswith("_generic") or domain.confidence < 0.5:
+        route = _route_from_model_id(
+            interp.model_id if interp.model_id != "baseball_generic" else GENERIC_INTERACTIVE,
+            source_app=app,
+            ctx=ctx,
+            interp=interp,
+        )
+    else:
+        route = domain
+
+    return _attach_interpretation(route, interp)
 
 
 def _route_baseball(

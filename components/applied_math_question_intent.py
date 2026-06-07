@@ -85,11 +85,22 @@ def _is_future_forecast_question(question: str) -> bool:
         "next decade",
         "continue to be better",
         "will continue",
+        "keep scoring",
+        "keep producing",
+        "lead in",
+        "going forward",
+        "project better",
+        "projects better",
+        "more likely to",
         "accumulate",
         "surpass",
         "pass ",
         "years based on",
         "seasons based on",
+        "age better",
+        "likely to age",
+        "outscore",
+        "score more",
     )
     if any(p in low for p in future_phrases):
         return True
@@ -106,7 +117,14 @@ def classify_question_intent(question: str) -> QuestionIntent:
 
     # Order matters — specific patterns before generic ones.
 
-    if low.startswith("why") or "why did" in low or "why is" in low or "why does" in low:
+    if (
+        low.startswith("why")
+        or "why did" in low
+        or "why is" in low
+        or "why does" in low
+        or "why is this portfolio risky" in low
+        or "what would reduce" in low and "risk" in low
+    ):
         if "drawdown" in low or ("risk" in low and ("create" in low or "cause" in low or "expos" in low)):
             return QuestionIntent(
                 INTENT_WHY,
@@ -160,6 +178,8 @@ def classify_question_intent(question: str) -> QuestionIntent:
             "edge meaningful",
             "noisy",
             "signal",
+            "upward trend",
+            "real trend",
         )
     ):
         return QuestionIntent(
@@ -174,6 +194,9 @@ def classify_question_intent(question: str) -> QuestionIntent:
         or low.startswith("will ")
         or "likely to" in low
         or "how many games" in low
+        or "how many more" in low
+        or "more years" in low
+        or re.search(r"lead(?:ing)?\s+in\s+\w+\s+going\s+forward", low)
     ):
         stat_note = f" for **{focus_stat}**" if focus_stat else ""
         h_note = f" over **{horizon}**" if horizon else ""

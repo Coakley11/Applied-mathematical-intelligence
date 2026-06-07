@@ -7,19 +7,36 @@ from typing import Any
 
 from components.applied_math_problem_router import (
     BASEBALL_FUTURE_ACCUMULATION,
+    BASEBALL_GENERIC,
     BASEBALL_PLAYER_COMPARE,
     BASEBALL_PROJECTION,
     BASEBALL_TREND,
+    GENERIC_INTERACTIVE,
     INVESTMENT_CONCENTRATION,
     INVESTMENT_DRAWDOWN_ATTRIBUTION,
+    INVESTMENT_GENERIC,
     INVESTMENT_MACRO,
     INVESTMENT_REBALANCE,
     INVESTMENT_RISK_RETURN,
+    NBA_GENERIC,
     NBA_INVERSE_STAT_CHASE,
     NBA_STAT_CHASE,
     NBA_WIN_PROBABILITY,
     ProblemRoute,
     route_suite_question,
+)
+from components.applied_math_problem_interpreter import CORRECTION_OPTIONS
+from components.applied_math_problem_interpreter import (
+    PURPOSE_COMPARE,
+    PURPOSE_DECIDE,
+    PURPOSE_ESTIMATE_PROBABILITY,
+    PURPOSE_ESTIMATE_RATE,
+    PURPOSE_EVALUATE_RISK,
+    PURPOSE_EXPLAIN_WHY,
+    PURPOSE_FORECAST,
+    PURPOSE_MEASURE_SENSITIVITY,
+    PURPOSE_TEST_SIGNIFICANCE,
+    PURPOSE_ATTRIBUTE,
 )
 from components.applied_math_solver_trace import SolverRunTrace
 from components.applied_math_solvers import SolverResult, _route_confidence_pct, solve_suite_question
@@ -113,12 +130,23 @@ def _fallback_solver_result(
     )
 
 
+def _is_generic_route(route: ProblemRoute) -> bool:
+    pid = route.problem_type_id
+    return pid in (GENERIC_INTERACTIVE, "generic_fallback") or pid.endswith("_generic")
+
+
+def _purpose_correction_key(question: str) -> str:
+    qhash = abs(hash(question.strip().lower())) % 10_000_000
+    return f"ami_purpose_override_{qhash}"
+
+
 def resolve_suite_solver(
     question: str,
     *,
     source_app: str,
     context: dict[str, Any] | None = None,
     params: dict[str, Any] | None = None,
+    purpose_override: str = "",
 ) -> tuple[ProblemRoute, SolverResult]:
     """Route + dispatch — same path as the UI; returns fallback on failure."""
     ctx = dict(context or {})
@@ -128,6 +156,7 @@ def resolve_suite_solver(
             source_app=source_app,
             context=ctx,
             params=params,
+            purpose_override=purpose_override,
         )
         if not isinstance(result, SolverResult):
             raise TypeError(f"expected SolverResult, got {type(result)!r}")
@@ -244,11 +273,13 @@ def _seed_control_defaults(st: Any, route: ProblemRoute, defaults: dict[str, Any
         for name, key, default in (
             ("seasons_a", "sa", 10),
             ("seasons_b", "sb", 10),
+            ("rate_a", "ra", 90.0),
+            ("rate_b", "rb", 100.0),
         ):
             ck = _control_key(pid, key)
             if ck not in st.session_state:
-                st.session_state[ck] = int(defaults.get(name, default))
-            params[name] = int(st.session_state[ck])
+                st.session_state[ck] = float(defaults.get(name, default)) if "rate" in name else int(defaults.get(name, default))
+            params[name] = float(st.session_state[ck]) if "rate" in name else int(st.session_state[ck])
         for name, key, default in (
             ("decline_a", "da", 0.02),
             ("decline_b", "db", 0.03),
@@ -266,6 +297,82 @@ def _seed_control_defaults(st: Any, route: ProblemRoute, defaults: dict[str, Any
             st.session_state[ck] = float(defaults.get("equity_correlation", 0.85))
         params["market_decline"] = float(st.session_state[mk])
         params["equity_correlation"] = float(st.session_state[ck])
+    elif _is_generic_route(route):
+        purpose = route.math_purpose or PURPOSE_COMPARE
+        gpid = "generic_interactive"
+        if purpose == PURPOSE_FORECAST:
+            for name, key, default in (
+                ("generic_rate_a", "gra", 90.0),
+                ("generic_rate_b", "grb", 100.0),
+                ("generic_seasons_a", "gsa", 10.0),
+                ("generic_seasons_b", "gsb", 8.0),
+                ("generic_decline_a", "gda", 0.02),
+                ("generic_decline_b", "gdb", 0.03),
+            ):
+                ck = _control_key(gpid, key)
+                if ck not in st.session_state:
+                    st.session_state[ck] = float(defaults.get(name, default))
+                params[name] = float(st.session_state[ck])
+        elif purpose == PURPOSE_COMPARE:
+            for name, key, default in (("generic_score_a", "sca", 55.0), ("generic_score_b", "scb", 45.0)):
+                ck = _control_key(gpid, key)
+                if ck not in st.session_state:
+                    st.session_state[ck] = float(defaults.get(name, default))
+                params[name] = float(st.session_state[ck])
+        elif purpose == PURPOSE_ESTIMATE_RATE:
+            for name, key, default in (
+                ("generic_gap", "gap", 100.0),
+                ("generic_periods", "per", 20.0),
+                ("generic_expected_rate", "exp", 4.5),
+            ):
+                ck = _control_key(gpid, key)
+                if ck not in st.session_state:
+                    st.session_state[ck] = float(defaults.get(name, default))
+                params[name] = float(st.session_state[ck])
+        elif purpose == PURPOSE_TEST_SIGNIFICANCE:
+            for name, key, default in (
+                ("generic_slope", "sl", 0.8),
+                ("generic_r2", "r2", 0.42),
+                ("min_slope", "msl", 0.5),
+                ("min_r2", "mr2", 0.35),
+            ):
+                ck = _control_key(gpid, key)
+                if ck not in st.session_state:
+                    st.session_state[ck] = float(defaults.get(name, default))
+                params[name] = float(st.session_state[ck])
+        elif purpose in (PURPOSE_EVALUATE_RISK, PURPOSE_EXPLAIN_WHY, PURPOSE_ATTRIBUTE):
+            for name, key, default in (
+                ("generic_return", "ret", 8.0),
+                ("generic_volatility", "vol", 14.0),
+                ("generic_weight", "wgt", 40.0),
+            ):
+                ck = _control_key(gpid, key)
+                if ck not in st.session_state:
+                    st.session_state[ck] = float(defaults.get(name, default))
+                params[name] = float(st.session_state[ck])
+        elif purpose == PURPOSE_DECIDE:
+            for name, key, default in (("generic_drift", "drf", 6.0), ("generic_threshold", "thr", 5.0)):
+                ck = _control_key(gpid, key)
+                if ck not in st.session_state:
+                    st.session_state[ck] = float(defaults.get(name, default))
+                params[name] = float(st.session_state[ck])
+        elif purpose == PURPOSE_ESTIMATE_PROBABILITY:
+            for name, key, default in (("generic_probability", "prob", 62.0), ("generic_prior", "prior", 52.0)):
+                ck = _control_key(gpid, key)
+                if ck not in st.session_state:
+                    st.session_state[ck] = float(defaults.get(name, default))
+                params[name] = float(st.session_state[ck])
+        elif purpose == PURPOSE_MEASURE_SENSITIVITY:
+            for name, key, default in (
+                ("generic_base_return", "bret", 8.0),
+                ("generic_return_shock", "rsh", -3.0),
+                ("generic_base_vol", "bvol", 12.0),
+                ("generic_vol_shock", "vsh", 4.0),
+            ):
+                ck = _control_key(gpid, key)
+                if ck not in st.session_state:
+                    st.session_state[ck] = float(defaults.get(name, default))
+                params[name] = float(st.session_state[ck])
 
     return params
 
@@ -420,10 +527,12 @@ def _render_controls(st: Any, route: ProblemRoute) -> None:
     elif pid == BASEBALL_FUTURE_ACCUMULATION:
         c1, c2 = st.columns(2)
         with c1:
-            st.number_input(f"Seasons remaining (player A)", min_value=1, max_value=20, key=_control_key(pid, "sa"))
+            st.number_input("Rate per season (player A)", min_value=0.0, max_value=200.0, key=_control_key(pid, "ra"))
+            st.number_input("Seasons remaining (player A)", min_value=1, max_value=20, key=_control_key(pid, "sa"))
             st.slider("Decline rate A (per season)", 0.0, 0.15, key=_control_key(pid, "da"))
         with c2:
-            st.number_input(f"Seasons remaining (player B)", min_value=1, max_value=20, key=_control_key(pid, "sb"))
+            st.number_input("Rate per season (player B)", min_value=0.0, max_value=200.0, key=_control_key(pid, "rb"))
+            st.number_input("Seasons remaining (player B)", min_value=1, max_value=20, key=_control_key(pid, "sb"))
             st.slider("Decline rate B (per season)", 0.0, 0.15, key=_control_key(pid, "db"))
     elif pid == INVESTMENT_DRAWDOWN_ATTRIBUTION:
         c1, c2 = st.columns(2)
@@ -431,6 +540,75 @@ def _render_controls(st: Any, route: ProblemRoute) -> None:
             st.slider("Assumed market decline (%)", -40.0, -5.0, key=_control_key(pid, "mkt"))
         with c2:
             st.slider("Equity correlation", 0.5, 1.0, key=_control_key(pid, "corr"))
+    elif _is_generic_route(route):
+        gpid = "generic_interactive"
+        purpose = route.math_purpose or PURPOSE_COMPARE
+        if purpose == PURPOSE_FORECAST:
+            c1, c2 = st.columns(2)
+            with c1:
+                st.number_input("Rate per season (A)", min_value=0.0, max_value=200.0, key=_control_key(gpid, "gra"))
+                st.number_input("Seasons remaining (A)", min_value=1, max_value=20, key=_control_key(gpid, "gsa"))
+                st.slider("Decline rate A", 0.0, 0.15, key=_control_key(gpid, "gda"))
+            with c2:
+                st.number_input("Rate per season (B)", min_value=0.0, max_value=200.0, key=_control_key(gpid, "grb"))
+                st.number_input("Seasons remaining (B)", min_value=1, max_value=20, key=_control_key(gpid, "gsb"))
+                st.slider("Decline rate B", 0.0, 0.15, key=_control_key(gpid, "gdb"))
+        elif purpose == PURPOSE_COMPARE:
+            c1, c2 = st.columns(2)
+            with c1:
+                st.number_input("Score A", min_value=0.0, max_value=200.0, key=_control_key(gpid, "sca"))
+            with c2:
+                st.number_input("Score B", min_value=0.0, max_value=200.0, key=_control_key(gpid, "scb"))
+        elif purpose == PURPOSE_ESTIMATE_RATE:
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                st.number_input("Gap to close", min_value=0.0, key=_control_key(gpid, "gap"))
+            with c2:
+                st.number_input("Periods remaining", min_value=1, key=_control_key(gpid, "per"))
+            with c3:
+                st.number_input("Expected rate", min_value=0.0, step=0.1, key=_control_key(gpid, "exp"))
+        elif purpose == PURPOSE_TEST_SIGNIFICANCE:
+            c1, c2 = st.columns(2)
+            with c1:
+                st.number_input("Trend slope", step=0.1, key=_control_key(gpid, "sl"))
+                st.slider("Min slope", 0.1, 3.0, key=_control_key(gpid, "msl"))
+            with c2:
+                st.number_input("R²", min_value=0.0, max_value=1.0, step=0.05, key=_control_key(gpid, "r2"))
+                st.slider("Min R²", 0.05, 0.95, key=_control_key(gpid, "mr2"))
+        elif purpose in (PURPOSE_EVALUATE_RISK, PURPOSE_EXPLAIN_WHY, PURPOSE_ATTRIBUTE):
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                st.number_input("Return (%)", key=_control_key(gpid, "ret"))
+            with c2:
+                st.number_input("Volatility (%)", key=_control_key(gpid, "vol"))
+            with c3:
+                st.number_input("Weight (%)", key=_control_key(gpid, "wgt"))
+        elif purpose == PURPOSE_DECIDE:
+            c1, c2 = st.columns(2)
+            with c1:
+                st.number_input("Drift (%)", key=_control_key(gpid, "drf"))
+            with c2:
+                st.number_input("Threshold (%)", key=_control_key(gpid, "thr"))
+        elif purpose == PURPOSE_ESTIMATE_PROBABILITY:
+            c1, c2 = st.columns(2)
+            with c1:
+                st.number_input("Quoted probability (%)", key=_control_key(gpid, "prob"))
+            with c2:
+                st.number_input("Prior (%)", key=_control_key(gpid, "prior"))
+        elif purpose == PURPOSE_MEASURE_SENSITIVITY:
+            c1, c2 = st.columns(2)
+            with c1:
+                st.number_input("Base return (%)", key=_control_key(gpid, "bret"))
+                st.number_input("Return shock (pp)", key=_control_key(gpid, "rsh"))
+            with c2:
+                st.number_input("Base vol (%)", key=_control_key(gpid, "bvol"))
+                st.number_input("Vol shock (pp)", key=_control_key(gpid, "vsh"))
+        else:
+            c1, c2 = st.columns(2)
+            with c1:
+                st.number_input("Baseline", key=_control_key(gpid, "base"))
+            with c2:
+                st.number_input("Threshold", key=_control_key(gpid, "thr2"))
     else:
         st.caption("No assumption controls for this problem type yet.")
 
@@ -472,11 +650,23 @@ def render_coach_answer(
             st.caption("Question text unavailable.")
 
         intent_txt = (result.intent_restatement or route.intent_restatement or "").strip()
-        intent_lbl = route.intent_label or result.question_intent
+        model_name = (result.model_name or route.model_name or "").strip()
+        model_rationale = (result.model_rationale or route.model_rationale or "").strip()
         if intent_txt:
             st.markdown(f"**What you're really asking:** {intent_txt}")
-        if intent_lbl and intent_lbl not in intent_txt:
-            st.caption(f"Question type: {intent_lbl}")
+        if model_name:
+            st.markdown(f"**Model selected:** {model_name}")
+        if model_rationale:
+            st.markdown(f"**Why this model:** {model_rationale}")
+        relevant = result.data_relevant or route.data_relevant
+        missing = route.data_missing_interp or route.missing_fields
+        if relevant:
+            st.caption("Data available: " + ", ".join(relevant[:6]))
+        if missing:
+            st.caption("Data missing (enter below or re-send from source app): " + ", ".join(str(m) for m in missing[:6]))
+        solv = result.solvability or route.solvability
+        if solv:
+            st.caption(f"Solvability: **{solv}**")
 
         st.markdown("#### 2. Short answer")
         st.markdown(short)
@@ -659,14 +849,31 @@ def render_suite_solver_answer(
     ctx = dict(context or {})
     used_fallback = False
     fallback_error = ""
+    corr_key = _purpose_correction_key(question)
+    labels = list(CORRECTION_OPTIONS.keys())
+    if corr_key not in st.session_state:
+        st.session_state[corr_key] = labels[0]
+    selected_label = st.selectbox(
+        "Change problem type (if the interpretation is wrong)",
+        labels,
+        key=corr_key,
+        help="Re-route to a different mathematical model without re-typing your question.",
+    )
+    purpose_override = CORRECTION_OPTIONS.get(selected_label, "")
     try:
-        route, seed_result = resolve_suite_solver(question, source_app=source_app, context=ctx)
+        route, seed_result = resolve_suite_solver(
+            question,
+            source_app=source_app,
+            context=ctx,
+            purpose_override=purpose_override,
+        )
         params = _seed_control_defaults(st, route, seed_result.default_controls)
         route, result = resolve_suite_solver(
             question,
             source_app=source_app,
             context=ctx,
             params=params,
+            purpose_override=purpose_override,
         )
         used_fallback = bool(result.computed.get("fallback"))
     except Exception as exc:

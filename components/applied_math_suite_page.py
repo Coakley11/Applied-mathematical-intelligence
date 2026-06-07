@@ -43,7 +43,7 @@ def render_suite_question_page_header(
     render_section_header(
         PROBLEM_SOLVING_LAB["icon"],
         "Problem Solver",
-        "A direct answer to your question — conclusion first, then the supporting math.",
+        "Learn the math behind your question — short answer first, then work through the calculation hands-on.",
     )
 
     area_name, area_icon = suite_quant_area_label(source_app)
@@ -56,8 +56,4 @@ def render_suite_question_page_header(
     except Exception:
         src_label = source_app or "Suite app"
 
-    with st.container(border=True):
-        st.markdown(f"**Question from {src_label}:**")
-        st.markdown(f'*"{question.strip()}"*')
-        if source_page:
-            st.caption(f"Source page: {source_page}")
+    st.caption(f"From {src_label}" + (f" · {source_page}" if source_page else ""))

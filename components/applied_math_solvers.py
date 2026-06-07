@@ -16,6 +16,7 @@ from components.applied_math_problem_router import (
     BASEBALL_PROJECTION,
     BASEBALL_TREND,
     GENERIC_FALLBACK,
+    GENERIC_INTERACTIVE,
     INVESTMENT_CONCENTRATION,
     INVESTMENT_DRAWDOWN_ATTRIBUTION,
     INVESTMENT_GENERIC,
@@ -30,6 +31,18 @@ from components.applied_math_problem_router import (
     NBA_WIN_PROBABILITY,
     ProblemRoute,
     route_suite_question,
+)
+from components.applied_math_problem_interpreter import (
+    PURPOSE_ATTRIBUTE,
+    PURPOSE_COMPARE,
+    PURPOSE_DECIDE,
+    PURPOSE_ESTIMATE_PROBABILITY,
+    PURPOSE_ESTIMATE_RATE,
+    PURPOSE_EVALUATE_RISK,
+    PURPOSE_EXPLAIN_WHY,
+    PURPOSE_FORECAST,
+    PURPOSE_MEASURE_SENSITIVITY,
+    PURPOSE_TEST_SIGNIFICANCE,
 )
 
 
@@ -66,6 +79,12 @@ class SolverResult:
     live_metrics: dict[str, str] = field(default_factory=dict)
     question_intent: str = ""
     intent_restatement: str = ""
+    math_purpose: str = ""
+    model_name: str = ""
+    model_rationale: str = ""
+    model_variables: str = ""
+    solvability: str = ""
+    data_relevant: list[str] = field(default_factory=list)
 
     # Legacy alias — older code/tests referenced problem_detected
     @property
@@ -165,6 +184,18 @@ def _finalize_result(route: ProblemRoute, result: SolverResult) -> SolverResult:
         result.question_intent = route.question_intent
     if route.intent_restatement:
         result.intent_restatement = route.intent_restatement
+    if route.math_purpose:
+        result.math_purpose = route.math_purpose
+    if route.model_name:
+        result.model_name = route.model_name
+    if route.model_rationale:
+        result.model_rationale = route.model_rationale
+    if route.model_variables:
+        result.model_variables = route.model_variables
+    if route.solvability:
+        result.solvability = route.solvability
+    if route.data_relevant:
+        result.data_relevant = list(route.data_relevant)
     return result
 
 
@@ -2017,6 +2048,8 @@ def solve_baseball_future_accumulation(
     decline_a: float = 0.02,
     decline_b: float = 0.03,
     horizon_seasons: int = 10,
+    rate_a_override: float | None = None,
+    rate_b_override: float | None = None,
 ) -> SolverResult:
     from components.applied_math_question_intent import classify_question_intent
 
@@ -2062,8 +2095,11 @@ def solve_baseball_future_accumulation(
             sa = max(1, default_seasons - int(age_a - age_b))
 
     missing: list[str] = []
-    if rate_a is None or rate_b is None:
+    rates_from_context = rate_a is not None and rate_b is not None
+    if not rates_from_context:
         missing.append("comparison_stats (rate for focus stat)")
+        rate_a = rate_a_override if rate_a_override is not None else 90.0
+        rate_b = rate_b_override if rate_b_override is not None else 100.0
 
     math_idea = (
         f"This is a **future accumulation** forecast — not who is better today. "
@@ -2088,7 +2124,7 @@ def solve_baseball_future_accumulation(
             f"→ projected total ≈ **{total_b:.0f}** {stat_name}"
         )
 
-    short_answer = "Attach per-season rates for both players from the chart."
+    short_answer = "Adjust per-season rates below to explore the forecast."
     why = ""
     live_metrics: dict[str, str] = {}
 
@@ -2162,12 +2198,15 @@ def solve_baseball_future_accumulation(
             "rate_b": rate_b,
             "seasons_a": sa,
             "seasons_b": sb,
+            "rates_assumed": not rates_from_context,
         },
         default_controls={
             "seasons_a": sa,
             "seasons_b": sb,
             "decline_a": decline_a,
             "decline_b": decline_b,
+            "rate_a": rate_a,
+            "rate_b": rate_b,
             "horizon_seasons": default_seasons,
         },
         conclusion=short_answer,
@@ -2330,41 +2369,239 @@ def solve_investment_drawdown_attribution(
     )
 
 
-def _generic_solver(route: ProblemRoute, question: str, ctx: dict[str, Any]) -> SolverResult:
-    model_note = "We can model this as a threshold/decision problem once one measurable quantity is attached."
-    data_improve = [f"**{f}**" for f in route.missing_fields[:4]]
-    conclusion = "Best estimate unavailable — need numeric context"
-    reasons: list[str] = []
-    if route.missing_fields:
-        reasons = [
-            "The question needs at least one number from the source page before a quantitative verdict.",
+def _generic_solver(route: ProblemRoute, question: str, ctx: dict[str, Any], params: dict[str, Any] | None = None) -> SolverResult:
+    """Interactive partial solver — closest model + assumption controls."""
+    p = dict(params or {})
+    purpose = route.math_purpose or PURPOSE_COMPARE
+    model_name = route.model_name or "Interactive partial model"
+    rationale = route.model_rationale or "We picked the closest mathematical model for your question shape."
+    variables = route.model_variables or "Adjust assumptions below to explore the answer."
+    restatement = route.intent_restatement or question
+    relevant = route.data_relevant or []
+    missing_interp = route.data_missing_interp or route.missing_fields
+    pa = str(ctx.get("player_a") or ctx.get("player") or "Player A")
+    pb = str(ctx.get("player_b") or "Player B")
+    stat = "stat"
+
+    default_controls: dict[str, Any] = {}
+    live_metrics: dict[str, str] = {}
+    calc_lines: list[str] = []
+    short_answer = ""
+    why = ""
+    math_idea = ""
+    partial = True
+
+    if purpose == PURPOSE_FORECAST:
+        math_idea = "Future accumulation — project totals as rate × seasons remaining (with optional decline)."
+        rate_a = float(p.get("rate_a", p.get("generic_rate_a", 90.0)))
+        rate_b = float(p.get("rate_b", p.get("generic_rate_b", 100.0)))
+        seasons_a = float(p.get("seasons_a", p.get("generic_seasons_a", 10.0)))
+        seasons_b = float(p.get("seasons_b", p.get("generic_seasons_b", 8.0)))
+        decline_a = float(p.get("decline_a", p.get("generic_decline_a", 0.02)))
+        decline_b = float(p.get("decline_b", p.get("generic_decline_b", 0.03)))
+        default_controls = {
+            "generic_rate_a": rate_a,
+            "generic_rate_b": rate_b,
+            "generic_seasons_a": seasons_a,
+            "generic_seasons_b": seasons_b,
+            "generic_decline_a": decline_a,
+            "generic_decline_b": decline_b,
+        }
+        total_a = sum(rate_a * ((1 - decline_a) ** i) for i in range(int(seasons_a)))
+        total_b = sum(rate_b * ((1 - decline_b) ** i) for i in range(int(seasons_b)))
+        winner = pa if total_a >= total_b else pb
+        margin = abs(total_a - total_b)
+        short_answer = f"**{winner}** projects ~**{max(total_a, total_b):.0f}** future {stat} vs ~**{min(total_a, total_b):.0f}** (margin ~{margin:.0f})."
+        why = (
+            f"At these rates and horizons, **{winner}** accumulates more over time"
+            + (f" despite lower current pace" if winner == pa and rate_a < rate_b else "")
+            + "."
+        )
+        calc_lines = [
+            f"{pa}: Σ rate × (1−decline)^t for t=0..{int(seasons_a) - 1} ≈ **{total_a:.0f}**",
+            f"{pb}: Σ rate × (1−decline)^t for t=0..{int(seasons_b) - 1} ≈ **{total_b:.0f}**",
         ]
-    partial_conf = _route_confidence_pct(route, True, len(route.missing_fields))
+        live_metrics = {
+            f"{pa} projected": f"{total_a:.0f}",
+            f"{pb} projected": f"{total_b:.0f}",
+            "Margin": f"{margin:.0f}",
+        }
+        partial = bool(missing_interp)
+
+    elif purpose == PURPOSE_COMPARE:
+        math_idea = "Weighted comparison — normalize two scores and compare share of total."
+        score_a = float(p.get("score_a", p.get("generic_score_a", 55.0)))
+        score_b = float(p.get("score_b", p.get("generic_score_b", 45.0)))
+        default_controls = {"generic_score_a": score_a, "generic_score_b": score_b}
+        total = score_a + score_b or 1.0
+        share_a = score_a / total
+        leader = pa if score_a >= score_b else pb
+        short_answer = f"**{leader}** leads with **{max(score_a, score_b):.0f}** vs **{min(score_a, score_b):.0f}** ({share_a:.0%} share for {pa})."
+        why = f"Comparison uses attached or assumed scores — **{leader}** is ahead at these values."
+        calc_lines = [f"Share({pa}) = {score_a} / ({score_a}+{score_b}) = **{share_a:.0%}**"]
+        live_metrics = {f"{pa} score": f"{score_a:.0f}", f"{pb} score": f"{score_b:.0f}", "Leader": leader}
+        partial = bool(missing_interp)
+
+    elif purpose == PURPOSE_ESTIMATE_RATE:
+        math_idea = "Rate-needed model — gap ÷ periods remaining = required pace."
+        gap = float(p.get("gap", p.get("generic_gap", 100.0)))
+        periods = float(p.get("periods", p.get("generic_periods", 20.0)))
+        expected = float(p.get("expected_rate", p.get("generic_expected_rate", 4.5)))
+        default_controls = {
+            "generic_gap": gap,
+            "generic_periods": periods,
+            "generic_expected_rate": expected,
+        }
+        required = gap / periods if periods else gap
+        feasible = expected >= required
+        short_answer = (
+            f"Need **{required:.2f}**/period; expected **{expected:.2f}** → "
+            + ("**on pace**" if feasible else "**behind pace**")
+            + "."
+        )
+        why = "Required rate is the gap spread evenly across remaining periods."
+        calc_lines = [f"required = {gap:.0f} ÷ {periods:.0f} = **{required:.2f}**/period"]
+        live_metrics = {"Required rate": f"{required:.2f}", "Expected rate": f"{expected:.2f}", "Verdict": "On pace" if feasible else "Behind"}
+        partial = bool(missing_interp)
+
+    elif purpose == PURPOSE_TEST_SIGNIFICANCE:
+        math_idea = "Trend significance — slope magnitude and R² vs thresholds."
+        slope = float(p.get("slope", p.get("generic_slope", 0.8)))
+        r2 = float(p.get("r2", p.get("generic_r2", 0.42)))
+        min_slope = float(p.get("min_slope", 0.5))
+        min_r2 = float(p.get("min_r2", 0.35))
+        default_controls = {"generic_slope": slope, "generic_r2": r2, "min_slope": min_slope, "min_r2": min_r2}
+        meaningful = abs(slope) >= min_slope and r2 >= min_r2
+        short_answer = "**Meaningful trend**" if meaningful else "**Likely noise** — adjust slope/R² to test."
+        why = f"|slope|={abs(slope):.2f} (need ≥{min_slope}), R²={r2:.2f} (need ≥{min_r2})."
+        calc_lines = [f"Signal check: |{slope:.2f}| ≥ {min_slope} and {r2:.2f} ≥ {min_r2} → **{meaningful}**"]
+        live_metrics = {"|Slope|": f"{abs(slope):.2f}", "R²": f"{r2:.2f}", "Verdict": "Meaningful" if meaningful else "Noise"}
+        partial = bool(missing_interp)
+
+    elif purpose in (PURPOSE_EVALUATE_RISK, PURPOSE_EXPLAIN_WHY, PURPOSE_ATTRIBUTE):
+        math_idea = "Risk / attribution — return vs volatility or weight × drawdown contribution."
+        ret = float(p.get("return_pct", p.get("generic_return", 8.0)))
+        vol = float(p.get("volatility", p.get("generic_volatility", 14.0)))
+        weight = float(p.get("weight_pct", p.get("generic_weight", 40.0)))
+        default_controls = {
+            "generic_return": ret,
+            "generic_volatility": vol,
+            "generic_weight": weight,
+        }
+        sharpe = ret / vol if vol else 0.0
+        contrib = weight * 0.18
+        if purpose == PURPOSE_ATTRIBUTE or purpose == PURPOSE_EXPLAIN_WHY:
+            short_answer = f"**{weight:.0f}%** weight ≈ **{contrib:.1f}pp** drawdown contribution at −18% market."
+            why = "Attribution ≈ weight × market decline × correlation — large weights dominate drawdown."
+            calc_lines = [f"contribution ≈ {weight:.0f}% × 18% ≈ **{contrib:.1f}pp**"]
+            live_metrics = {"Weight": f"{weight:.0f}%", "Est. contribution": f"{contrib:.1f}pp"}
+        else:
+            short_answer = f"Sharpe ≈ **{sharpe:.2f}** ({ret:.1f}% return ÷ {vol:.1f}% vol)."
+            why = "Return must compensate for volatility at your tolerance."
+            calc_lines = [f"Sharpe ≈ {ret:.1f} ÷ {vol:.1f} = **{sharpe:.2f}**"]
+            live_metrics = {"Return": f"{ret:.1f}%", "Volatility": f"{vol:.1f}%", "Sharpe": f"{sharpe:.2f}"}
+        partial = bool(missing_interp)
+
+    elif purpose == PURPOSE_DECIDE:
+        math_idea = "Threshold decision — act when drift or gap exceeds your cutoff."
+        drift = float(p.get("drift", p.get("generic_drift", 6.0)))
+        threshold = float(p.get("threshold", p.get("generic_threshold", 5.0)))
+        default_controls = {"generic_drift": drift, "generic_threshold": threshold}
+        act = abs(drift) >= threshold
+        short_answer = "**Rebalance / act**" if act else "**Hold** — below threshold."
+        why = f"|drift|={abs(drift):.1f}% vs threshold {threshold:.1f}%."
+        calc_lines = [f"|{drift:.1f}| {'≥' if act else '<'} {threshold:.1f} → **{'act' if act else 'hold'}**"]
+        live_metrics = {"Drift": f"{drift:.1f}%", "Threshold": f"{threshold:.1f}%", "Decision": "Act" if act else "Hold"}
+        partial = bool(missing_interp)
+
+    elif purpose == PURPOSE_ESTIMATE_PROBABILITY:
+        math_idea = "Probability reasonableness — compare quoted p to an implied edge band."
+        prob = float(p.get("probability", p.get("generic_probability", 62.0)))
+        prior = float(p.get("prior", p.get("generic_prior", 52.0)))
+        default_controls = {"generic_probability": prob, "generic_prior": prior}
+        gap = prob - prior
+        label = "Optimistic" if gap > 10 else "Conservative" if gap < -10 else "Reasonable"
+        short_answer = f"**{prob:.0f}%** vs prior **{prior:.0f}%** → **{label}**."
+        why = "Large gaps vs a simple prior warrant checking injuries, matchups, and sample size."
+        calc_lines = [f"gap = {prob:.0f} − {prior:.0f} = **{gap:+.0f}pp**"]
+        live_metrics = {"Quoted": f"{prob:.0f}%", "Prior": f"{prior:.0f}%", "Label": label}
+        partial = bool(missing_interp)
+
+    elif purpose == PURPOSE_MEASURE_SENSITIVITY:
+        math_idea = "Scenario sensitivity — stressed return/vol under macro shock."
+        base_ret = float(p.get("base_return", p.get("generic_base_return", 8.0)))
+        shock = float(p.get("return_shock", p.get("generic_return_shock", -3.0)))
+        base_vol = float(p.get("base_vol", p.get("generic_base_vol", 12.0)))
+        vol_shock = float(p.get("vol_shock", p.get("generic_vol_shock", 4.0)))
+        default_controls = {
+            "generic_base_return": base_ret,
+            "generic_return_shock": shock,
+            "generic_base_vol": base_vol,
+            "generic_vol_shock": vol_shock,
+        }
+        stressed_ret = base_ret + shock
+        stressed_vol = base_vol + vol_shock
+        short_answer = f"Stressed return **{stressed_ret:.1f}%**, vol **{stressed_vol:.1f}%**."
+        why = "Macro shocks move both return and volatility — test whether the plan still fits."
+        calc_lines = [
+            f"return: {base_ret:.1f} + ({shock:.1f}) = **{stressed_ret:.1f}%**",
+            f"vol: {base_vol:.1f} + {vol_shock:.1f} = **{stressed_vol:.1f}%**",
+        ]
+        live_metrics = {"Stressed return": f"{stressed_ret:.1f}%", "Stressed vol": f"{stressed_vol:.1f}%"}
+        partial = bool(missing_interp)
+
+    else:
+        math_idea = route.model_variables or "Define measurable quantity, baseline, and decision threshold."
+        baseline = float(p.get("baseline", p.get("generic_baseline", 50.0)))
+        threshold = float(p.get("threshold", p.get("generic_threshold", 60.0)))
+        default_controls = {"generic_baseline": baseline, "generic_threshold": threshold}
+        short_answer = f"Baseline **{baseline:.0f}** vs threshold **{threshold:.0f}** → **{'above' if baseline >= threshold else 'below'}** cutoff."
+        why = "Generic threshold model — enter your own numbers to explore."
+        calc_lines = [f"{baseline:.0f} {'≥' if baseline >= threshold else '<'} {threshold:.0f}"]
+        live_metrics = {"Baseline": f"{baseline:.0f}", "Threshold": f"{threshold:.0f}"}
+
+    data_used = [f"Source: **{route.source_app}**"]
+    if relevant:
+        data_used.append("Available: " + ", ".join(relevant[:4]))
+    if missing_interp:
+        data_used.append("Missing: " + ", ".join(str(m) for m in missing_interp[:4]))
+
+    data_improve = [
+        f"Enter **{m}** in the controls below or re-send from the source app."
+        for m in missing_interp[:3]
+    ]
+    partial_conf = _route_confidence_pct(route, partial, len(route.missing_fields))
+
     return _coach_result(
         question=question,
-        problem_type=route.problem_type,
-        math_idea="Define the measurable quantity, baseline, and decision threshold.",
-        variables="variable = what you measure\nbaseline = comparison point\nthreshold = decision cutoff",
-        data_used=[f"Source: **{route.source_app}**"],
-        calculation="State the claim as one number, then compare to baseline ± uncertainty.",
-        result="Partial — attach numeric context from the source app",
+        problem_type=route.problem_type or model_name,
+        math_idea=math_idea,
+        variables=variables,
+        data_used=data_used,
+        calculation="\n\n".join(calc_lines) if calc_lines else rationale,
+        result=short_answer,
         interpretation=(
-            "We can model this as a threshold/decision problem, but need: "
-            + ", ".join(route.missing_fields)
-            + "."
-            if route.missing_fields
-            else "Translate the question into one measurable quantity and re-send from the source app."
+            f"We don't have every field for a full answer, but this is a **{model_name}** problem. "
+            f"{restatement} Adjust assumptions below."
         ),
-        assumptions=["Context from the source app reflects the user's current view."],
-        sensitivity_notes="Adding missing fields enables a domain-specific solver with a firmer conclusion.",
+        assumptions=[
+            "Assumption values are editable — change them to see how the verdict shifts.",
+            "Partial solvability: " + (route.solvability or "approximate"),
+        ],
+        sensitivity_notes="Changing rates, horizons, or thresholds updates the live result above.",
         missing_fields=list(route.missing_fields),
-        partial=True,
+        partial=partial,
         problem_type_id=route.problem_type_id,
-        conclusion=conclusion,
+        default_controls=default_controls,
+        conclusion=short_answer,
         confidence_pct=partial_conf,
-        reasons=reasons,
-        model_note=model_note,
+        reasons=[why] if why else [],
+        model_note=rationale,
         data_would_improve=data_improve,
+        short_answer=short_answer,
+        why=why,
+        sensitivity_plain="Drag the assumption sliders — the short answer and live metrics update immediately.",
+        live_metrics=live_metrics,
     )
 
 
@@ -2417,6 +2654,8 @@ def dispatch_solver(
             decline_a=float(p.get("decline_a", 0.02)),
             decline_b=float(p.get("decline_b", 0.03)),
             horizon_seasons=int(p.get("horizon_seasons", 10)),
+            rate_a_override=p.get("rate_a"),
+            rate_b_override=p.get("rate_b"),
         )
     if pid == INVESTMENT_DRAWDOWN_ATTRIBUTION:
         return solve_investment_drawdown_attribution(
@@ -2562,7 +2801,16 @@ def dispatch_solver(
             recession_prob=float(p.get("recession_prob", 30.0)),
         )
 
-    return _generic_solver(route, question, ctx)
+    if pid in (
+        BASEBALL_GENERIC,
+        NBA_GENERIC,
+        INVESTMENT_GENERIC,
+        GENERIC_FALLBACK,
+        GENERIC_INTERACTIVE,
+    ):
+        return _generic_solver(route, question, ctx, p)
+
+    return _generic_solver(route, question, ctx, p)
 
 
 def solve_suite_question(
@@ -2571,9 +2819,15 @@ def solve_suite_question(
     source_app: str = "",
     context: dict[str, Any] | None = None,
     params: dict[str, Any] | None = None,
+    purpose_override: str = "",
 ) -> tuple[ProblemRoute, SolverResult]:
     ctx = dict(context or {})
-    route = route_suite_question(question, source_app=source_app, context=ctx)
+    route = route_suite_question(
+        question,
+        source_app=source_app,
+        context=ctx,
+        purpose_override=purpose_override,
+    )
     result = dispatch_solver(route, question, ctx, params)
     if result is None:
         raise ValueError("dispatch_solver returned None")

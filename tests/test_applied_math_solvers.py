@@ -10,6 +10,7 @@ from components.applied_math_problem_router import (
     INVESTMENT_RISK_RETURN,
     NBA_STAT_CHASE,
     GENERIC_FALLBACK,
+    GENERIC_INTERACTIVE,
     ProblemRoute,
     route_suite_question,
 )
@@ -239,7 +240,8 @@ class TestConclusionEngine(unittest.TestCase):
             "Is Soto likely to surpass Judge?",
             {"player_a": "Juan Soto", "player_b": "Aaron Judge"},
         )
-        self.assertIn("attach", result.conclusion.lower())
+        self.assertTrue(result.live_metrics)
+        self.assertIn("project", (result.short_answer or result.conclusion).lower())
 
     def test_finalize_fills_confidence_from_route(self) -> None:
         route, result = solve_suite_question(
@@ -260,7 +262,7 @@ class TestGenericFallback(unittest.TestCase):
             source_app="unknown",
             context={},
         )
-        self.assertEqual(route.problem_type_id, GENERIC_FALLBACK)
+        self.assertIn(route.problem_type_id, (GENERIC_FALLBACK, GENERIC_INTERACTIVE))
         self.assertTrue(result.partial)
 
 
