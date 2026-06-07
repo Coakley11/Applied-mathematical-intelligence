@@ -1003,7 +1003,16 @@ def render_suite_solver_answer(
         )
         stage_pending_insight(st, insight, return_context=ctx)
         st.markdown("---")
-        render_return_to_source_button(st, insight, resume_key=resume_key, return_context=ctx)
+        source_state = st.session_state.get("_suite_ai_source_state")
+        if not isinstance(source_state, dict):
+            source_state = None
+        render_return_to_source_button(
+            st,
+            insight,
+            resume_key=resume_key,
+            return_context=ctx,
+            source_state=source_state,
+        )
     except Exception:
         pass
 
