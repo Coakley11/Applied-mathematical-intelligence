@@ -121,7 +121,7 @@ def _render_area_hub() -> None:
             pass
 
         from components.applied_math_analysis_scaffold import render_applied_math_analysis_scaffold
-        from components.applied_math_first_pass_analysis import analyze_suite_question, render_first_pass_analysis
+        from components.applied_math_solver_ui import render_suite_solver_answer
 
         render_applied_math_analysis_scaffold(
             st,
@@ -130,7 +130,12 @@ def _render_area_hub() -> None:
             source_page=source_page,
             context=ctx_dict,
         )
-        render_first_pass_analysis(st, analyze_suite_question(preloaded, source_app=source, context=ctx_dict))
+        render_suite_solver_answer(
+            st,
+            question=preloaded,
+            source_app=source,
+            context=ctx_dict,
+        )
 
         area_ids = [a["id"] for a in QUANT_AREAS]
         area_id = str(st.session_state.get("ps_area_id") or area_ids[0])

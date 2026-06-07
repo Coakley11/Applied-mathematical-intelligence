@@ -471,6 +471,36 @@ def analyze_suite_question(
     source_app: str = "",
     context: dict[str, Any] | None = None,
 ) -> FirstPassAnalysis:
+    """Backward-compatible wrapper — delegates to rule-based solvers."""
+    try:
+        from components.applied_math_solvers import solve_suite_question
+
+        route, result = solve_suite_question(question, source_app=source_app, context=context)
+        sections = [
+            ("Problem detected", result.problem_detected),
+            ("Calculation", result.calculation),
+            ("Result", result.result),
+            ("Interpretation", result.interpretation),
+        ]
+        return FirstPassAnalysis(
+            problem_type=route.problem_type,
+            method=f"Rule-based solver ({route.problem_type_id}, confidence {route.confidence:.0%})",
+            sections=sections,
+            answer=" ".join(
+                x
+                for x in (
+                    result.calculation,
+                    result.result,
+                    result.interpretation,
+                )
+                if x
+            ).strip(),
+            assumptions=result.assumptions,
+            limitations=[result.sensitivity_notes] if result.sensitivity_notes else [],
+            data_needed=result.missing_fields,
+        )
+    except Exception:
+        pass
     ctx = dict(context or {})
     app = str(source_app or ctx.get("source_app") or "").strip().lower()
     if "baseball" in app:

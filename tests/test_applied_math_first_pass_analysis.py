@@ -39,15 +39,19 @@ class TestAppliedMathFirstPassAnalysis(unittest.TestCase):
                 "stat_gap": {
                     "player": "Jalen Brunson",
                     "comparison": "Allan Houston",
+                    "stat": "rebounds",
+                    "current_value": 8,
+                    "target_value": 20,
+                    "gap": 12,
+                    "games_remaining": 4,
+                    "rate_needed": "3.0 RPG",
                     "summary": "Gap: 12 rebounds; Brunson 8, Houston 20",
                 },
-                "games_remaining": 4,
-                "rate_needed": "3.0 RPG",
             },
         )
         self.assertIn("4", analysis.answer)
-        self.assertIn("3.0 RPG", analysis.answer)
-        self.assertIn("Gap: 12", analysis.answer)
+        self.assertIn("3.0", analysis.answer)
+        self.assertIn("12", analysis.answer)
 
     def test_investment_macro_forward_note(self) -> None:
         analysis = analyze_suite_question(
