@@ -102,14 +102,15 @@ def render_quantitative_flow(
         try:
             from applied_intelligence_activity import log_problem_solved
 
-            act_sig = (problem, area.get("id", ""), flow.get("interactive", ""))
-            if st.session_state.get("_cc_ai_problem_sig") != act_sig:
-                st.session_state["_cc_ai_problem_sig"] = act_sig
-                log_problem_solved(
-                    topic=problem,
-                    area=area.get("name", ""),
-                    interactive=flow.get("interactive", ""),
-                )
+            if not st.session_state.get("_suite_ai_question"):
+                act_sig = (problem, area.get("id", ""), flow.get("interactive", ""))
+                if st.session_state.get("_cc_ai_problem_sig") != act_sig:
+                    st.session_state["_cc_ai_problem_sig"] = act_sig
+                    log_problem_solved(
+                        topic=problem,
+                        area=area.get("name", ""),
+                        interactive=flow.get("interactive", ""),
+                    )
         except Exception:
             pass
 

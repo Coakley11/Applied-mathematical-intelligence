@@ -30,6 +30,26 @@ st.set_page_config(
 )
 
 try:
+    from applied_intelligence_persistent_state import (
+        autosave_applied_intelligence_state,
+        default_reset_applied_intelligence_session,
+        restore_applied_intelligence_disk_state_once,
+    )
+    from suite_user_persistence import render_reset_controls, show_persistence_messages
+
+    restore_applied_intelligence_disk_state_once(st)
+    show_persistence_messages(st)
+    render_reset_controls(
+        st,
+        "applied_intelligence",
+        on_reset=default_reset_applied_intelligence_session,
+        help_text="Clears saved page, problem area, and suite preload state for this app.",
+        extra_reset_clear_prefixes=("_suite_ai_", "_ami_", "_cc_ai_"),
+    )
+except Exception:
+    pass
+
+try:
     from suite_resume_launch import apply_suite_resume_launch
 
     apply_suite_resume_launch(st, "applied_intelligence")
@@ -135,6 +155,13 @@ elif view_mode in ACTION_SECTION_TYPES:
         render_problem_solving_lab()
     elif section_type == "math_idea_explorer":
         render_math_idea_explorer()
+
+try:
+    from applied_intelligence_persistent_state import autosave_applied_intelligence_state
+
+    autosave_applied_intelligence_state(st)
+except Exception:
+    pass
 
 st.markdown("---")
 st.caption(
