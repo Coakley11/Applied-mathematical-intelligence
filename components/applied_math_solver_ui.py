@@ -701,12 +701,12 @@ def render_coach_answer(
         st.markdown("##### Your question")
         if source_app:
             try:
-                from suite_analytical_question import source_app_label
+                from suite_analytical_question import source_question_card_title
 
-                src = source_app_label(source_app)
+                src = source_question_card_title(source_app)
             except Exception:
-                src = source_app
-            st.caption(f"From **{src}**" + (f" · {source_page}" if source_page else ""))
+                src = str(source_app or "").strip()
+            st.caption(src + (f" · {source_page}" if source_page else ""))
         if q:
             st.markdown(f'*"{q}"*')
         if intent_txt:
