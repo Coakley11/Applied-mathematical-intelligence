@@ -5,6 +5,7 @@ Supabase PostgREST backend for cross-deployment suite activity.
 from __future__ import annotations
 
 import json
+from activity_time import normalize_timestamp_iso, utc_now_iso
 from datetime import datetime
 from typing import Any
 
@@ -28,6 +29,7 @@ _TABLE_STATE = "suite_app_current_state"
 _TABLE_RESUME = "suite_resume_items"
 _TABLE_SAVED = "suite_saved_items"
 _TABLE_SETTINGS = "suite_user_settings"
+_SAVED_ITEM_CONFLICT_COLS = "user_id,app,item_type,item_key"
 
 
 def _now_iso() -> str:
@@ -272,14 +274,20 @@ def invalidate_app_resume_items(app: str) -> None:
 
 
 def load_events(limit: int = MAX_EVENTS) -> list[dict[str, Any]]:
+    params: dict[str, str] = {
+        "select": "app,event,page,timestamp,metrics",
+        "order": "timestamp.desc",
+        "limit": str(limit),
+    }
+    uid = _cloud_user_id()
+    if uid:
+        params["user_id"] = f"eq.{uid}"
+    else:
+        params["user_id"] = "is.null"
     rows = _request(
         "GET",
         _TABLE_EVENTS,
-        params={
-            "select": "app,event,page,timestamp,metrics",
-            "order": "id.desc",
-            "limit": str(limit),
-        },
+        params=params,
         prefer="return=representation",
     )
     if not isinstance(rows, list):
@@ -291,12 +299,13 @@ def load_events(limit: int = MAX_EVENTS) -> list[dict[str, Any]]:
         metrics = row.get("metrics")
         if not isinstance(metrics, dict):
             metrics = {}
+        raw_ts = str(row.get("timestamp") or "")
         out.append(
             {
                 "app": str(row.get("app") or ""),
                 "event": str(row.get("event") or ""),
                 "page": str(row.get("page") or ""),
-                "timestamp": str(row.get("timestamp") or "")[:19],
+                "timestamp": normalize_timestamp_iso(raw_ts) or raw_ts,
                 "metrics": metrics,
             }
         )
@@ -364,6 +373,11 @@ def load_active_resume_items(limit: int = 8) -> list[dict[str, Any]]:
     ]
 
 
+def _is_duplicate_key_error(exc: BaseException) -> bool:
+    msg = str(exc).lower()
+    return "409" in str(exc) or "duplicate key" in msg or "unique constraint" in msg
+
+
 def upsert_saved_item(
     app: str,
     item_type: str,
@@ -371,28 +385,62 @@ def upsert_saved_item(
     *,
     title: str,
     payload: dict[str, Any] | None = None,
-) -> None:
+) -> dict[str, Any]:
+    """
+    Idempotent write for ``suite_saved_items``.
+
+    Uses PostgREST upsert on ``(user_id, app, item_type, item_key)``; falls back to
+  PATCH when a duplicate-key 409 still occurs (older PostgREST / missing on_conflict).
+    """
     app_key = normalize_app_key(app)
     key = str(item_key or "").strip()
     title_clean = str(title or "").strip()
     itype = str(item_type or "item").strip() or "item"
     if not app_key or not key or not title_clean:
-        return
-    _request(
-        "POST",
-        _TABLE_SAVED,
-        json_body={
-            "user_id": _scoped_user_id(),
-            "app": app_key,
-            "item_type": itype,
-            "item_key": key,
-            "title": title_clean,
-            "payload": payload or {},
-            "valid": True,
-            "updated_at": _now_iso(),
-        },
-        prefer="resolution=merge-duplicates,return=minimal",
-    )
+        return {"write_mode": "skipped", "duplicate_handled": False}
+    uid = _scoped_user_id()
+    row_body = {
+        "user_id": uid,
+        "app": app_key,
+        "item_type": itype,
+        "item_key": key,
+        "title": title_clean,
+        "payload": payload or {},
+        "valid": True,
+        "updated_at": _now_iso(),
+    }
+    patch_body = {
+        "title": title_clean,
+        "payload": payload or {},
+        "valid": True,
+        "updated_at": _now_iso(),
+    }
+    patch_params = {
+        "user_id": f"eq.{uid}",
+        "app": f"eq.{app_key}",
+        "item_type": f"eq.{itype}",
+        "item_key": f"eq.{key}",
+    }
+    try:
+        _request(
+            "POST",
+            _TABLE_SAVED,
+            params={"on_conflict": _SAVED_ITEM_CONFLICT_COLS},
+            json_body=row_body,
+            prefer="resolution=merge-duplicates,return=minimal",
+        )
+        return {"write_mode": "upsert", "duplicate_handled": False}
+    except RuntimeError as exc:
+        if not _is_duplicate_key_error(exc):
+            raise
+        _request(
+            "PATCH",
+            _TABLE_SAVED,
+            params=patch_params,
+            json_body=patch_body,
+            prefer="return=minimal",
+        )
+        return {"write_mode": "update", "duplicate_handled": True}
 
 
 def invalidate_saved_item(app: str, item_type: str, item_key: str) -> None:

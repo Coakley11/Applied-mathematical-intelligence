@@ -51,13 +51,16 @@ def remember_saved_item(
     *,
     title: str,
     payload: dict[str, Any] | None = None,
-) -> None:
+) -> dict[str, Any]:
     """Persist a song, player, portfolio, simulation, etc. for this account."""
     storage = _import_storage()
 
-    storage.upsert_saved_item(
+    result = storage.upsert_saved_item(
         app, item_type, item_key, title=title, payload=payload
     )
+    if isinstance(result, dict):
+        return result
+    return {"write_mode": "upsert", "duplicate_handled": False}
 
 
 def forget_saved_item(app: str, item_type: str, item_key: str) -> None:
@@ -74,7 +77,7 @@ def load_saved_items(
     item_type: str | None = None,
     limit: int = 100,
 ) -> list[dict[str, Any]]:
-    import suite_storage as storage
+    storage = _import_storage()
 
     return storage.load_saved_items(app=app, item_type=item_type, limit=limit)
 
@@ -87,7 +90,7 @@ def save_settings(app: str, settings: dict[str, Any]) -> None:
 
 
 def load_settings(app: str = "_global") -> dict[str, Any]:
-    import suite_storage as storage
+    storage = _import_storage()
 
     return storage.load_user_settings(app)
 

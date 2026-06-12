@@ -50,6 +50,24 @@ class TestSuiteAccountStorage(unittest.TestCase):
             payload={"insight_id": "abc123"},
         )
 
+    def test_remember_saved_item_returns_write_result(self) -> None:
+        import suite_account as sa
+
+        storage = MagicMock()
+        storage.upsert_saved_item.return_value = {
+            "write_mode": "upsert",
+            "duplicate_handled": False,
+        }
+        with patch.object(sa, "_import_storage", return_value=storage):
+            result = sa.remember_saved_item(
+                "investment",
+                "applied_math_insight",
+                "abc123",
+                title="Test",
+                payload={},
+            )
+        self.assertEqual(result["write_mode"], "upsert")
+
 
 if __name__ == "__main__":
     unittest.main()

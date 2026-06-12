@@ -703,7 +703,10 @@ def store_applied_math_insight(
     )
     _flatten_insight_store_diag_on_blob(blob, store_trace)
     written_ok = False
-    try:
+    write_modes: list[str] = []
+    duplicate_handled = False
+
+    def _write_insight_blobs() -> None:
         from suite_account import remember_saved_item
 
         for store_app in (
@@ -714,13 +717,21 @@ def store_applied_math_insight(
             default_title = "Applied Math insight"
             if str(data.get("source_app") or "").strip().lower() == "investment":
                 default_title = "Applied Investment Insight"
-            remember_saved_item(
+            write_result = remember_saved_item(
                 store_app,
                 INSIGHT_ITEM_TYPE,
                 iid,
                 title=str(data.get("conclusion") or default_title)[:120],
                 payload=blob,
             )
+            if isinstance(write_result, dict):
+                mode = str(write_result.get("write_mode") or "").strip()
+                if mode:
+                    write_modes.append(mode)
+                duplicate_handled |= bool(write_result.get("duplicate_handled"))
+
+    try:
+        _write_insight_blobs()
         written_ok = True
     except Exception as exc:
         store_exc = str(exc)
@@ -729,27 +740,22 @@ def store_applied_math_insight(
     store_trace["store_exception"] = store_exc or None
     store_trace["store_payload_has_source_state"] = _source_state_has_restore_payload(blob.get("source_state"))
     store_trace["store_payload_has_question_id"] = bool(str(blob.get("question_id") or "").strip())
+    if write_modes:
+        store_trace["store_write_mode"] = write_modes[-1]
+    store_trace["store_duplicate_handled"] = duplicate_handled
     _flatten_insight_store_diag_on_blob(blob, store_trace)
     if written_ok:
         try:
-            from suite_account import remember_saved_item
-
-            for store_app in (
-                str(data.get("source_app") or "applied_intelligence"),
-                "applied_intelligence",
-                "investment",
-            ):
-                default_title = "Applied Investment Insight"
-                if str(data.get("source_app") or "").strip().lower() != "investment":
-                    default_title = "Applied Math insight"
-                remember_saved_item(
-                    store_app,
-                    INSIGHT_ITEM_TYPE,
-                    iid,
-                    title=str(data.get("conclusion") or default_title)[:120],
-                    payload=blob,
-                )
+            _write_insight_blobs()
+            if write_modes:
+                store_trace["store_write_mode"] = write_modes[-1]
+            store_trace["store_duplicate_handled"] = duplicate_handled
+            _flatten_insight_store_diag_on_blob(blob, store_trace)
         except Exception as exc:
+            store_exc = str(exc)
+            store_trace["store_exception"] = store_exc
+            store_trace["store_blob_written_success"] = False
+            _flatten_insight_store_diag_on_blob(blob, store_trace)
             log.warning("remember_saved_item insight re-write failed: %s", exc)
     if st is not None:
         st.session_state["_ami_insight_store_trace"] = dict(store_trace)
@@ -946,6 +952,8 @@ def _ami_insight_store_trace(
     return_link_insight_id: str = "",
     store_exception: str = "",
     payload_keys: list[str] | None = None,
+    store_write_mode: str = "",
+    store_duplicate_handled: bool = False,
 ) -> dict[str, Any]:
     ent = source_state.get("entity_params") if isinstance(source_state, dict) else {}
     return {
@@ -970,6 +978,8 @@ def _ami_insight_store_trace(
         "store_payload_has_question_id": bool(str(question_id or "").strip()),
         "store_payload_has_ami_store_trace": True,
         "store_exception": str(store_exception or "").strip() or None,
+        "store_write_mode": str(store_write_mode or "").strip() or None,
+        "store_duplicate_handled": bool(store_duplicate_handled),
         "return_link_insight_id": str(return_link_insight_id or insight_id or "").strip() or None,
     }
 
