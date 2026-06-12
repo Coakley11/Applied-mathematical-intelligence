@@ -671,12 +671,39 @@ def store_applied_math_insight(
             if _source_state_has_restore_payload(candidate):
                 ss = dict(candidate)
                 break
+    qid = str(
+        data.get("question_id")
+        or blob.get("question_id")
+        or (st is not None and _question_id_from_insight_or_session(st, data))
+        or ""
+    ).strip()
+    if qid and not _source_state_has_restore_payload(ss):
+        try:
+            from suite_analytical_question import load_analytical_question_source_state
+
+            loaded = load_analytical_question_source_state(qid)
+            if _source_state_has_restore_payload(loaded):
+                ss = dict(loaded)
+        except Exception:
+            pass
     if _source_state_has_restore_payload(ss):
         blob["source_state"] = ss
         blob["return_context"] = ss
-    qid = str(data.get("question_id") or blob.get("question_id") or "").strip()
     if qid:
         blob["question_id"] = qid
+    if st is not None:
+        ent = ss.get("entity_params") if isinstance(ss, dict) else {}
+        st.session_state["_ami_insight_store_trace"] = {
+            "insight_id": iid,
+            "question_id": qid or None,
+            "insight_blob_has_source_state": _source_state_has_restore_payload(ss),
+            "insight_blob_source_state_keys": sorted(str(k) for k in ss.keys()) if isinstance(ss, dict) and ss else None,
+            "insight_blob_has_question_id": bool(qid),
+            "insight_blob_has_holdings_df": bool(isinstance(ent, dict) and ent.get("holdings_df")),
+            "insight_blob_holdings_fingerprint": (
+                str(ent.get("holdings_fingerprint") or "").strip() or None if isinstance(ent, dict) else None
+            ),
+        }
     try:
         from suite_account import remember_saved_item
 
@@ -714,29 +741,40 @@ def store_applied_math_insight(
 
 
 def load_applied_math_insight(insight_id: str, *, source_app: str = "") -> dict[str, Any]:
-    """Load stored insight by id."""
+    """Load stored insight by id, preferring blobs that include usable source_state."""
     iid = str(insight_id or "").strip()
     if not iid:
         return {}
     app = str(source_app or "").strip()
+    best: dict[str, Any] = {}
+    best_score = -1
+    seen_apps: set[str] = set()
     try:
         from suite_account import load_saved_items
 
         for app_key in ([app] if app else []) + [
             "applied_intelligence",
+            "investment",
             "baseball",
             "nba",
-            "investment",
         ]:
+            if app_key in seen_apps:
+                continue
+            seen_apps.add(app_key)
             rows = load_saved_items(app=app_key, item_type=INSIGHT_ITEM_TYPE, limit=80)
             for row in rows:
-                if str(row.get("item_key") or "") == iid:
-                    payload = row.get("payload")
-                    if isinstance(payload, dict):
-                        return dict(payload)
+                if str(row.get("item_key") or "") != iid:
+                    continue
+                payload = row.get("payload")
+                if not isinstance(payload, dict):
+                    continue
+                score = _insight_blob_restore_score(payload)
+                if score > best_score:
+                    best = dict(payload)
+                    best_score = score
     except Exception as exc:
         log.warning("load_applied_math_insight failed: %s", exc)
-    return {}
+    return best
 
 
 def _get_dismissed_insight_ids(st: Any) -> set[str]:
@@ -867,6 +905,22 @@ def _source_state_has_restore_payload(state: Any) -> bool:
     if state.get("source_page") or state.get("page_params"):
         return True
     return False
+
+
+def _insight_blob_restore_score(payload: dict[str, Any]) -> int:
+    """Rank stored insight payloads — prefer blobs with usable source_state."""
+    if not isinstance(payload, dict) or not payload:
+        return -1
+    score = 0
+    if str(payload.get("insight_id") or "").strip():
+        score += 1
+    if str(payload.get("question_id") or "").strip():
+        score += 1
+    for key in ("source_state", "return_context"):
+        if _source_state_has_restore_payload(payload.get(key)):
+            score += 4
+            break
+    return score
 
 
 def _question_id_from_insight_or_session(st: Any, data: dict[str, Any]) -> str:
