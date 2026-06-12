@@ -336,16 +336,26 @@ def _store_question_context_blob(payload: dict[str, Any]) -> None:
     try:
         from suite_account import remember_saved_item
 
-        remember_saved_item(
-            "applied_intelligence",
-            _CONTEXT_ITEM_TYPE,
-            qid,
-            title=str(payload.get("question") or "Applied Math question")[:200],
-            payload=blob,
-        )
+        store_apps: list[str] = ["applied_intelligence"]
+        src_app = str(payload.get("source_app") or "").strip().lower()
+        if src_app and src_app not in store_apps:
+            store_apps.append(src_app)
+        for app_name in store_apps:
+            remember_saved_item(
+                app_name,
+                _CONTEXT_ITEM_TYPE,
+                qid,
+                title=str(payload.get("question") or "Applied Math question")[:200],
+                payload=blob,
+            )
         return
     except Exception as exc:
         log.warning("remember_saved_item failed for analytical context: %s", exc)
+
+
+def persist_question_context_blob(payload: dict[str, Any]) -> None:
+    """Public wrapper: persist question send snapshot (context + source_state) by question_id."""
+    _store_question_context_blob(payload)
 
 
 def load_analytical_question_context(question_id: str) -> dict[str, Any]:
