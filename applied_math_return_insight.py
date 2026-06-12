@@ -13,6 +13,7 @@ log = logging.getLogger(__name__)
 
 INSIGHT_ITEM_TYPE = "applied_math_insight"
 INSIGHT_DISMISSAL_ITEM_TYPE = "applied_math_insight_dismissal"
+AMI_INSIGHT_STORE_VERSION = "insight-store-v10"
 SESSION_PENDING_KEY = "_ami_pending_insight"
 SESSION_RETURN_PAGE_KEY = "_ami_return_page"
 SESSION_RETURN_CONTEXT_KEY = "_ami_return_context"
@@ -691,14 +692,16 @@ def store_applied_math_insight(
         blob["return_context"] = ss
     if qid:
         blob["question_id"] = qid
+    store_exc = ""
     store_trace = _ami_insight_store_trace(
         insight_id=iid,
         question_id=qid,
         source_state=ss if isinstance(ss, dict) else {},
         return_context_exists=_source_state_has_restore_payload(ss),
         blob_written_success=False,
+        payload_keys=sorted(str(k) for k in blob.keys()),
     )
-    blob["_ami_store_trace"] = store_trace
+    _flatten_insight_store_diag_on_blob(blob, store_trace)
     written_ok = False
     try:
         from suite_account import remember_saved_item
@@ -720,9 +723,34 @@ def store_applied_math_insight(
             )
         written_ok = True
     except Exception as exc:
+        store_exc = str(exc)
         log.warning("remember_saved_item insight failed: %s", exc)
     store_trace["store_blob_written_success"] = written_ok
-    blob["_ami_store_trace"] = store_trace
+    store_trace["store_exception"] = store_exc or None
+    store_trace["store_payload_has_source_state"] = _source_state_has_restore_payload(blob.get("source_state"))
+    store_trace["store_payload_has_question_id"] = bool(str(blob.get("question_id") or "").strip())
+    _flatten_insight_store_diag_on_blob(blob, store_trace)
+    if written_ok:
+        try:
+            from suite_account import remember_saved_item
+
+            for store_app in (
+                str(data.get("source_app") or "applied_intelligence"),
+                "applied_intelligence",
+                "investment",
+            ):
+                default_title = "Applied Investment Insight"
+                if str(data.get("source_app") or "").strip().lower() != "investment":
+                    default_title = "Applied Math insight"
+                remember_saved_item(
+                    store_app,
+                    INSIGHT_ITEM_TYPE,
+                    iid,
+                    title=str(data.get("conclusion") or default_title)[:120],
+                    payload=blob,
+                )
+        except Exception as exc:
+            log.warning("remember_saved_item insight re-write failed: %s", exc)
     if st is not None:
         st.session_state["_ami_insight_store_trace"] = dict(store_trace)
     try:
@@ -916,9 +944,15 @@ def _ami_insight_store_trace(
     return_context_exists: bool,
     blob_written_success: bool,
     return_link_insight_id: str = "",
+    store_exception: str = "",
+    payload_keys: list[str] | None = None,
 ) -> dict[str, Any]:
     ent = source_state.get("entity_params") if isinstance(source_state, dict) else {}
     return {
+        "store_called": True,
+        "store_function_name_used": "store_applied_math_insight",
+        "store_module_file_used": __file__,
+        "store_version": AMI_INSIGHT_STORE_VERSION,
         "store_insight_id": insight_id or None,
         "store_question_id": question_id or None,
         "store_source_state_exists": _source_state_has_restore_payload(source_state),
@@ -931,8 +965,22 @@ def _ami_insight_store_trace(
         ),
         "store_return_context_exists": return_context_exists,
         "store_blob_written_success": blob_written_success,
+        "store_payload_keys": sorted(str(k) for k in (payload_keys or [])) or None,
+        "store_payload_has_source_state": _source_state_has_restore_payload(source_state),
+        "store_payload_has_question_id": bool(str(question_id or "").strip()),
+        "store_payload_has_ami_store_trace": True,
+        "store_exception": str(store_exception or "").strip() or None,
         "return_link_insight_id": str(return_link_insight_id or insight_id or "").strip() or None,
     }
+
+
+def _flatten_insight_store_diag_on_blob(blob: dict[str, Any], trace: dict[str, Any]) -> None:
+    """Copy store diagnostics onto blob top-level so Investment return can read them."""
+    blob["_ami_store_trace"] = dict(trace)
+    blob["store_version"] = AMI_INSIGHT_STORE_VERSION
+    for key, value in trace.items():
+        if key.startswith("store_") or key == "return_link_insight_id":
+            blob[key] = value
 
 
 def _insight_blob_restore_score(payload: dict[str, Any]) -> int:
@@ -948,6 +996,12 @@ def _insight_blob_restore_score(payload: dict[str, Any]) -> int:
         if _source_state_has_restore_payload(payload.get(key)):
             score += 4
             break
+    if isinstance(payload.get("_ami_store_trace"), dict) and payload.get("_ami_store_trace"):
+        score += 2
+    if str(payload.get("store_version") or "") == AMI_INSIGHT_STORE_VERSION:
+        score += 3
+    if payload.get("store_blob_written_success") is True:
+        score += 1
     return score
 
 
@@ -984,12 +1038,25 @@ def prepare_ami_insight_store_context(
 
     ctx = dict(context or {})
     ss: dict[str, Any] = dict(session_source_state) if isinstance(session_source_state, dict) else {}
-    qid = str(question_id or "").strip()
-    if not qid:
+    session_qid = str(question_id or "").strip()
+    if not session_qid:
         try:
-            qid = str(st.session_state.get("_suite_ai_question_id") or "").strip()
+            session_qid = str(st.session_state.get("_suite_ai_question_id") or "").strip()
         except Exception:
-            qid = ""
+            session_qid = ""
+    if not session_qid:
+        try:
+            session_qid = _query_param(st, "suite_ai_question_id")
+        except Exception:
+            session_qid = ""
+
+    if session_qid and not _source_state_has_restore_payload(ss):
+        try:
+            loaded = load_analytical_question_source_state(session_qid)
+            if _source_state_has_restore_payload(loaded):
+                ss = dict(loaded)
+        except Exception:
+            pass
 
     payload = build_question_payload(
         source_app=source_app,
@@ -998,7 +1065,8 @@ def prepare_ami_insight_store_context(
         context=ctx,
         source_state=ss if _source_state_has_restore_payload(ss) else None,
     )
-    qid = str(payload.get("question_id") or qid).strip()
+    qid = session_qid or str(payload.get("question_id") or "").strip()
+    payload["question_id"] = qid
     if qid:
         try:
             st.session_state["_suite_ai_question_id"] = qid
@@ -1030,6 +1098,83 @@ def prepare_ami_insight_store_context(
                 log.warning("persist_question_context_blob failed: %s", exc)
 
     return payload, ss, qid
+
+
+def persist_suite_return_insight(
+    st: Any,
+    *,
+    question: str,
+    source_app: str,
+    source_page: str,
+    context: dict[str, Any],
+    route: Any,
+    result: Any,
+) -> dict[str, Any]:
+    """Single live AMI path: prepare context, store insight blob, render return button."""
+    out: dict[str, Any] = {
+        "store_called": True,
+        "store_function_name_used": "persist_suite_return_insight",
+        "store_module_file_used": __file__,
+        "store_version": AMI_INSIGHT_STORE_VERSION,
+    }
+    try:
+        session_source_state = st.session_state.get("_suite_ai_source_state")
+        if not isinstance(session_source_state, dict):
+            session_source_state = None
+        payload, session_source_state, qid = prepare_ami_insight_store_context(
+            st,
+            source_app=source_app,
+            source_page=source_page,
+            question=question,
+            context=context,
+            session_source_state=session_source_state,
+        )
+        resume_key = f"ai:question:{qid}" if qid else ""
+        full_url = build_applied_math_full_analysis_url(payload)
+        insight = build_return_insight_payload(
+            question=question,
+            source_app=source_app,
+            source_page=source_page,
+            question_id=qid,
+            route=route,
+            result=result,
+            resume_key=resume_key,
+            full_analysis_url=full_url,
+            context=context,
+        )
+        insight_data = insight.to_dict() if hasattr(insight, "to_dict") else dict(insight)
+        if qid:
+            insight_data["question_id"] = qid
+
+        resolved_ss = resolve_ami_return_source_state_for_store(
+            st,
+            insight_data,
+            source_state=session_source_state,
+            return_context=context,
+        )
+        store_applied_math_insight(
+            insight_data,
+            return_context=resolved_ss or None,
+            source_state=resolved_ss or None,
+            st=st,
+        )
+        stage_pending_insight(st, insight, return_context=resolved_ss or context)
+        st.markdown("---")
+        render_return_to_source_button(
+            st,
+            insight_data,
+            resume_key=resume_key,
+            return_context=context,
+            source_state=resolved_ss or session_source_state,
+        )
+        trace = dict(st.session_state.get("_ami_insight_store_trace") or {})
+        out.update(trace)
+        st.session_state["_ami_last_insight_store_trace"] = dict(out)
+    except Exception as exc:
+        out["store_exception"] = str(exc)
+        log.exception("persist_suite_return_insight failed")
+        st.session_state["_ami_last_insight_store_trace"] = dict(out)
+    return out
 
 
 def resolve_ami_return_source_state_for_store(

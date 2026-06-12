@@ -90,7 +90,23 @@ except Exception:
     pass
 
 st.sidebar.title("Applied Mathematical Intelligence")
+try:
+    from applied_math_return_insight import AMI_INSIGHT_STORE_VERSION
+
+    _ami_store_marker = AMI_INSIGHT_STORE_VERSION
+except Exception:
+    _ami_store_marker = "insight-store-unknown"
+try:
+    import subprocess
+
+    _ami_git_head = (
+        subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], stderr=subprocess.DEVNULL, text=True)
+        .strip()
+    )
+except Exception:
+    _ami_git_head = "unknown"
 st.sidebar.caption(f"Applied Mathematical Intelligence · v{VERSION}")
+st.sidebar.caption(f"**AMI insight store:** `{_ami_store_marker}` · commit `{_ami_git_head}` · branch `dev`")
 
 nav_index = (
     PRIMARY_NAV.index(st.session_state.view_mode)
