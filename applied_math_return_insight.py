@@ -707,6 +707,7 @@ def store_applied_math_insight(
     duplicate_handled = False
 
     def _write_insight_blobs() -> None:
+        nonlocal duplicate_handled, write_modes
         from suite_account import remember_saved_item
 
         for store_app in (
