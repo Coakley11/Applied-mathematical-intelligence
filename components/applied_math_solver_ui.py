@@ -973,26 +973,31 @@ def render_suite_solver_answer(
 
     # Return insight to source app (v1 — display only)
     try:
+        import logging
+
         from applied_math_return_insight import (
             build_applied_math_full_analysis_url,
             build_return_insight_payload,
+            prepare_ami_insight_store_context,
             render_return_to_source_button,
+            resolve_ami_return_source_state_for_store,
             stage_pending_insight,
+            store_applied_math_insight,
         )
-        from suite_analytical_question import build_question_payload
 
-        qid = str(st.session_state.get("_suite_ai_question_id") or "").strip()
-        resume_key = f"ai:question:{qid}" if qid else ""
+        _ami_store_log = logging.getLogger(__name__)
         session_source_state = st.session_state.get("_suite_ai_source_state")
         if not isinstance(session_source_state, dict):
             session_source_state = None
-        payload = build_question_payload(
+        payload, session_source_state, qid = prepare_ami_insight_store_context(
+            st,
             source_app=source_app,
             source_page=source_page,
             question=question,
             context=ctx,
-            source_state=session_source_state,
+            session_source_state=session_source_state,
         )
+        resume_key = f"ai:question:{qid}" if qid else ""
         full_url = build_applied_math_full_analysis_url(payload)
         insight = build_return_insight_payload(
             question=question,
@@ -1006,7 +1011,8 @@ def render_suite_solver_answer(
             context=ctx,
         )
         insight_data = insight.to_dict() if hasattr(insight, "to_dict") else dict(insight)
-        from applied_math_return_insight import resolve_ami_return_source_state_for_store, store_applied_math_insight
+        if qid:
+            insight_data["question_id"] = qid
 
         resolved_ss = resolve_ami_return_source_state_for_store(
             st,
@@ -1029,8 +1035,10 @@ def render_suite_solver_answer(
             return_context=ctx,
             source_state=resolved_ss or session_source_state,
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        import logging
+
+        logging.getLogger(__name__).warning("AMI return insight store failed: %s", exc)
 
     render_solver_dev_diagnostics(st, route=route, result=result, trace=trace, context=ctx)
     return trace
