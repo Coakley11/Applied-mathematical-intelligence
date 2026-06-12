@@ -93,7 +93,8 @@ class TestReturnUrlAndPayload(unittest.TestCase):
             with patch("suite_activity_client.record_activity"):
                 iid = store_applied_math_insight(insight)
         self.assertTrue(iid)
-        mock_save.assert_called_once()
+        self.assertGreaterEqual(mock_save.call_count, 1)
+        self.assertEqual(mock_save.call_args.kwargs.get("payload", {}).get("insight_id"), iid)
 
 
 class TestResumeLaunchPreservesState(unittest.TestCase):
