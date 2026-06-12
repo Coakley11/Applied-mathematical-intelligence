@@ -42,17 +42,29 @@ def render_applied_math_context_diagnostics(
     present, missing = audit_context(context, required_keys=req_keys, nested_required=nested)
 
     ctx_size = context_json_size(context)
-    hydration = "session JSON"
-    if not context and question_id:
+    hydrate = str(st.session_state.get("_suite_ai_hydrate_source") or "").strip()
+    if hydrate == "question_id_blob":
+        hydration = "question_id blob (full payload)"
+    elif hydrate == "metrics":
+        hydration = "resume metrics"
+    elif hydrate == "url_query":
+        hydration = "URL query (may be truncated)"
+    elif hydrate == "session_json":
+        hydration = "session JSON"
+    elif not context and question_id:
         hydration = "empty — check question_id load"
     elif question_id and ctx_size > 400:
         hydration = "likely full blob (question_id or resume subtitle)"
+    else:
+        hydration = "session JSON"
 
     with st.expander("Context received (Developer Mode)", expanded=False):
         st.markdown(f"**Question ID:** `{question_id or '—'}`")
         st.markdown(f"**Source app:** {source_app or '—'}")
         st.markdown(f"**Source page:** {source_page or '—'}")
         st.markdown(f"**Context size:** {ctx_size} chars ({hydration})")
+        if hydrate:
+            st.markdown(f"**Hydrate source:** `{hydrate}`")
         st.markdown(f"**Question:** {question[:200]}{'…' if len(question) > 200 else ''}")
         st.caption(
             "Normal view shows 3–5 key inputs only. This panel is the full transferred payload."
@@ -73,6 +85,21 @@ def render_applied_math_context_diagnostics(
             st.markdown("**Missing (expected for this page)**")
             for key in missing:
                 st.markdown(f"- `{key}`")
+
+        draft_snap = context.get("draft_snapshot")
+        if isinstance(draft_snap, dict) and draft_snap:
+            st.markdown("**Draft snapshot (received)**")
+            for key in (
+                "current_pick",
+                "draft_round",
+                "user_roster",
+                "recommended_players",
+                "available_players",
+                "sleepers",
+                "scoring_settings",
+            ):
+                if key in draft_snap:
+                    st.markdown(f"- `{key}`: {_preview_value(draft_snap.get(key))}")
 
         with st.expander("Raw context JSON", expanded=False):
             st.code(json.dumps(context, indent=2, ensure_ascii=False, default=str)[:12000])

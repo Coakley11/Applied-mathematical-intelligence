@@ -36,26 +36,50 @@ def _load_suite_context() -> tuple[str, str, str, dict]:
     preloaded = str(st.session_state.get("ps_library_problem") or "").strip()
     source = str(st.session_state.get("_suite_ai_source_app") or "").strip()
     source_page = str(st.session_state.get("_suite_ai_source_page") or "").strip()
-    ctx_raw = str(st.session_state.get("_suite_ai_context") or "").strip()
     ctx_dict: dict = {}
-    if ctx_raw:
+    hydrate_source = str(st.session_state.get("_suite_ai_hydrate_source") or "").strip()
+
+    qid = str(st.session_state.get("_suite_ai_question_id") or "").strip()
+    if qid:
         try:
-            parsed = json.loads(ctx_raw)
-            if isinstance(parsed, dict):
-                ctx_dict = parsed
+            from suite_analytical_question import load_analytical_question_payload
+
+            payload = load_analytical_question_payload(qid)
+            blob_ctx = payload.get("context") if isinstance(payload.get("context"), dict) else {}
+            if blob_ctx:
+                ctx_dict = blob_ctx
+                hydrate_source = "question_id_blob"
+                st.session_state["_suite_ai_context"] = json.dumps(ctx_dict, ensure_ascii=False)
+                st.session_state["_suite_ai_hydrate_source"] = hydrate_source
         except Exception:
             pass
-    if not ctx_dict:
-        qid = str(st.session_state.get("_suite_ai_question_id") or "").strip()
-        if qid:
-            try:
-                from suite_analytical_question import load_analytical_question_context
 
-                ctx_dict = load_analytical_question_context(qid)
-                if ctx_dict:
-                    st.session_state["_suite_ai_context"] = json.dumps(ctx_dict, ensure_ascii=False)
+    if not ctx_dict:
+        ctx_raw = str(st.session_state.get("_suite_ai_context") or "").strip()
+        if ctx_raw:
+            try:
+                parsed = json.loads(ctx_raw)
+                if isinstance(parsed, dict):
+                    ctx_dict = parsed
+                    if not hydrate_source:
+                        hydrate_source = "session_json"
             except Exception:
                 pass
+
+    if not ctx_dict and qid:
+        try:
+            from suite_analytical_question import load_analytical_question_context
+
+            ctx_dict = load_analytical_question_context(qid)
+            if ctx_dict:
+                hydrate_source = "question_id_blob"
+                st.session_state["_suite_ai_context"] = json.dumps(ctx_dict, ensure_ascii=False)
+                st.session_state["_suite_ai_hydrate_source"] = hydrate_source
+        except Exception:
+            pass
+
+    if hydrate_source:
+        st.session_state["_suite_ai_hydrate_source"] = hydrate_source
     if not source:
         raw = str(ctx_dict.get("source_app") or "").strip().lower()
         if "baseball" in raw:

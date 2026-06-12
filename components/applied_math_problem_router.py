@@ -67,7 +67,7 @@ MODEL_ID_TO_ROUTE: dict[str, tuple[str, str, tuple[str, ...]]] = {
     BASEBALL_PLAYER_COMPARE: ("Player comparison", "baseball", ("player_a", "player_b")),
     BASEBALL_TREND: ("Trend significance", "baseball", FIELD_SPECS[BASEBALL_TREND]),
     BASEBALL_HISTORICAL: ("Historical stat comparison", "baseball", ("historical_snapshot", "player")),
-    BASEBALL_DRAFT: ("Draft decision", "baseball", ("player", "draft_projection")),
+    BASEBALL_DRAFT: ("Draft decision", "baseball", ("draft_snapshot", "player", "draft_projection")),
     BASEBALL_PROJECTION: ("Projection realism", "baseball", ("player", "projection")),
     BASEBALL_GENERIC: ("Baseball decision analysis", "baseball", ("player", "metrics")),
     NBA_STAT_CHASE: ("NBA stat chase / rate needed", "nba", FIELD_SPECS[NBA_STAT_CHASE]),
@@ -104,6 +104,7 @@ def _topics(question: str) -> set[str]:
         "trend": ("trend", "slope", "declin", "improv", "significant", "meaningful"),
         "compare": ("compare", "better", " vs ", "versus", "value", "pass"),
         "draft": ("draft", "round", "pick", "wait"),
+        "sleeper": ("sleeper", "sleepers", "upside pick", "late round"),
         "probability": ("probability", "percent", "odds", "chance", "likely", "win"),
         "rebalance": ("rebalance", "allocat", "drift", "weight"),
         "risk": ("risk", "volatil", "concentration", "diversif", "sharpe", "drawdown", "worth"),
@@ -306,6 +307,13 @@ def route_suite_question(
     return _attach_interpretation(route, interp)
 
 
+def _has_draft_context(ctx: dict[str, Any]) -> bool:
+    snap = ctx.get("draft_snapshot")
+    if isinstance(snap, dict) and snap:
+        return True
+    return _has_value(ctx.get("roster")) or _has_value(ctx.get("recommended_players"))
+
+
 def _route_baseball(
     question: str,
     ctx: dict[str, Any],
@@ -375,15 +383,25 @@ def _route_baseball(
             available_fields=avail,
             missing_fields=miss,
         )
-    if "draft" in topics or "draft" in workflow or (
-        intent.intent_id == INTENT_SHOULD_I and "draft" in low
+    if (
+        "draft" in topics
+        or "sleeper" in topics
+        or "draft" in workflow
+        or _has_draft_context(ctx)
+        or (intent.intent_id == INTENT_SHOULD_I and ("draft" in low or _has_draft_context(ctx)))
     ):
-        req = ("player", "draft_projection")
-        avail, miss = _audit_fields(ctx, req)
+        if _has_draft_context(ctx):
+            req = ("draft_snapshot", "current_pick", "roster", "recommended_players")
+            avail, miss = _audit_fields(ctx, req)
+            conf = 0.88 if "draft_snapshot" in avail else 0.72 if avail else 0.45
+        else:
+            req = ("player", "draft_projection")
+            avail, miss = _audit_fields(ctx, req)
+            conf = 0.65 if avail else 0.4
         return ProblemRoute(
             problem_type_id=BASEBALL_DRAFT,
             problem_type="Draft decision",
-            confidence=0.65 if avail else 0.4,
+            confidence=conf,
             source_app="baseball",
             required_fields=list(req),
             available_fields=avail,

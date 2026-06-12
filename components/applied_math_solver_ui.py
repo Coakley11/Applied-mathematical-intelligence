@@ -668,6 +668,49 @@ def _render_live_dashboard(st: Any, result: SolverResult, *, max_metrics: int = 
             st.metric(label, value)
 
 
+def _render_baseball_draft_analyst_sections(st: Any, result: SolverResult) -> bool:
+    """Six-part baseball analyst answer when solver produced coach_sections."""
+    coach = result.computed.get("coach_sections") if isinstance(result.computed, dict) else None
+    if not isinstance(coach, dict):
+        return False
+
+    with st.container(border=True):
+        st.markdown("##### Direct answer")
+        st.markdown(coach.get("direct_answer") or result.short_answer)
+
+    with st.container(border=True):
+        st.markdown("##### Analyst framing")
+        st.markdown(coach.get("analyst_framing") or result.why or "—")
+
+    key_vars = coach.get("key_variables")
+    if isinstance(key_vars, list) and key_vars:
+        with st.container(border=True):
+            st.markdown("##### Key variables")
+            for item in key_vars[:8]:
+                st.markdown(f"- {item}")
+
+    tradeoffs = str(coach.get("tradeoffs") or result.interpretation or "").strip()
+    if tradeoffs:
+        with st.container(border=True):
+            st.markdown("##### Tradeoffs")
+            st.markdown(tradeoffs)
+
+    applied = str(coach.get("applied_math") or result.math_idea or "").strip()
+    if applied:
+        with st.container(border=True):
+            st.markdown("##### Applied math")
+            st.markdown(applied)
+
+    what_if = coach.get("what_if")
+    if isinstance(what_if, list) and what_if:
+        with st.container(border=True):
+            st.markdown("##### What-if scenarios")
+            for line in what_if[:5]:
+                st.markdown(f"- {line}")
+
+    return True
+
+
 def render_coach_answer(
     st: Any,
     route: ProblemRoute,
@@ -712,31 +755,46 @@ def render_coach_answer(
         if intent_txt:
             st.markdown(f"**What you're asking:** {intent_txt}")
 
-    # 2 — Answer card
-    with st.container(border=True):
-        st.markdown("##### Answer")
-        st.markdown(f"### {short}")
+    # 2 — Answer card (baseball draft uses six-part analyst layout)
+    if result.problem_type_id == BASEBALL_DRAFT and isinstance(result.computed.get("coach_sections"), dict):
+        _render_baseball_draft_analyst_sections(st, result)
         if conf_lbl:
             st.caption(f"Confidence: **{conf_lbl}**")
-        if why:
-            st.markdown(f"**Main reason:** {why}")
+    else:
+        with st.container(border=True):
+            st.markdown("##### Answer")
+            st.markdown(f"### {short}")
+            if conf_lbl:
+                st.caption(f"Confidence: **{conf_lbl}**")
+            if why:
+                st.markdown(f"**Main reason:** {why}")
 
     # 3 — Math card (formula details collapsed)
-    with st.container(border=True):
-        st.markdown("##### The math")
-        if model_name:
-            st.markdown(f"**Model:** {model_name}")
-        if model_rationale:
-            st.caption(model_rationale.replace("**", ""))
-        if result.math_idea:
-            st.markdown(result.math_idea)
-        with st.expander("Variables & calculation", expanded=False):
+    skip_math_card = (
+        result.problem_type_id == BASEBALL_DRAFT
+        and isinstance(result.computed.get("coach_sections"), dict)
+    )
+    if not skip_math_card:
+        with st.container(border=True):
+            st.markdown("##### The math")
+            if model_name:
+                st.markdown(f"**Model:** {model_name}")
+            if model_rationale:
+                st.caption(model_rationale.replace("**", ""))
+            if result.math_idea:
+                st.markdown(result.math_idea)
+            with st.expander("Variables & calculation", expanded=False):
+                if result.variables:
+                    st.markdown(f"```\n{result.variables.strip()}\n```")
+                if result.calculation:
+                    st.markdown(result.calculation)
+            if result.partial and result.data_would_improve:
+                st.caption(result.data_would_improve[0])
+    elif result.calculation:
+        with st.expander("Calculation details", expanded=False):
             if result.variables:
                 st.markdown(f"```\n{result.variables.strip()}\n```")
-            if result.calculation:
-                st.markdown(result.calculation)
-        if result.partial and result.data_would_improve:
-            st.caption(result.data_would_improve[0])
+            st.markdown(result.calculation)
 
     # 4 — Try it yourself
     with st.container(border=True):
@@ -862,6 +920,12 @@ def render_solver_dev_diagnostics(
             st.markdown(f"- **fields missing:** {', '.join(route.missing_fields)}")
         if ctx:
             st.markdown(f"- **context keys received:** {', '.join(sorted(ctx.keys())[:24])}")
+        hydrate = str(st.session_state.get("_suite_ai_hydrate_source") or "").strip()
+        if hydrate:
+            st.markdown(f"- **hydrate_source:** `{hydrate}`")
+        coach = result.computed.get("coach_sections") if isinstance(result.computed, dict) else None
+        if isinstance(coach, dict):
+            st.markdown(f"- **coach_sections:** {', '.join(sorted(coach.keys()))}")
 
         st.markdown("**Data used (solver)**")
         if result.data_used:

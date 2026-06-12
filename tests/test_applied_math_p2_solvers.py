@@ -40,6 +40,76 @@ class TestDraftPickSolver(unittest.TestCase):
         )
         self.assertIn("avoid", result.short_answer.lower())
 
+    def test_who_should_draft_next_uses_roster_context(self) -> None:
+        ctx = {
+            "draft_snapshot": {
+                "current_pick": 18,
+                "draft_round": 2,
+                "user_roster": ["Aaron Judge", "Juan Soto"],
+                "recommended_players": [
+                    {"player": "Elly De La Cruz"},
+                    {"player": "Corbin Carroll"},
+                ],
+                "sleepers": [{"player": "Junior Caminero"}],
+                "scoring_settings": {"draft_format": "Rotisserie"},
+            },
+            "current_pick": 18,
+            "roster": ["Aaron Judge", "Juan Soto"],
+            "recommended_players": ["Elly De La Cruz", "Corbin Carroll"],
+            "ami_guidance": "Answer using live draft context",
+        }
+        result = solve_baseball_draft(ctx, "Who should I draft next?")
+        self.assertIn("Elly De La Cruz", result.short_answer)
+        self.assertIn("category", result.why.lower())
+        coach = result.computed.get("coach_sections")
+        self.assertIsInstance(coach, dict)
+        self.assertIn("key_variables", coach)
+        self.assertGreater(len(coach["key_variables"]), 2)
+
+    def test_sleeper_question_explains_uncertainty(self) -> None:
+        ctx = {
+            "draft_snapshot": {
+                "current_pick": 24,
+                "draft_round": 2,
+                "sleepers": [{"player": "Junior Caminero"}],
+            },
+            "sleepers": ["Junior Caminero"],
+            "player": "Junior Caminero",
+        }
+        result = solve_baseball_draft(ctx, "How do I think about sleepers?")
+        coach = result.computed.get("coach_sections") or {}
+        framing = str(coach.get("analyst_framing") or "")
+        self.assertTrue("upside" in framing.lower() or "probability" in result.short_answer.lower())
+
+    def test_risk_question_mentions_variance(self) -> None:
+        ctx = {
+            "draft_snapshot": {
+                "current_pick": 18,
+                "user_roster": ["Aaron Judge"],
+                "recommended_players": [{"player": "Corbin Carroll"}],
+            },
+            "current_pick": 18,
+        }
+        result = solve_baseball_draft(ctx, "Should I take a risky player?")
+        coach = result.computed.get("coach_sections") or {}
+        self.assertIn("variance", str(coach.get("analyst_framing") or "").lower())
+
+    def test_draft_routes_with_snapshot_without_projection(self) -> None:
+        ctx = {
+            "draft_snapshot": {
+                "current_pick": 18,
+                "recommended_players": [{"player": "Corbin Carroll"}],
+            },
+            "current_pick": 18,
+        }
+        route = route_suite_question(
+            "Who should I draft next?",
+            source_app="baseball",
+            context=ctx,
+        )
+        self.assertEqual(route.problem_type_id, BASEBALL_DRAFT)
+        self.assertIn("draft_snapshot", route.available_fields)
+
     def test_draft_routes_and_dispatches(self) -> None:
         route = route_suite_question(
             "Is Corbin Carroll worth a Round 2 pick?",

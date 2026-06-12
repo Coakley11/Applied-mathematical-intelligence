@@ -140,6 +140,26 @@ def expected_fields_for_page(source_app: str, source_page: str) -> tuple[tuple[s
             return (("player", "metrics", "trend_summary"), {"trend_summary": ("slope", "r2", "delta", "summary")})
         if "comparison" in page:
             return (("player_a", "player_b", "comparison_differences"), {})
+        if "draft" in page:
+            return (
+                (
+                    "draft_snapshot",
+                    "current_pick",
+                    "roster",
+                    "recommended_players",
+                    "sleepers",
+                    "scoring_settings",
+                ),
+                {
+                    "draft_snapshot": (
+                        "user_roster",
+                        "recommended_players",
+                        "available_players",
+                        "sleepers",
+                        "current_pick",
+                    )
+                },
+            )
     if "nba" in app:
         if "matchup" in page:
             return (

@@ -2405,6 +2405,221 @@ def _parse_pct(val: Any) -> float | None:
         return None
 
 
+def _draft_player_name(row: Any) -> str:
+    if isinstance(row, dict):
+        return str(row.get("player") or row.get("Player") or row.get("fullName") or "").strip()
+    return str(row or "").strip()
+
+
+def _draft_player_rows(val: Any) -> list[dict[str, Any]]:
+    if not isinstance(val, list):
+        return []
+    rows: list[dict[str, Any]] = []
+    for item in val:
+        if isinstance(item, dict):
+            rows.append(item)
+        elif item:
+            rows.append({"player": str(item).strip()})
+    return rows
+
+
+def _draft_context_bundle(ctx: dict[str, Any]) -> dict[str, Any]:
+    snap = ctx.get("draft_snapshot") if isinstance(ctx.get("draft_snapshot"), dict) else {}
+    roster = _ctx_list(ctx.get("roster"))
+    if not roster:
+        ur = snap.get("user_roster")
+        if isinstance(ur, list):
+            roster = [str(x).strip() for x in ur if str(x).strip()]
+    recommendations = _draft_player_rows(ctx.get("recommended_players") or snap.get("recommended_players"))
+    sleepers = _draft_player_rows(ctx.get("sleepers") or snap.get("sleepers"))
+    available = _draft_player_rows(snap.get("available_players"))
+    scoring = ctx.get("scoring_settings") if isinstance(ctx.get("scoring_settings"), dict) else {}
+    if not scoring and isinstance(snap.get("scoring_settings"), dict):
+        scoring = snap["scoring_settings"]
+    rnd = _num(ctx.get("draft_round")) or _num(snap.get("draft_round"))
+    pick = _num(ctx.get("current_pick")) or _num(snap.get("current_pick"))
+    player = str(ctx.get("player") or (ctx.get("players") or [""])[0] if isinstance(ctx.get("players"), list) else "").strip()
+    if not player and recommendations:
+        player = _draft_player_name(recommendations[0])
+    return {
+        "snap": snap,
+        "roster": roster,
+        "recommendations": recommendations,
+        "sleepers": sleepers,
+        "available": available,
+        "scoring": scoring,
+        "round": int(rnd) if rnd is not None else None,
+        "pick": int(pick) if pick is not None else None,
+        "player": player,
+        "guidance": str(ctx.get("ami_guidance") or "").strip(),
+        "proj_text": str(ctx.get("draft_projection") or ""),
+    }
+
+
+def _draft_question_mode(question: str) -> str:
+    low = question.lower()
+    if "sleeper" in low:
+        return "sleeper"
+    if any(w in low for w in ("risky", "take a risk", "risk in", "risk on", "how risky")):
+        return "risk"
+    if any(w in low for w in ("steal", "power", "category", "balance", "obp", "priorit")):
+        return "category"
+    if any(p in low for p in ("who should", "draft next", "who to draft", "pick next", "draft first")):
+        return "next_pick"
+    if any(p in low for p in ("projection", "project", "what does this projection")):
+        return "projection"
+    return "value_edge"
+
+
+def _draft_scoring_label(scoring: dict[str, Any]) -> str:
+    for key in ("draft_format", "draft_lab_scoring_type", "scoring_type", "room_format"):
+        val = scoring.get(key)
+        if val is not None and str(val).strip():
+            return str(val).strip()
+    return "standard"
+
+
+def _build_baseball_draft_coach_sections(
+    *,
+    question: str,
+    bundle: dict[str, Any],
+    mode: str,
+    player: str,
+    pick: int,
+    rnd: int,
+    adp_val: float,
+    rank_edge: float,
+    verdict: str,
+) -> dict[str, Any]:
+    rec_names = [_draft_player_name(r) for r in bundle["recommendations"][:4] if _draft_player_name(r)]
+    sleeper_names = [_draft_player_name(r) for r in bundle["sleepers"][:4] if _draft_player_name(r)]
+    roster = bundle["roster"]
+    scoring_label = _draft_scoring_label(bundle["scoring"])
+    roster_note = f"your **{len(roster)}**-player roster" if roster else "your roster"
+    pick_note = f"pick **{pick}** (round **{rnd}**)" if pick else f"round **{rnd}**"
+
+    top = rec_names[0] if rec_names else (player or "the best available fit")
+    alt = rec_names[1] if len(rec_names) > 1 else (sleeper_names[0] if sleeper_names else "")
+
+    if mode == "next_pick" and rec_names:
+        direct = f"Given {roster_note} at {pick_note}, lean **{top}** for the next selection."
+        if alt:
+            direct = (
+                f"Given {roster_note} at {pick_note}, lean **{top}** over **{alt}** "
+                "for the next selection."
+            )
+        framing = (
+            "This is a category-balance and replacement-value decision, not just a raw projection "
+            f"decision in **{scoring_label}** scoring."
+        )
+        tradeoffs = (
+            f"**{top}** likely offers the stronger overall fit from your board; "
+            f"**{alt or 'the next tier'}** may be better if you need to close a specific category gap."
+            if alt
+            else f"**{top}** balances projected value with roster fit at this pick slot."
+        )
+        what_if = [
+            f"If you need steals or speed more → compare **{alt or top}** vs power-heavy options.",
+            f"If you need stability → favor **{top}** (higher-floor recommendation).",
+            f"If league rewards OBP or ratio categories → weight on-base skills over raw HR totals.",
+        ]
+    elif mode == "sleeper":
+        target = sleeper_names[0] if sleeper_names else (player or "this sleeper")
+        direct = (
+            f"Treat **{target}** as a probability-weighted upside pick — worth it when draft cost "
+            "is low enough that hitting the ceiling pays for several misses."
+        )
+        framing = (
+            "Sleepers are upside bets: you're trading projection certainty for low draft cost "
+            "and replacement-level downside."
+        )
+        tradeoffs = (
+            f"**{target}** offers more ceiling than safe picks at this cost; the tradeoff is "
+            "playing-time risk and wider outcome variance."
+        )
+        what_if = [
+            "If you need floor → pass and take the safer recommendation.",
+            f"If you can absorb bust risk → **{target}** is a reasonable EV+ dart throw.",
+            "If similar players are still available next round → waiting one round improves cost efficiency.",
+        ]
+    elif mode == "risk":
+        direct = (
+            f"At {pick_note}, taking **{player or top}** is worth the risk when upside moves "
+            "your roster from average to competitive in a scarce category."
+        )
+        framing = (
+            "Risky picks are variance decisions: expected value must justify wider outcome swings "
+            "given how your roster is constructed."
+        )
+        tradeoffs = (
+            f"**{player or top}** raises ceiling but widens downside; safer picks stabilize "
+            f"{roster_note} at the cost of category upside."
+        )
+        what_if = [
+            "If your roster already has power → risk on speed/upside profiles is easier to absorb.",
+            "If early round → lower risk tolerance; if late round → higher risk tolerance.",
+            f"If ADP is {adp_val:g} vs your pick {pick} → cost of being wrong is {'lower' if rank_edge >= 0 else 'higher'}.",
+        ]
+    elif mode == "category":
+        direct = (
+            f"Given {roster_note}, prioritize the player who closes your weakest category "
+            f"in **{scoring_label}** — often **{top}** over raw rank."
+        )
+        framing = "This is really a category-balance optimization, not just a raw projection decision."
+        tradeoffs = (
+            f"**{top}** may rank lower overall but improve category balance; "
+            f"**{alt or 'higher-ranked options'}** add raw value with less category impact."
+            if alt
+            else f"**{top}** is the better category-fit choice at {pick_note}."
+        )
+        what_if = [
+            "If you need steals more → favor speed-first profiles.",
+            "If you need power → favor HR/SB combo or pure power.",
+            "If league is points-based → revert to total projected value.",
+        ]
+    else:
+        direct = f"**{verdict}** for **{player or top}** at {pick_note} (ADP **{adp_val:g}**)."
+        framing = (
+            "This is a draft value edge decision — compare where the player usually goes (ADP/rank) "
+            "to your current pick slot."
+        )
+        tradeoffs = (
+            f"Positive rank edge (~**{rank_edge:+.0f}** picks) means value; negative edge means reach."
+        )
+        what_if = [
+            "If ADP drops 3 picks → verdict can flip to value.",
+            "If you need category fit more than ADP value → weight recommendations over rank edge.",
+            f"If you wait one round → similar players may be available near pick **{int(adp_val)}**.",
+        ]
+
+    key_variables = [
+        "Projected playing time",
+        "Power vs speed category impact",
+        "Batting average / OBP risk",
+        "Positional scarcity",
+        "Team need vs replacement value",
+        f"Draft cost at pick {pick}" if pick else "Draft cost at current slot",
+    ]
+    if roster:
+        key_variables.append(f"Roster construction ({len(roster)} players drafted)")
+    if rec_names:
+        key_variables.append(f"Board recommendations ({', '.join(rec_names[:3])})")
+
+    applied_math = (
+        "A draft pick is an optimization problem: maximize expected value while controlling "
+        "category imbalance and downside risk at this pick slot."
+    )
+
+    return {
+        "direct_answer": direct,
+        "analyst_framing": framing,
+        "key_variables": key_variables,
+        "tradeoffs": tradeoffs,
+        "applied_math": applied_math,
+        "what_if": what_if,
+    }
+
+
 def solve_baseball_draft(
     ctx: dict[str, Any],
     question: str,
@@ -2417,14 +2632,16 @@ def solve_baseball_draft(
     risk_tolerance: str = "moderate",
     num_teams: int = 12,
 ) -> SolverResult:
-    """Draft value edge — rank_edge = ADP − current pick."""
-    player = str(ctx.get("player") or (ctx.get("players") or [""])[0] if isinstance(ctx.get("players"), list) else "").strip()
-    proj_text = str(ctx.get("draft_projection") or "")
+    """Draft value edge — rank_edge = ADP − current pick; uses live draft_snapshot when present."""
+    bundle = _draft_context_bundle(ctx)
+    player = bundle["player"]
+    proj_text = bundle["proj_text"]
     parsed = _parse_draft_projection(proj_text)
+    mode = _draft_question_mode(question)
 
-    rnd = draft_round if draft_round is not None else _num(ctx.get("draft_round"))
+    rnd = draft_round if draft_round is not None else bundle["round"]
     rnd = int(rnd) if rnd is not None else int(parsed.get("projected_round") or 2)
-    pick = current_pick if current_pick is not None else _num(ctx.get("current_pick"))
+    pick = current_pick if current_pick is not None else bundle["pick"]
     if pick is None:
         pick = parsed.get("pick")
     if pick is None:
@@ -2456,24 +2673,36 @@ def solve_baseball_draft(
         verdict = "Avoid"
         label = "Overdraft — ADP much earlier than this pick"
 
-    short_answer = f"**{verdict}** for **{player or 'this player'}** at pick **{pick}** (ADP **{adp_val:g}**)."
-    why = label
-    if rank_edge > 0:
-        why += f" You get ~**{rank_edge:.0f}** picks of value vs ADP."
-    elif rank_edge < 0:
-        why += f" You're reaching ~**{abs(rank_edge):.0f}** picks ahead of ADP."
+    coach = _build_baseball_draft_coach_sections(
+        question=question,
+        bundle=bundle,
+        mode=mode,
+        player=player,
+        pick=pick,
+        rnd=rnd,
+        adp_val=adp_val,
+        rank_edge=rank_edge,
+        verdict=verdict,
+    )
 
-    opp = f"Opportunity cost: passing here may leave **{player or 'this tier'}** for pick ~**{int(adp_val)}**."
-    if rank_edge < -2:
+    short_answer = coach["direct_answer"]
+    why = coach["analyst_framing"]
+    if mode == "value_edge":
+        why = label
+        if rank_edge > 0:
+            why += f" You get ~**{rank_edge:.0f}** picks of value vs ADP."
+        elif rank_edge < 0:
+            why += f" You're reaching ~**{abs(rank_edge):.0f}** picks ahead of ADP."
+
+    opp = coach["tradeoffs"]
+    if rank_edge < -2 and mode == "value_edge":
         opp = f"Waiting one round could land similar value near pick **{int(adp_val)}** instead of **{pick}**."
 
-    math_idea = (
-        "This is a **draft value edge** decision — compare where the player usually goes (ADP/rank) "
-        "to your current pick slot."
-    )
+    math_idea = coach["applied_math"]
     variables = (
         "rank_edge = ADP − current_pick\n"
         "value_edge = replacement_value + rank_edge × scale\n"
+        "roster_fit = category gaps + positional scarcity + replacement value\n"
         "positive rank_edge → value · negative → reach/overdraft"
     )
     calc = (
@@ -2482,47 +2711,74 @@ def solve_baseball_draft(
         f"rank_edge = {adp_val:g} − {pick} = **{rank_edge:+.0f}**\n"
         f"value_edge ≈ {replacement_value:g} + {rank_edge:+.0f}×2.5 = **{value_edge:.0f}**"
     )
+    if bundle["recommendations"]:
+        rec_line = ", ".join(_draft_player_name(r) for r in bundle["recommendations"][:4])
+        calc += f"\nBoard recommendations: **{rec_line}**"
+    if bundle["roster"]:
+        calc += f"\nRoster size: **{len(bundle['roster'])}** players"
 
     missing: list[str] = []
-    if not player:
-        missing.append("player")
-    if not proj_text and adp is None:
+    if not bundle["snap"] and not player:
+        missing.append("player or draft_snapshot")
+    if not proj_text and adp is None and mode == "value_edge":
         missing.append("draft_projection or ADP")
+    if mode == "next_pick" and not bundle["recommendations"]:
+        missing.append("recommended_players")
+
+    data_used_lines = [
+        f"Player focus: **{player}**" if player else "",
+        f"Projection: {proj_text}" if proj_text else "",
+        f"Round: **{rnd}** · Pick: **{pick}**",
+        f"League: {ctx.get('draft_format') or ctx.get('league_format') or _draft_scoring_label(bundle['scoring'])}",
+    ]
+    if bundle["roster"]:
+        data_used_lines.append(f"Roster: {len(bundle['roster'])} players drafted")
+    if bundle["recommendations"]:
+        data_used_lines.append(
+            "Recommendations: " + ", ".join(_draft_player_name(r) for r in bundle["recommendations"][:4])
+        )
+    if bundle["sleepers"]:
+        data_used_lines.append(
+            "Sleepers: " + ", ".join(_draft_player_name(r) for r in bundle["sleepers"][:3])
+        )
 
     live_metrics = {
-        "Verdict": verdict,
+        "Verdict": verdict if mode == "value_edge" else mode.replace("_", " ").title(),
         "Rank edge": f"{rank_edge:+.0f}",
         "ADP vs pick": f"{adp_val:g} vs {pick}",
     }
+    if bundle["recommendations"]:
+        live_metrics["Top rec"] = _draft_player_name(bundle["recommendations"][0])
 
     sens_rows = []
     for delta in (-3, 0, 3):
         adj = rank_edge + delta
         out = "Worth it" if adj >= 3 else "Fair" if adj >= -2 else "Wait" if adj >= -6 else "Avoid"
         sens_rows.append({"Parameter": "Pick slot", "Scenario": f"{pick + delta}", "Outcome": out})
+    for line in coach["what_if"][:3]:
+        sens_rows.append({"Parameter": "What-if", "Scenario": line.split("→")[0].strip(), "Outcome": line.split("→")[-1].strip() if "→" in line else line})
+
+    partial = bool(missing) and mode == "value_edge"
+    conf = 85 if bundle["snap"] and bundle["recommendations"] else 80 if not missing else 55
 
     return _coach_result(
         question=question,
         problem_type="Draft decision",
         math_idea=math_idea,
         variables=variables,
-        data_used=_cap_data_used([
-            f"Player: **{player}**" if player else "",
-            f"Projection: {proj_text}" if proj_text else "",
-            f"Round: **{rnd}** · Pick: **{pick}**",
-            f"League: {ctx.get('draft_format') or ctx.get('league_format') or 'standard'}",
-        ]),
+        data_used=_cap_data_used(data_used_lines),
         calculation=calc,
         result=short_answer,
         interpretation=opp,
         assumptions=[
             f"ADP reflects {num_teams}-team league norms unless you override.",
             f"Risk tolerance: **{risk_tolerance}** shifts reach/fade thresholds.",
+            "Uses live draft_snapshot (roster, recommendations, sleepers) when transferred from Baseball.",
             "Does not auto-change your draft board — decision support only.",
         ],
-        sensitivity_notes="If ADP moves 3 picks, verdict can flip — update ADP slider below.",
+        sensitivity_notes="If ADP moves 3 picks or category needs shift, the best pick can change — use sliders below.",
         missing_fields=missing,
-        partial=bool(missing),
+        partial=partial,
         problem_type_id=BASEBALL_DRAFT,
         computed={
             "rank_edge": rank_edge,
@@ -2530,6 +2786,8 @@ def solve_baseball_draft(
             "adp": adp_val,
             "pick": pick,
             "projected_rank": rank,
+            "draft_mode": mode,
+            "coach_sections": coach,
         },
         default_controls={
             "draft_round": rnd,
@@ -2541,11 +2799,11 @@ def solve_baseball_draft(
             "num_teams": num_teams,
         },
         conclusion=short_answer,
-        confidence_pct=80 if not missing else 55,
-        reasons=[why],
+        confidence_pct=conf,
+        reasons=[coach["tradeoffs"], *coach["key_variables"][:2]],
         short_answer=short_answer,
         why=why,
-        sensitivity_plain=opp,
+        sensitivity_plain="\n".join(coach["what_if"][:3]),
         live_metrics=live_metrics,
         sensitivity_rows=sens_rows,
     )

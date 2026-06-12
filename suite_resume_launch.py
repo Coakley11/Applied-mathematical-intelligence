@@ -47,6 +47,7 @@ def finalize_suite_resume_launch(
         _finalize_music_resume(st, song_picker_catalog, song_library)
 
     st.session_state[done_flag] = True
+    st.session_state.pop(launch_flag, None)
     return True
 
 

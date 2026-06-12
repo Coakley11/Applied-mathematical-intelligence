@@ -139,6 +139,14 @@ _PUBLIC_CONTEXT_KEYS = (
     "rebalance_recommendation",
     "total_drift",
     "historical_comparison",
+    "draft_snapshot",
+    "roster",
+    "recommended_players",
+    "sleepers",
+    "scoring_settings",
+    "ami_guidance",
+    "projection",
+    "watchlist",
 )
 
 _CONTEXT_LABELS = {
@@ -369,15 +377,26 @@ def load_analytical_question_payload(question_id: str) -> dict[str, Any]:
     if not qid:
         return {}
     resume_key = f"ai:question:{qid}"
+    search_apps = ["applied_intelligence"]
     try:
         from suite_account import load_saved_items
 
-        rows = load_saved_items(app="applied_intelligence", item_type=_CONTEXT_ITEM_TYPE, limit=50)
-        for row in rows:
-            if str(row.get("item_key") or "") == qid:
-                payload = row.get("payload")
-                if isinstance(payload, dict):
-                    return copy.deepcopy(payload)
+        for app_name in search_apps:
+            rows = load_saved_items(app=app_name, item_type=_CONTEXT_ITEM_TYPE, limit=80)
+            for row in rows:
+                if str(row.get("item_key") or "") == qid:
+                    payload = row.get("payload")
+                    if isinstance(payload, dict):
+                        return copy.deepcopy(payload)
+        for app_name in ("investment", "baseball", "nba", "music"):
+            if app_name in search_apps:
+                continue
+            rows = load_saved_items(app=app_name, item_type=_CONTEXT_ITEM_TYPE, limit=80)
+            for row in rows:
+                if str(row.get("item_key") or "") == qid:
+                    payload = row.get("payload")
+                    if isinstance(payload, dict):
+                        return copy.deepcopy(payload)
     except Exception as exc:
         log.warning("load_saved_items failed for question context: %s", exc)
     try:
@@ -427,20 +446,39 @@ def hydrate_applied_intelligence_session(st: Any, *, metrics: dict[str, Any] | N
     page = str(m.get("page") or _qp("suite_page") or "Solve a Problem").strip()
 
     ctx: dict[str, Any] = {}
+    source_state: dict[str, Any] = {}
+    hydrate_source = "none"
+
+    # Blob-first: full context by question_id before metrics/URL (avoids truncated deep links).
+    if qid:
+        blob_payload = load_analytical_question_payload(qid)
+        blob_ctx = blob_payload.get("context") if isinstance(blob_payload.get("context"), dict) else {}
+        if blob_ctx:
+            ctx = copy.deepcopy(blob_ctx)
+            hydrate_source = "question_id_blob"
+        blob_ss = blob_payload.get("source_state") if isinstance(blob_payload.get("source_state"), dict) else {}
+        if blob_ss:
+            source_state = copy.deepcopy(blob_ss)
+
+    metrics_ctx: dict[str, Any] = {}
     if isinstance(m.get("context"), dict):
-        ctx = copy.deepcopy(m["context"])
+        metrics_ctx = copy.deepcopy(m["context"])
     elif m.get("context_json"):
         try:
             parsed = json.loads(str(m["context_json"]))
             if isinstance(parsed, dict):
-                ctx = parsed
+                metrics_ctx = parsed
         except json.JSONDecodeError:
             pass
-    if not ctx and qid:
-        ctx = load_analytical_question_context(qid)
-    source_state: dict[str, Any] = {}
-    if qid:
-        source_state = load_analytical_question_source_state(qid)
+    if metrics_ctx:
+        if not ctx:
+            ctx = metrics_ctx
+            hydrate_source = "metrics"
+        else:
+            for key, val in metrics_ctx.items():
+                if key not in ctx or not ctx.get(key):
+                    ctx[key] = val
+
     if not ctx:
         raw_ctx = _qp("suite_ai_context")
         if raw_ctx:
@@ -448,6 +486,7 @@ def hydrate_applied_intelligence_session(st: Any, *, metrics: dict[str, Any] | N
                 parsed = json.loads(raw_ctx)
                 if isinstance(parsed, dict):
                     ctx = parsed
+                    hydrate_source = "url_query"
             except json.JSONDecodeError:
                 pass
 
@@ -468,6 +507,7 @@ def hydrate_applied_intelligence_session(st: Any, *, metrics: dict[str, Any] | N
         ss["_suite_ai_context"] = json.dumps(ctx, ensure_ascii=False)
     if source_state:
         ss["_suite_ai_source_state"] = copy.deepcopy(source_state)
+    ss["_suite_ai_hydrate_source"] = hydrate_source
 
 
 def _format_context_value(key: str, val: Any) -> str:
@@ -589,99 +629,6 @@ def _upsert_applied_intelligence_resume(
         log.warning("suite_storage upsert_resume_item failed: %s", exc)
 
 
-def _holdings_records_from_blob(raw: Any) -> list[dict[str, Any]]:
-    if isinstance(raw, list) and raw:
-        return [dict(row) for row in raw if isinstance(row, dict)]
-    return []
-
-
-def _holdings_fingerprint_from_records(records: list[dict[str, Any]]) -> str:
-    if not records:
-        return ""
-    rows: list[tuple[str, float, str]] = []
-    for row in records:
-        ticker = str(row.get("Ticker", "")).strip().upper()
-        try:
-            weight = round(float(row.get("Weight (%)", 0) or 0), 2)
-        except (TypeError, ValueError):
-            weight = 0.0
-        atype = str(row.get("Asset Type", "")).strip()
-        if ticker:
-            rows.append((ticker, weight, atype))
-    rows.sort(key=lambda item: item[0])
-    return "|".join(f"{t}:{w}:{a}" for t, w, a in rows)
-
-
-def peek_investment_portfolio_entity_params() -> dict[str, Any]:
-    """Read-only portfolio snapshot for AMI source_state (cloud, then local disk)."""
-    ent: dict[str, Any] = {}
-    try:
-        from suite_cloud_state import load_cloud_full_session
-
-        cloud_state, _ = load_cloud_full_session("investment")
-        if isinstance(cloud_state, dict):
-            records = _holdings_records_from_blob(cloud_state.get("holdings_df"))
-            hfp = str(cloud_state.get("holdings_fingerprint") or "").strip()
-            if records:
-                ent["holdings_df"] = records
-            if hfp:
-                ent["holdings_fingerprint"] = hfp
-            elif records:
-                ent["holdings_fingerprint"] = _holdings_fingerprint_from_records(records)
-            if cloud_state.get("portfolio_built"):
-                ent["portfolio_built"] = True
-    except Exception:
-        pass
-    if ent.get("holdings_df"):
-        return ent
-    try:
-        from suite_user_persistence import load_user_state
-
-        disk_state, _ = load_user_state("investment")
-        if isinstance(disk_state, dict):
-            records = _holdings_records_from_blob(disk_state.get("holdings_df"))
-            hfp = str(disk_state.get("holdings_fingerprint") or "").strip()
-            if records:
-                ent["holdings_df"] = records
-            if hfp:
-                ent["holdings_fingerprint"] = hfp
-            elif records:
-                ent["holdings_fingerprint"] = _holdings_fingerprint_from_records(records)
-            if disk_state.get("portfolio_built"):
-                ent["portfolio_built"] = True
-    except Exception:
-        pass
-    return ent
-
-
-def investment_source_state_has_portfolio_payload(source_state: dict[str, Any] | None) -> bool:
-    if not isinstance(source_state, dict):
-        return False
-    ent = source_state.get("entity_params")
-    if not isinstance(ent, dict):
-        return False
-    if ent.get("holdings_df"):
-        return True
-    return bool(str(ent.get("holdings_fingerprint") or "").strip())
-
-
-def ensure_investment_source_state_portfolio_payload(
-    source_state: dict[str, Any] | None,
-    *,
-    session_state: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    state = dict(source_state or {})
-    if str(state.get("source_app") or "investment").strip().lower() not in ("", "investment"):
-        return state
-    ent = dict(state.get("entity_params") or {})
-    if not investment_source_state_has_portfolio_payload(state):
-        peek = peek_investment_portfolio_entity_params()
-        if peek:
-            ent.update(peek)
-            state["entity_params"] = ent
-    return state
-
-
 def build_question_payload(
     *,
     source_app: str,
@@ -691,7 +638,6 @@ def build_question_payload(
     context_summary: str = "",
     quant_area: str = "",
     source_state: dict[str, Any] | None = None,
-    session_state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     q = str(question or "").strip()
     if not q:
@@ -707,12 +653,6 @@ def build_question_payload(
         summary = _short_context_summary(ctx)
     qid = question_id(q, source_app=app, source_page=page, context=ctx)
     ctx_display = format_context_lines(ctx)
-    resolved_source_state = dict(source_state or {})
-    if app.strip().lower() == "investment":
-        resolved_source_state = ensure_investment_source_state_portfolio_payload(
-            resolved_source_state,
-            session_state=session_state or {},
-        )
     return {
         "question": q,
         "question_id": qid,
@@ -723,7 +663,7 @@ def build_question_payload(
         "context_display": " · ".join(ctx_display),
         "quant_area": area,
         "resume_key": f"ai:question:{qid}",
-        "source_state": resolved_source_state,
+        "source_state": dict(source_state or {}),
     }
 
 
@@ -803,7 +743,6 @@ def submit_analytical_question(
         context_summary=context_summary,
         quant_area=quant_area,
         source_state=source_state,
-        session_state=session_state,
     )
     action_url = build_applied_math_resume_url(payload)
     duplicate = _recent_duplicate_send(session_state, payload["question_id"])
@@ -830,7 +769,13 @@ def submit_analytical_question(
         except Exception as exc:
             log.warning("record_activity failed for analytical_question: %s", exc)
     _upsert_applied_intelligence_resume(payload, action_url=action_url)
-    if not duplicate:
+    ss = payload.get("source_state")
+    refresh_blob = not duplicate or (
+        str(payload.get("source_app") or "").strip().lower() == "investment"
+        and isinstance(ss, dict)
+        and bool(ss.get("entity_params"))
+    )
+    if refresh_blob:
         _store_question_context_blob(payload)
     if session_state is not None:
         session_state["_ami_last_send"] = {
