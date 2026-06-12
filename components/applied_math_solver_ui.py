@@ -983,11 +983,15 @@ def render_suite_solver_answer(
 
         qid = str(st.session_state.get("_suite_ai_question_id") or "").strip()
         resume_key = f"ai:question:{qid}" if qid else ""
+        session_source_state = st.session_state.get("_suite_ai_source_state")
+        if not isinstance(session_source_state, dict):
+            session_source_state = None
         payload = build_question_payload(
             source_app=source_app,
             source_page=source_page,
             question=question,
             context=ctx,
+            source_state=session_source_state,
         )
         full_url = build_applied_math_full_analysis_url(payload)
         insight = build_return_insight_payload(
@@ -1001,17 +1005,29 @@ def render_suite_solver_answer(
             full_analysis_url=full_url,
             context=ctx,
         )
-        stage_pending_insight(st, insight, return_context=ctx)
+        insight_data = insight.to_dict() if hasattr(insight, "to_dict") else dict(insight)
+        from applied_math_return_insight import resolve_ami_return_source_state_for_store, store_applied_math_insight
+
+        resolved_ss = resolve_ami_return_source_state_for_store(
+            st,
+            insight_data,
+            source_state=session_source_state,
+            return_context=ctx,
+        )
+        store_applied_math_insight(
+            insight_data,
+            return_context=resolved_ss or None,
+            source_state=resolved_ss or None,
+            st=st,
+        )
+        stage_pending_insight(st, insight, return_context=resolved_ss or ctx)
         st.markdown("---")
-        source_state = st.session_state.get("_suite_ai_source_state")
-        if not isinstance(source_state, dict):
-            source_state = None
         render_return_to_source_button(
             st,
-            insight,
+            insight_data,
             resume_key=resume_key,
             return_context=ctx,
-            source_state=source_state,
+            source_state=resolved_ss or session_source_state,
         )
     except Exception:
         pass

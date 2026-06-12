@@ -42,6 +42,42 @@ _SOURCE_LABELS: dict[str, str] = {
     "music": "Music",
 }
 
+_SOURCE_APP_ID_ALIASES: dict[str, str] = {
+    "music": "music",
+    "music practice coach": "music",
+    "music coach": "music",
+    "music practice": "music",
+    "baseball": "baseball",
+    "baseball stat app": "baseball",
+    "nba": "nba",
+    "nba playoff companion": "nba",
+    "investment": "investment",
+    "investment portfolio analyzer": "investment",
+}
+
+
+def normalize_source_app_id(
+    source_app: str,
+    context: dict[str, Any] | None = None,
+) -> str:
+    """Map display labels and context values to canonical suite app ids."""
+    raw = str(source_app or "").strip().lower()
+    if raw in _SOURCE_APP_ID_ALIASES:
+        return _SOURCE_APP_ID_ALIASES[raw]
+    if raw in _SOURCE_LABELS:
+        return raw
+    if context and isinstance(context, dict):
+        ctx_raw = str(context.get("source_app") or "").strip().lower()
+        if ctx_raw in _SOURCE_APP_ID_ALIASES:
+            return _SOURCE_APP_ID_ALIASES[ctx_raw]
+        if ctx_raw in _SOURCE_LABELS:
+            return ctx_raw
+        if "music" in ctx_raw and "math" not in ctx_raw:
+            return "music"
+    if "music" in raw and "math" not in raw:
+        return "music"
+    return raw
+
 _MUSIC_COACH_PLACEHOLDERS: dict[str, str] = {
     "practice": "e.g. How should I practice this song?",
     "backing": "e.g. How do I use Backing Track Studio?",
@@ -171,9 +207,12 @@ def source_app_label(source_app: str) -> str:
     return _SOURCE_LABELS.get(key, key.replace("_", " ").title())
 
 
-def source_question_card_title(source_app: str) -> str:
+def source_question_card_title(
+    source_app: str,
+    context: dict[str, Any] | None = None,
+) -> str:
     """Normalized Continue / activity title for cross-app questions."""
-    app = str(source_app or "").strip().lower()
+    app = normalize_source_app_id(source_app, context)
     if app == "music":
         return "Music Coach question from Music"
     label = _SOURCE_LABELS.get(app, app.replace("_", " ").title())
@@ -297,13 +336,18 @@ def _store_question_context_blob(payload: dict[str, Any]) -> None:
     try:
         from suite_account import remember_saved_item
 
-        remember_saved_item(
-            "applied_intelligence",
-            _CONTEXT_ITEM_TYPE,
-            qid,
-            title=str(payload.get("question") or "Applied Math question")[:200],
-            payload=blob,
-        )
+        store_apps: list[str] = ["applied_intelligence"]
+        src_app = str(payload.get("source_app") or "").strip().lower()
+        if src_app and src_app not in store_apps:
+            store_apps.append(src_app)
+        for app_name in store_apps:
+            remember_saved_item(
+                app_name,
+                _CONTEXT_ITEM_TYPE,
+                qid,
+                title=str(payload.get("question") or "Applied Math question")[:200],
+                payload=blob,
+            )
         return
     except Exception as exc:
         log.warning("remember_saved_item failed for analytical context: %s", exc)
@@ -320,15 +364,26 @@ def load_analytical_question_payload(question_id: str) -> dict[str, Any]:
     if not qid:
         return {}
     resume_key = f"ai:question:{qid}"
+    search_apps = ["applied_intelligence"]
     try:
         from suite_account import load_saved_items
 
-        rows = load_saved_items(app="applied_intelligence", item_type=_CONTEXT_ITEM_TYPE, limit=50)
-        for row in rows:
-            if str(row.get("item_key") or "") == qid:
-                payload = row.get("payload")
-                if isinstance(payload, dict):
-                    return copy.deepcopy(payload)
+        for app_name in search_apps:
+            rows = load_saved_items(app=app_name, item_type=_CONTEXT_ITEM_TYPE, limit=80)
+            for row in rows:
+                if str(row.get("item_key") or "") == qid:
+                    payload = row.get("payload")
+                    if isinstance(payload, dict):
+                        return copy.deepcopy(payload)
+        for app_name in ("investment", "baseball", "nba", "music"):
+            if app_name in search_apps:
+                continue
+            rows = load_saved_items(app=app_name, item_type=_CONTEXT_ITEM_TYPE, limit=80)
+            for row in rows:
+                if str(row.get("item_key") or "") == qid:
+                    payload = row.get("payload")
+                    if isinstance(payload, dict):
+                        return copy.deepcopy(payload)
     except Exception as exc:
         log.warning("load_saved_items failed for question context: %s", exc)
     try:
@@ -464,9 +519,10 @@ def format_context_lines(context: dict[str, Any] | None) -> list[str]:
 
 def analytical_question_continue_copy(payload: dict[str, Any]) -> tuple[str, str, str]:
     """Return (title, subtitle, button_label) for Command Center Continue cards."""
-    app = str(payload.get("source_app") or "").strip().lower()
+    ctx = payload.get("context") if isinstance(payload.get("context"), dict) else {}
+    app = normalize_source_app_id(str(payload.get("source_app") or ""), ctx)
     question = str(payload.get("question") or "").strip()
-    title = source_question_card_title(app)
+    title = source_question_card_title(app, ctx)
     if app == "music":
         return (title, question, "Continue with Music Coach →")
     return (title, question, ANALYTICAL_QUESTION_BUTTON_LABEL)
@@ -602,6 +658,10 @@ def build_applied_math_resume_url(payload: dict[str, Any], *, base_url: str = ""
     from suite_deep_links import build_resume_action_url
 
     metrics = metrics_for_applied_math_resume(payload)
+    metrics["source_app"] = normalize_source_app_id(
+        str(payload.get("source_app") or ""),
+        dict(payload.get("context") or {}),
+    )
     return build_resume_action_url(
         "applied_intelligence",
         resume_key=str(payload.get("resume_key") or ""),
@@ -654,7 +714,11 @@ def submit_analytical_question(
     duplicate = _recent_duplicate_send(session_state, payload["question_id"])
     if not duplicate:
         metrics = metrics_for_applied_math_resume(payload)
-        if payload["source_app"] == "music":
+        metrics["source_app"] = normalize_source_app_id(
+            str(payload.get("source_app") or ""),
+            dict(payload.get("context") or {}),
+        )
+        if metrics["source_app"] == "music":
             summary = f"Asked Music Coach: {payload['question'][:80]}"
         else:
             summary = f"Asked Applied Math: {payload['question'][:80]}"
