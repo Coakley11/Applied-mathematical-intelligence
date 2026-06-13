@@ -531,6 +531,13 @@ def solve_baseball_trend(
     player = str(trend.get("player") or ctx.get("player") or "Player").strip()
     metrics = _ctx_list(ctx.get("metrics"))
     stat = str(trend.get("stat") or (metrics[0] if metrics else "stat")).strip()
+    low_q = question.lower()
+    if any(w in low_q for w in ("double", "doubles", "2b")):
+        answer_stat = "2B"
+    elif any(w in low_q for w in ("home run", " homer", " hr")):
+        answer_stat = "HR"
+    else:
+        answer_stat = stat
 
     slope = _num(trend.get("slope"))
     r2 = _num(trend.get("r2"))
@@ -637,10 +644,10 @@ def solve_baseball_trend(
 
     if slope is not None and r2 is not None:
         if meaningful:
-            short_answer = f"Yes — the {direction} {stat} trend looks meaningful at your thresholds."
+            short_answer = f"Yes — the {direction} {answer_stat} trend looks meaningful at your thresholds."
             why = (
                 f"|slope| = **{abs(slope):g}** ≥ **{min_slope}** and R² = **{r2:g}** ≥ **{min_r2}** — "
-                "the line fits consistently enough to trust."
+                f"the {answer_stat} line fits consistently enough to trust."
             )
             live_metrics = {
                 "Trend verdict": "Meaningful ✓",
@@ -1804,10 +1811,16 @@ def solve_baseball_player_compare(
             winner = ""
             margin = abs(score_a - score_b)
         if winner:
-            short_answer = f"**{winner}** leads under current weights (score **{max(score_a, score_b):.2f}** vs **{min(score_a, score_b):.2f}**)."
+            short_answer = (
+                f"**{winner}** leads **{loser}** under current weights "
+                f"(score **{max(score_a, score_b):.2f}** vs **{min(score_a, score_b):.2f}**)."
+            )
             why = f"Driven by: {', '.join(drivers[:3]) or 'attached stats'}."
         else:
-            short_answer = f"Too close to call — weighted scores **{score_a:.2f}** vs **{score_b:.2f}**."
+            short_answer = (
+                f"**{pa}** vs **{pb}** is too close to call — weighted scores "
+                f"**{score_a:.2f}** vs **{score_b:.2f}**."
+            )
             why = "Neither player leads by more than 2% on the weighted score."
         live_metrics = {
             f"{pa} score": f"{score_a:.2f}",
