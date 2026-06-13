@@ -15,6 +15,7 @@ from components.applied_math_problem_router import (
     BASEBALL_PLAYER_COMPARE,
     BASEBALL_PROJECTION,
     BASEBALL_TREND,
+    BASEBALL_VALUATION,
     GENERIC_FALLBACK,
     GENERIC_INTERACTIVE,
     INVESTMENT_CONCENTRATION,
@@ -770,6 +771,99 @@ def solve_baseball_trend(
         why=why,
         sensitivity_plain=sensitivity_plain,
         live_metrics=live_metrics,
+    )
+
+
+def solve_baseball_valuation(
+    ctx: dict[str, Any],
+    question: str,
+    *,
+    over_threshold: float = 0.72,
+    under_threshold: float = 0.38,
+) -> SolverResult:
+    """Valuation over/under using Valuation_Score, Perf_Score, Trend_Score, and market edge."""
+    snap = ctx.get("valuation_snapshot") if isinstance(ctx.get("valuation_snapshot"), dict) else {}
+    player = str(snap.get("selected_player") or ctx.get("player") or "Player").strip()
+    top_rows = snap.get("top_valuation_players") if isinstance(snap.get("top_valuation_players"), list) else []
+    row = next((r for r in top_rows if isinstance(r, dict) and str(r.get("player", "")).lower() == player.lower()), None)
+    if row is None and top_rows and isinstance(top_rows[0], dict):
+        row = top_rows[0]
+        player = str(row.get("player") or player)
+
+    val_score = _num(row.get("Valuation_Score")) if row else None
+    perf = _num(row.get("Perf_Score")) if row else None
+    trend = _num(row.get("Trend_Score")) if row else None
+    edge = _num(row.get("Fantasy Edge")) if row else None
+    market = row.get("Market Rank") if row else None
+    ds = ctx.get("draft_status") if isinstance(ctx.get("draft_status"), dict) else {}
+
+    low = question.lower()
+    if val_score is not None:
+        if val_score >= over_threshold or (edge is not None and edge < -10):
+            verdict = "overvalued"
+            short = f"**{player}** looks **overvalued** at Valuation Score **{val_score:.2f}** — market may be ahead of recent production/trend."
+        elif val_score <= under_threshold or (edge is not None and edge > 15):
+            verdict = "undervalued"
+            short = f"**{player}** looks **undervalued** at Valuation Score **{val_score:.2f}** — model ranks him above market."
+        else:
+            verdict = "fair"
+            short = f"**{player}** is **fairly valued** at Valuation Score **{val_score:.2f}** — near the middle of your filtered pool."
+    else:
+        verdict = "unknown"
+        short = f"Attach **valuation_snapshot** with Valuation_Score for **{player}** to judge over/under vs market."
+
+    why = (
+        f"Valuation blends **Current Score** (**{perf}**) and **Trend Score** (**{trend}**) "
+        f"with your page weights. Market Rank **{market}**, Fantasy Edge **{edge}**."
+    )
+    if ds.get("is_drafted"):
+        why += f" **{player}** is already drafted on your board."
+    elif ds.get("on_user_roster"):
+        why += f" **{player}** is on your roster."
+
+    calc = (
+        f"Player: **{player}**\n"
+        f"Valuation Score: **{val_score}** (over ≥ **{over_threshold}**, under ≤ **{under_threshold}**)\n"
+        f"Perf_Score: **{perf}** · Trend_Score: **{trend}**\n"
+        f"Fantasy Edge: **{edge}** · Market Rank: **{market}**"
+    )
+    tradeoffs = (
+        f"If you need safety → favor higher Perf_Score peers in top_valuation_players. "
+        f"If you need upside → favor higher Trend_Score / positive Fantasy Edge names."
+    )
+    what_if = [
+        "If you weight trend more → undervalued sleepers rise in Valuation Score.",
+        "If you weight current production more → stable veterans rank higher.",
+        f"If {player} is drafted before your pick → pivot to next name in valuation_snapshot.",
+    ]
+
+    return _coach_result(
+        question=question,
+        problem_type="Player valuation",
+        math_idea="Valuation = weighted blend of recent production (Perf) and momentum (Trend) vs market rank/edge.",
+        variables="Valuation_Score = f(Perf_Score, Trend_Score, weights)\nFantasy Edge = Model Rank − Market Rank",
+        data_used=_cap_data_used([
+            f"Valuation Score: **{val_score}**" if val_score is not None else "",
+            f"Perf/Trend: **{perf}** / **{trend}**" if perf is not None else "",
+            f"Draft status: {ds}" if ds else "",
+        ]),
+        calculation=calc,
+        result=short,
+        interpretation=why,
+        assumptions=["Valuation uses the filtered player pool on the Valuation page, not generic rankings."],
+        sensitivity_notes="Shift value_w_current vs value_w_trend weights to stress-test the score.",
+        missing_fields=[] if val_score is not None else ["valuation_snapshot.Valuation_Score"],
+        partial=val_score is None,
+        problem_type_id=BASEBALL_VALUATION,
+        computed={"verdict": verdict, "valuation_score": val_score, "coach_sections": {
+            "direct_answer": short,
+            "analyst_framing": why,
+            "tradeoffs": tradeoffs,
+            "what_if": what_if,
+        }},
+        short_answer=short,
+        why=why,
+        live_metrics=bool(val_score is not None),
     )
 
 
@@ -2626,6 +2720,14 @@ def _draft_question_mode(question: str) -> str:
     low = question.lower()
     if is_draft_market_prediction_question(question):
         return "draft_market_prediction"
+    if re.search(r"hitter.*pitcher|pitcher.*hitter", low):
+        return "hitter_pitcher"
+    if "weakest" in low and "category" in low:
+        return "weakest_category"
+    if any(p in low for p in ("fits my team", "fit my team", "fits my roster", "who fits")):
+        return "team_fit"
+    if ("safest" in low and "upside" in low) or re.search(r"safest.*upside|upside.*safest", low):
+        return "safety_upside"
     if re.search(r"why is .+ the best", low) or (
         "why is" in low and "best" in low and any(w in low for w in ("draft", "pick", "player"))
     ):
@@ -3030,6 +3132,76 @@ def _build_baseball_draft_coach_sections(
             f"If you prioritize upside → **{focus}** vs higher-ceiling alt **{sleeper_names[0] if sleeper_names else alt or '—'}**.",
         ]
         risk_line = _draft_risk_line(bundle, focus, mode=mode)
+    elif mode == "hitter_pitcher":
+        direct = (
+            f"At {pick_note}, weigh **hitter** vs **pitcher** by **{needs_label}** and "
+            f"whether your league rewards pitching scarcity now — lean **{top}** if hitters close bigger category gaps."
+        )
+        framing = (
+            f"Roster construction: {roster_note}; category_needs **{needs_label}**; "
+            f"**{len(avail_names)}** hitters/pitchers tracked in available pool.{context_suffix}"
+        )
+        tradeoffs = (
+            f"**Hitter path ({top})** improves counting cats; **pitcher path** helps ratios/WHIP/K if SP/RP needs are open."
+        )
+        what_if = [
+            "If you prioritize ratios → pitcher now even if a hitter ranks higher.",
+            "If you prioritize counting stats → hitter unless elite SP falls to you.",
+            "If a position run is coming → take scarce position before waiting.",
+        ]
+        scarcity_line = _draft_scarcity_line(bundle)
+        risk_line = _draft_risk_line(bundle, player or top, mode=mode)
+    elif mode == "weakest_category":
+        cats = bundle.get("category_needs") or []
+        weakest = cats[0] if cats else "balanced"
+        direct = (
+            f"Your weakest tracked category gap is **{weakest}** — prioritize available players who move "
+            f"**{weakest}** most at {pick_note}."
+        )
+        framing = (
+            f"Category diagnosis from saved board: needs **{needs_label}**; "
+            f"recommendations favor **{top}** for overall fit.{context_suffix}"
+        )
+        tradeoffs = (
+            f"Closing **{weakest}** may mean passing on higher ADP names like **{alt or top}** with better raw rank."
+        )
+        what_if = [
+            f"If you fix **{weakest}** this round → next pick can target **{alt or 'BPA'}**.",
+            "If you punt the weak category → you need a later-round specialist.",
+            "If league is shallow at the position → scarcity overrides category punt.",
+        ]
+        scarcity_line = _draft_scarcity_line(bundle)
+        risk_line = _draft_risk_line(bundle, player or top, mode=mode)
+    elif mode == "team_fit":
+        direct = (
+            f"**{top}** fits your team best at {pick_note} because he closes **{needs_label}** "
+            f"on your saved board recommendations."
+        )
+        framing = f"Team-fit optimization vs raw rank at {pick_note}.{context_suffix}"
+        tradeoffs = f"**{alt or 'next best'}** may rank higher overall but adds less to your roster construction."
+        what_if = [
+            "If you prioritize power → re-rank available_players by HR/SLG.",
+            "If you prioritize speed → favor SB leaders in queue/watchlist.",
+            "If you prioritize safety → take higher-floor recommendation over upside.",
+        ]
+        scarcity_line = _draft_scarcity_line(bundle)
+        risk_line = _draft_risk_line(bundle, player or top, mode=mode)
+    elif mode == "safety_upside":
+        safe = top
+        upside = sleeper_names[0] if sleeper_names else (alt or top)
+        direct = (
+            f"**Safest pick: {safe}** (recommendation/floor). "
+            f"**Highest upside: {upside}** (variance/ceiling) at {pick_note}."
+        )
+        framing = f"Risk spectrum on your board at {pick_note} — floor vs ceiling tradeoff.{context_suffix}"
+        tradeoffs = f"**{safe}** stabilizes **{needs_label}**; **{upside}** widens outcome swings."
+        what_if = [
+            f"If you need reliability → **{safe}**.",
+            f"If you need league-winning ceiling → **{upside}**.",
+            "If pick is late → upside has lower opportunity cost.",
+        ]
+        scarcity_line = _draft_scarcity_line(bundle)
+        risk_line = _draft_risk_line(bundle, upside, mode="sleeper")
     elif mode == "roster_needs":
         pos = bundle.get("needed_positions") or []
         cats = bundle.get("category_needs") or []
@@ -3846,6 +4018,13 @@ def dispatch_solver(
             min_slope=float(p.get("min_slope", 0.5)),
             min_r2=float(p.get("min_r2", 0.35)),
         )
+    if pid == BASEBALL_VALUATION:
+        return solve_baseball_valuation(
+            ctx,
+            question,
+            over_threshold=float(p.get("over_threshold", 0.72)),
+            under_threshold=float(p.get("under_threshold", 0.38)),
+        )
     if pid == INVESTMENT_REBALANCE:
         return solve_investment_rebalance(
             ctx,
@@ -3975,7 +4154,9 @@ def dispatch_solver(
             calculation=f"Compare **{sort_stat}** to next-ranked rows. Outlier if >1.5× next rank.\n\n{calc_detail}",
             result=f"Snapshot on **{sort_stat}**" if row_bits else "Attach historical_snapshot.top_rows",
             interpretation=(
-                f"Top rows: {calc_detail}." if row_bits else f"Compare {player}'s row to neighbors."
+                f"With filters **{ctx.get('filters_applied') or snap.get('year_range') or 'active'}**, "
+                f"**{player or 'top rows'}** ranks high on **{sort_stat}** — "
+                + (f"top rows: {calc_detail}." if row_bits else f"compare {player}'s row to neighbors.")
             ),
             assumptions=[f"Filters: {ctx.get('filters_applied') or snap.get('year_range') or 'see snapshot'}"],
             sensitivity_notes="Rate stats need playing-time context; counting stats need AB/PA.",

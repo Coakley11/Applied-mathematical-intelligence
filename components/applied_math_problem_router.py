@@ -38,6 +38,7 @@ BASEBALL_FUTURE_ACCUMULATION = "baseball_future_accumulation"
 BASEBALL_HISTORICAL = "baseball_historical_comparison"
 BASEBALL_DRAFT = "baseball_draft_decision"
 BASEBALL_PROJECTION = "baseball_projection_realism"
+BASEBALL_VALUATION = "baseball_valuation"
 BASEBALL_GENERIC = "baseball_generic"
 
 INVESTMENT_REBALANCE = "investment_rebalance"
@@ -70,6 +71,7 @@ MODEL_ID_TO_ROUTE: dict[str, tuple[str, str, tuple[str, ...]]] = {
     BASEBALL_HISTORICAL: ("Historical stat comparison", "baseball", ("historical_snapshot", "player")),
     BASEBALL_DRAFT: ("Draft decision", "baseball", ("draft_snapshot", "player", "draft_projection")),
     BASEBALL_PROJECTION: ("Projection realism", "baseball", ("player", "projection")),
+    BASEBALL_VALUATION: ("Player valuation", "baseball", ("valuation_snapshot", "player")),
     BASEBALL_GENERIC: ("Baseball decision analysis", "baseball", ("player", "metrics")),
     NBA_STAT_CHASE: ("NBA stat chase / rate needed", "nba", FIELD_SPECS[NBA_STAT_CHASE]),
     NBA_INVERSE_STAT_CHASE: ("NBA inverse stat chase (games needed)", "nba", FIELD_SPECS[NBA_STAT_CHASE]),
@@ -339,6 +341,26 @@ def _route_baseball(
             available_fields=avail,
             missing_fields=miss,
         )
+    trend_sum = ctx.get("trend_summary")
+    has_trend_ctx = isinstance(trend_sum, dict) and bool(trend_sum)
+    if has_trend_ctx and (
+        "trend" in topics
+        or "trend" in workflow
+        or intent.intent_id == INTENT_IS_MEANINGFUL
+        or any(w in low for w in ("trend", "slope", "doubles", "next season"))
+    ):
+        req = FIELD_SPECS[BASEBALL_TREND]
+        avail, miss = _audit_fields(ctx, req)
+        conf = 0.9 if not miss else 0.55 if avail else 0.4
+        return ProblemRoute(
+            problem_type_id=BASEBALL_TREND,
+            problem_type="Trend significance",
+            confidence=conf,
+            source_app="baseball",
+            required_fields=list(req),
+            available_fields=avail,
+            missing_fields=miss,
+        )
     # Future accumulation beats static compare when user asks about next N seasons.
     if intent.intent_id == INTENT_WILL_HAPPEN or (
         intent.intent_id == INTENT_WHO_IS_BETTER and intent.horizon
@@ -375,6 +397,21 @@ def _route_baseball(
             missing_fields=miss,
         )
     if ("compare" in topics or "comparison" in workflow) and intent.intent_id == INTENT_WHO_IS_BETTER:
+        if _has_draft_context(ctx) and re.search(
+            r"safest.*upside|upside.*safest|highest.upside|safest pick|on the clock",
+            low,
+        ):
+            req = ("draft_snapshot", "recommended_players")
+            avail, miss = _audit_fields(ctx, req)
+            return ProblemRoute(
+                problem_type_id=BASEBALL_DRAFT,
+                problem_type="Draft decision",
+                confidence=0.82 if avail else 0.55,
+                source_app="baseball",
+                required_fields=list(req),
+                available_fields=avail,
+                missing_fields=miss,
+            )
         req = ("player_a", "player_b", "comparison_stats")
         avail, miss = _audit_fields(ctx, req)
         return ProblemRoute(
@@ -394,6 +431,23 @@ def _route_baseball(
             problem_type_id=BASEBALL_HISTORICAL,
             problem_type="Historical stat comparison",
             confidence=0.8 if avail else 0.5,
+            source_app="baseball",
+            required_fields=list(req),
+            available_fields=avail,
+            missing_fields=miss,
+        )
+    val_snap = ctx.get("valuation_snapshot")
+    if isinstance(val_snap, dict) and val_snap and (
+        "valuation" in page.lower()
+        or val_snap.get("top_valuation_players")
+        or any(w in low for w in ("overvalued", "undervalued", "valuation score", "worth drafting"))
+    ):
+        req = ("valuation_snapshot", "player")
+        avail, miss = _audit_fields(ctx, req)
+        return ProblemRoute(
+            problem_type_id=BASEBALL_VALUATION,
+            problem_type="Player valuation",
+            confidence=0.85 if not miss else 0.55,
             source_app="baseball",
             required_fields=list(req),
             available_fields=avail,
