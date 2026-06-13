@@ -92,6 +92,18 @@ class TestIntentRouting(unittest.TestCase):
         self.assertEqual(route.problem_type_id, BASEBALL_DRAFT)
         self.assertNotEqual(route.problem_type_id, BASEBALL_FUTURE_ACCUMULATION)
 
+    def test_next_catcher_routes_draft_without_snapshot(self) -> None:
+        q = "Who is likely to be the next catcher picked in this draft?"
+        ctx = {
+            "page": "Draft Assistant Simulator",
+            "player_a": "Julio Rodriguez",
+            "player_b": "Aaron Judge",
+            "_ami_comparison_context": {"HR": "Julio 30 vs Judge 40"},
+        }
+        route = route_suite_question(q, source_app="baseball", context=ctx)
+        self.assertEqual(route.problem_type_id, BASEBALL_DRAFT)
+        self.assertNotEqual(route.problem_type_id, BASEBALL_FUTURE_ACCUMULATION)
+
     def test_static_compare_still_routes_compare(self) -> None:
         route = route_suite_question(
             "Was Soto better than Judge?",

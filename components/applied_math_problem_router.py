@@ -244,6 +244,9 @@ def _route_aligns(domain: ProblemRoute, interp: ProblemInterpretation) -> bool:
         return False
     if interp.intent.intent_id == INTENT_WHY and domain.problem_type_id == INVESTMENT_MACRO:
         return False
+    # Draft-market questions must not fall through to future accumulation via interpreter.
+    if domain.problem_type_id == BASEBALL_DRAFT and domain.problem_type == "Draft market prediction":
+        return True
     return domain.confidence >= 0.65
 
 
@@ -326,12 +329,18 @@ def _route_baseball(
     intent: QuestionIntent,
 ) -> ProblemRoute:
     low = question.lower()
-    if is_draft_market_prediction_question(question) and (
-        _has_draft_context(ctx) or "draft" in topics or "draft" in workflow
-    ):
+    if is_draft_market_prediction_question(question):
         req = ("draft_snapshot", "drafted_players", "available_players")
         avail, miss = _audit_fields(ctx, req)
-        conf = 0.92 if "draft_snapshot" in avail else 0.78 if avail else 0.5
+        has_draft_page = _has_draft_context(ctx) or "draft" in topics or "draft" in workflow or "draft" in page.lower()
+        if "draft_snapshot" in avail:
+            conf = 0.92
+        elif avail:
+            conf = 0.78
+        elif has_draft_page:
+            conf = 0.55
+        else:
+            conf = 0.42
         return ProblemRoute(
             problem_type_id=BASEBALL_DRAFT,
             problem_type="Draft market prediction",
