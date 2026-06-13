@@ -110,3 +110,62 @@ def position_matches_row(position_label: str, row_position: str) -> bool:
         if len(alias) <= 3 and re.search(rf"\b{re.escape(alias)}\b", row):
             return True
     return False
+
+
+_DRAFT_COMPARE_PATTERNS: tuple[str, ...] = (
+    r"(?:which player (?:would be )?better to draft[,?]?\s*)(.+?)\s+(?:or|vs\.?|versus)\s+(.+?)(?:\?|\s*$)",
+    r"(?:should i draft|who should i draft[,?]?\s*)(.+?)\s+(?:or|vs\.?|versus)\s+(.+?)(?:\?|\s*$)",
+    r"(?:compare|between)\s+(.+?)\s+(?:and|or|vs\.?|versus)\s+(.+?)(?:\?|\s*$)",
+    r"^(.+?)\s+(?:vs\.?|versus)\s+(.+?)(?:\?|\s*$)",
+)
+
+
+def extract_draft_compare_players(question: str) -> tuple[str, str]:
+    """Pull two player names from a draft head-to-head question."""
+    q = str(question or "").strip()
+    if not q:
+        return "", ""
+    for pat in _DRAFT_COMPARE_PATTERNS:
+        m = re.search(pat, q, flags=re.I)
+        if not m:
+            continue
+        a = q[m.start(1) : m.end(1)].strip().strip("?,").strip()
+        b = q[m.start(2) : m.end(2)].strip().strip("?,").strip()
+        skip = {"this player", "this pick", "he", "him", "a hitter", "a pitcher"}
+        if len(a) >= 3 and len(b) >= 3 and a.lower() not in skip and b.lower() not in skip:
+            return a, b
+    return "", ""
+
+
+def _looks_like_player_name(name: str) -> bool:
+    parts = str(name or "").strip().split()
+    if len(parts) < 2:
+        return False
+    invalid = frozenset(
+        {
+            "safest",
+            "upside",
+            "highest",
+            "weakest",
+            "better",
+            "value",
+            "risk",
+            "floor",
+            "ceiling",
+            "who",
+            "which",
+            "what",
+            "should",
+        }
+    )
+    if any(p.lower() in invalid for p in parts):
+        return False
+    if parts[0].lower() in ("who", "which", "what", "should", "better"):
+        return False
+    return True
+
+
+def is_draft_head_to_head_question(question: str) -> bool:
+    """True when question compares two named players in a draft decision."""
+    a, b = extract_draft_compare_players(question)
+    return bool(a and b and _looks_like_player_name(a) and _looks_like_player_name(b))

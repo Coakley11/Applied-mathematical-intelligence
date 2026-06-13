@@ -22,7 +22,7 @@ from components.applied_math_problem_interpreter import (
     ProblemInterpretation,
     interpret_suite_question,
 )
-from components.draft_market_question import is_draft_market_prediction_question
+from components.draft_market_question import is_draft_market_prediction_question, is_draft_head_to_head_question
 
 # Stable IDs consumed by solvers and tests.
 NBA_STAT_CHASE = "nba_stat_chase"
@@ -247,6 +247,8 @@ def _route_aligns(domain: ProblemRoute, interp: ProblemInterpretation) -> bool:
     # Draft-market questions must not fall through to future accumulation via interpreter.
     if domain.problem_type_id == BASEBALL_DRAFT and domain.problem_type == "Draft market prediction":
         return True
+    if domain.problem_type_id == BASEBALL_DRAFT and domain.problem_type == "Draft player compare":
+        return True
     return domain.confidence >= 0.65
 
 
@@ -406,6 +408,18 @@ def _route_baseball(
             missing_fields=miss,
         )
     if ("compare" in topics or "comparison" in workflow) and intent.intent_id == INTENT_WHO_IS_BETTER:
+        if _has_draft_context(ctx) and is_draft_head_to_head_question(question):
+            req = ("draft_snapshot", "player_a", "player_b")
+            avail, miss = _audit_fields(ctx, req)
+            return ProblemRoute(
+                problem_type_id=BASEBALL_DRAFT,
+                problem_type="Draft player compare",
+                confidence=0.85 if avail else 0.55,
+                source_app="baseball",
+                required_fields=list(req),
+                available_fields=avail,
+                missing_fields=miss,
+            )
         if _has_draft_context(ctx) and re.search(
             r"safest.*upside|upside.*safest|highest.upside|safest pick|on the clock",
             low,
