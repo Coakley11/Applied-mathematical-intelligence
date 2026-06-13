@@ -60,7 +60,11 @@ class TestDraftPickSolver(unittest.TestCase):
         }
         result = solve_baseball_draft(ctx, "Who should I draft next?")
         self.assertIn("Elly De La Cruz", result.short_answer)
-        self.assertIn("category", result.why.lower())
+        self.assertTrue(
+            "category" in result.why.lower()
+            or "roster" in result.why.lower()
+            or "fit" in result.why.lower()
+        )
         coach = result.computed.get("coach_sections")
         self.assertIsInstance(coach, dict)
         self.assertIn("key_variables", coach)
@@ -80,6 +84,61 @@ class TestDraftPickSolver(unittest.TestCase):
         coach = result.computed.get("coach_sections") or {}
         framing = str(coach.get("analyst_framing") or "")
         self.assertTrue("upside" in framing.lower() or "probability" in result.short_answer.lower())
+
+    def test_roster_needs_uses_position_gaps(self) -> None:
+        ctx = {
+            "draft_snapshot": {
+                "current_pick": 6,
+                "user_roster": ["Juan Soto", "Elly De La Cruz"],
+                "recommended_players": [{"player": "Cal Raleigh", "Primary Position": "C"}],
+                "needed_positions": ["C", "SS"],
+                "category_needs": ["HR", "SB"],
+            },
+            "needed_positions": ["C", "SS"],
+            "category_needs": ["HR", "SB"],
+            "roster": ["Juan Soto", "Elly De La Cruz"],
+        }
+        result = solve_baseball_draft(ctx, "What does my roster need?")
+        self.assertEqual(result.computed.get("draft_mode"), "roster_needs")
+        self.assertIn("C", result.short_answer)
+        self.assertIn("SS", result.short_answer)
+        self.assertNotIn("ADP 2", result.short_answer)
+
+    def test_best_values_ranks_multiple_players(self) -> None:
+        ctx = {
+            "draft_snapshot": {
+                "current_pick": 6,
+                "best_available_players": [
+                    {"player": "Cal Raleigh", "Fantasy Edge": 7, "Market Rank": 35},
+                    {"player": "Bobby Witt Jr.", "Fantasy Edge": -3, "Market Rank": 12},
+                ],
+                "available_players": [
+                    {"player": "Cal Raleigh", "Fantasy Edge": 7},
+                    {"player": "Junior Caminero", "Fantasy Edge": 5},
+                ],
+            },
+            "current_pick": 6,
+        }
+        result = solve_baseball_draft(ctx, "Who are the best values left?")
+        self.assertEqual(result.computed.get("draft_mode"), "best_values")
+        self.assertIn("Cal Raleigh", result.short_answer)
+        self.assertIn("Bobby Witt", result.short_answer)
+
+    def test_sleeper_names_candidate_from_snapshot(self) -> None:
+        ctx = {
+            "sleepers_snapshot": {
+                "sleeper_candidates": [
+                    {"player": "Junior Caminero", "Fantasy Edge": 42, "Market Rank": 95},
+                ],
+                "drafted_exclusions": ["Aaron Judge", "Juan Soto"],
+                "roster_needs": ["C", "SS"],
+            },
+            "sleeper_candidates": ["Junior Caminero"],
+        }
+        result = solve_baseball_draft(ctx, "Should I take this sleeper?")
+        self.assertEqual(result.computed.get("draft_mode"), "sleeper")
+        self.assertIn("Junior Caminero", result.short_answer)
+        self.assertNotIn("this sleeper", result.short_answer.lower())
 
     def test_risk_question_mentions_variance(self) -> None:
         ctx = {
