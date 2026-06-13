@@ -5,6 +5,7 @@ from __future__ import annotations
 import unittest
 
 from components.applied_math_problem_router import (
+    BASEBALL_DRAFT,
     BASEBALL_FUTURE_ACCUMULATION,
     BASEBALL_PLAYER_COMPARE,
     INVESTMENT_DRAWDOWN_ATTRIBUTION,
@@ -69,6 +70,27 @@ class TestIntentRouting(unittest.TestCase):
         )
         self.assertEqual(route.problem_type_id, BASEBALL_FUTURE_ACCUMULATION)
         self.assertEqual(route.question_intent, INTENT_WILL_HAPPEN)
+
+    def test_next_catcher_routes_draft_despite_likely_intent(self) -> None:
+        q = "Who is likely to be the next catcher picked in this draft?"
+        ctx = {
+            "draft_snapshot": {
+                "current_pick": 7,
+                "available_players": [
+                    {"player": "Cal Raleigh", "Primary Position": "C", "Market Rank": 35},
+                    {"player": "William Contreras", "Primary Position": "C", "Market Rank": 40},
+                ],
+                "canonical_drafted_players": ["Cal Raleigh"],
+            },
+            "player_a": "Julio Rodriguez",
+            "player_b": "Aaron Judge",
+            "_ami_comparison_context": {"HR": "Julio 30 vs Judge 40"},
+        }
+        intent = classify_question_intent(q)
+        self.assertEqual(intent.intent_id, INTENT_WILL_HAPPEN)
+        route = route_suite_question(q, source_app="baseball", context=ctx)
+        self.assertEqual(route.problem_type_id, BASEBALL_DRAFT)
+        self.assertNotEqual(route.problem_type_id, BASEBALL_FUTURE_ACCUMULATION)
 
     def test_static_compare_still_routes_compare(self) -> None:
         route = route_suite_question(

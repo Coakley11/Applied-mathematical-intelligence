@@ -44,6 +44,11 @@ from components.applied_math_problem_interpreter import (
     PURPOSE_MEASURE_SENSITIVITY,
     PURPOSE_TEST_SIGNIFICANCE,
 )
+from components.draft_market_question import (
+    extract_draft_position_query,
+    is_draft_market_prediction_question,
+    position_matches_row,
+)
 
 
 @dataclass
@@ -2573,6 +2578,7 @@ def _extract_player_from_question_text(question: str) -> str:
         r"why is (.+?) the best",
         r"why is (.+?) a good",
         r"why is (.+?) worth",
+        r"will (.+?) make it back",
         r"should i draft (.+?)(?:\?|\s|$)",
         r"is (.+?) (?:worth|available|the best)",
     )
@@ -2618,6 +2624,8 @@ def _resolve_focus_player(question: str, ctx: dict[str, Any], bundle: dict[str, 
 
 def _draft_question_mode(question: str) -> str:
     low = question.lower()
+    if is_draft_market_prediction_question(question):
+        return "draft_market_prediction"
     if re.search(r"why is .+ the best", low) or (
         "why is" in low and "best" in low and any(w in low for w in ("draft", "pick", "player"))
     ):
@@ -2639,6 +2647,92 @@ def _draft_question_mode(question: str) -> str:
     if any(p in low for p in ("projection", "project", "what does this projection")):
         return "projection"
     return "value_edge"
+
+
+def _draft_market_subtype(question: str) -> str:
+    low = question.lower()
+    if "make it back" in low:
+        return "make_it_back"
+    if "how long can i wait" in low or "wait on" in low:
+        return "wait_timing"
+    if re.search(r"which position", low) and "run" in low:
+        return "position_run"
+    if "run" in low and any(w in low for w in ("position", "catcher", "coming", "about to")):
+        return "position_run"
+    if "before my next pick" in low:
+        return "before_next_pick"
+    return "position_next"
+
+
+def _infer_scarce_position_from_bundle(bundle: dict[str, Any]) -> str:
+    needs = bundle.get("needed_positions") or []
+    pos_map = {"C": "catcher", "SS": "shortstop", "OF": "outfield", "SP": "starting pitcher", "RP": "relief pitcher"}
+    for need in needs:
+        key = str(need).strip().upper()
+        if key in pos_map:
+            return pos_map[key]
+        if str(need).strip():
+            return str(need).strip().lower()
+    return "catcher"
+
+
+def _row_market_rank(row: dict[str, Any]) -> float:
+    val = _player_metric(row, "Market Rank", "market_rank", "Model Rank", "model_rank")
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return 9999.0
+
+
+def _pool_rows_by_position(bundle: dict[str, Any], position_query: str) -> list[dict[str, Any]]:
+    drafted_tokens = {
+        _player_name_token(str(n).split(" (")[0].strip())
+        for n in (bundle.get("drafted_players") or [])
+    }
+    pools: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for pool_key in ("available", "best_available", "recommendations"):
+        for row in bundle.get(pool_key) or []:
+            if not isinstance(row, dict):
+                continue
+            name = _draft_player_name(row)
+            if not name or name.lower() in seen:
+                continue
+            if _player_name_token(name) in drafted_tokens:
+                continue
+            pos = str(_player_metric(row, "Primary Position", "position", "pos") or "")
+            if position_query and not position_matches_row(position_query, pos):
+                continue
+            seen.add(name.lower())
+            pools.append(row)
+    return sorted(pools, key=_row_market_rank)
+
+
+def _player_position_from_pools(bundle: dict[str, Any], player_name: str) -> str:
+    token = _player_name_token(player_name)
+    for pool_key in ("available", "best_available", "recommendations"):
+        for row in bundle.get(pool_key) or []:
+            if not isinstance(row, dict):
+                continue
+            if _player_name_token(_draft_player_name(row)) == token:
+                return str(_player_metric(row, "Primary Position", "position", "pos") or "")
+    return ""
+
+
+def _drafted_names_at_position(bundle: dict[str, Any], position_query: str) -> list[str]:
+    names: list[str] = []
+    for name in bundle.get("drafted_players") or []:
+        clean = str(name).split(" (")[0].strip()
+        if not clean:
+            continue
+        pos = _player_position_from_pools(bundle, clean)
+        if not position_query:
+            names.append(clean)
+        elif pos and position_matches_row(position_query, pos):
+            names.append(clean)
+        elif not pos and position_query in clean.lower():
+            names.append(clean)
+    return names
 
 
 def _draft_scoring_label(scoring: dict[str, Any]) -> str:
@@ -2788,7 +2882,97 @@ def _build_baseball_draft_coach_sections(
     scarcity_line = _draft_scarcity_line(bundle)
     risk_line = _draft_risk_line(bundle, player or top, mode=mode)
 
-    if mode == "player_why":
+    if mode == "draft_market_prediction":
+        subtype = _draft_market_subtype(question)
+        pos_query = extract_draft_position_query(question)
+        if not pos_query:
+            pos_query = _infer_scarce_position_from_bundle(bundle) if subtype in ("position_run", "wait_timing") else "catcher"
+        pos_label = pos_query.title() if pos_query else "position"
+        remaining = _pool_rows_by_position(bundle, pos_query)
+        drafted_pos = _drafted_names_at_position(bundle, pos_query)
+        remaining_names = [_draft_player_name(r) for r in remaining[:5] if _draft_player_name(r)]
+        next_name = remaining_names[0] if remaining_names else "no clear next pick in context"
+        drafted_note = (
+            f"**{', '.join(drafted_pos[:4])}** {'is' if len(drafted_pos) == 1 else 'are'} already off the board. "
+            if drafted_pos
+            else ""
+        )
+
+        if subtype == "make_it_back":
+            target = player or (remaining_names[0] if remaining_names else "this player")
+            direct = (
+                f"**{target}** {'is likely to be drafted before your next pick' if remaining_names else 'may not return'} "
+                f"based on Market Rank order among remaining **{pos_label}** options at {pick_note}."
+            )
+            framing = (
+                f"Draft-flow read: {drafted_note}"
+                f"Remaining **{pos_label}** pool: {', '.join(remaining_names[:4]) or '—'}. "
+                f"Compare vs your next pick **{bundle.get('proj', {}).get('my_next_pick') or bundle.get('pick')}**.{context_suffix}"
+            )
+        elif subtype == "wait_timing":
+            direct = (
+                f"You can likely wait **1–2 rounds** on **{pos_label}** if **{next_name}** is the only elite name left, "
+                f"but scarcity index **{bundle.get('position_scarcity') or 'rising'}** raises reach risk."
+            )
+            framing = (
+                f"{drafted_note}"
+                f"Next **{pos_label}** candidates by rank: {', '.join(remaining_names[:3]) or '—'}.{context_suffix}"
+            )
+        elif subtype == "position_run":
+            direct = (
+                f"A **{pos_label} run** is plausible — **{next_name}** is the top remaining name and "
+                f"**{len(remaining_names)}** **{pos_label}** options remain in your board context."
+            )
+            framing = (
+                f"{drafted_note}"
+                f"Managers often cluster scarce positions; queue/watchlist: "
+                f"{', '.join(bundle.get('draft_queue')[:3]) or '—'}.{context_suffix}"
+            )
+        elif subtype == "position_next" and not remaining_names:
+            direct = (
+                f"{drafted_note}"
+                f"No clear remaining **{pos_label}** options in your saved board context at {pick_note}."
+            )
+            framing = (
+                f"Check available_players and recommendations for updated **{pos_label}** tiers.{context_suffix}"
+            )
+        else:
+            direct = (
+                f"{drafted_note}"
+                f"The next **{pos_label}** most likely selected is **{next_name}** "
+                f"— highest-ranked remaining **{pos_label}** on your saved board."
+            )
+            framing = (
+                f"Ranked by Market Rank / ADP among available **{pos_label}** in context at {pick_note}. "
+                f"**{len(drafted_pos)}** **{pos_label}** already drafted.{context_suffix}"
+            )
+
+        if len(remaining_names) > 1:
+            ranked_lines = [f"{i + 1}. **{n}**" for i, n in enumerate(remaining_names[:3])]
+            tradeoffs = (
+                f"After **{next_name}**, the most likely **{pos_label}** selections are: "
+                + " · ".join(ranked_lines)
+            )
+        else:
+            tradeoffs = (
+                f"Thin **{pos_label}** tier after **{next_name}** — alternatives may shift to other positions."
+            )
+
+        scarcity_line = (
+            f"**{pos_label}** scarcity is {'increasing' if bundle.get('position_scarcity') else 'tightening'} "
+            f"(index **{bundle.get('position_scarcity') or 'n/a'}**); "
+            f"waiting two more rounds carries elevated risk if only **{len(remaining_names)}** remain."
+        )
+        risk_line = (
+            f"If you skip **{next_name}**, the next **{pos_label}** tier may fall off before your next pick "
+            f"(round **{rnd}**, pick **{pick}**)."
+        )
+        what_if = [
+            f"If **{next_name}** is drafted early → pivot to **{remaining_names[1] if len(remaining_names) > 1 else 'next tier'}**.",
+            f"If you wait one round → monitor whether a **{pos_label} run** clears the top tier.",
+            f"If you prioritize need elsewhere → **{pos_label}** depth drops fast after **{next_name}**.",
+        ]
+    elif mode == "player_why":
         focus = player or top
         row = _find_player_row_in_bundle(focus, bundle) or {}
         ds = bundle.get("draft_status") if isinstance(bundle.get("draft_status"), dict) else {}
@@ -3155,8 +3339,10 @@ def solve_baseball_draft(
         missing.append("best_available or available_players")
     if mode == "player_why" and not player:
         missing.append("question_player or player name in question")
-    if mode == "sleeper" and not bundle.get("sleepers") and not bundle.get("sleeper_candidates"):
-        missing.append("sleeper_candidates or sleepers")
+    if mode == "draft_market_prediction" and not _pool_rows_by_position(
+        bundle, extract_draft_position_query(question) or "catcher"
+    ):
+        missing.append("available_players at requested position")
 
     data_used_lines = [
         f"Player focus: **{player}**" if player else "",

@@ -22,6 +22,7 @@ from components.applied_math_problem_interpreter import (
     ProblemInterpretation,
     interpret_suite_question,
 )
+from components.draft_market_question import is_draft_market_prediction_question
 
 # Stable IDs consumed by solvers and tests.
 NBA_STAT_CHASE = "nba_stat_chase"
@@ -323,6 +324,21 @@ def _route_baseball(
     intent: QuestionIntent,
 ) -> ProblemRoute:
     low = question.lower()
+    if is_draft_market_prediction_question(question) and (
+        _has_draft_context(ctx) or "draft" in topics or "draft" in workflow
+    ):
+        req = ("draft_snapshot", "drafted_players", "available_players")
+        avail, miss = _audit_fields(ctx, req)
+        conf = 0.92 if "draft_snapshot" in avail else 0.78 if avail else 0.5
+        return ProblemRoute(
+            problem_type_id=BASEBALL_DRAFT,
+            problem_type="Draft market prediction",
+            confidence=conf,
+            source_app="baseball",
+            required_fields=list(req),
+            available_fields=avail,
+            missing_fields=miss,
+        )
     # Future accumulation beats static compare when user asks about next N seasons.
     if intent.intent_id == INTENT_WILL_HAPPEN or (
         intent.intent_id == INTENT_WHO_IS_BETTER and intent.horizon

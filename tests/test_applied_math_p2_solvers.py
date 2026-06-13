@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import unittest
 
-from components.applied_math_problem_router import BASEBALL_DRAFT, NBA_MATCHUP_EDGE, route_suite_question
+from components.applied_math_problem_router import BASEBALL_DRAFT, BASEBALL_FUTURE_ACCUMULATION, NBA_MATCHUP_EDGE, route_suite_question
 from components.applied_math_solvers import (
     dispatch_solver,
     solve_baseball_draft,
@@ -203,6 +203,78 @@ class TestDraftPickSolver(unittest.TestCase):
         )
         self.assertEqual(route.problem_type_id, BASEBALL_DRAFT)
         self.assertIn("draft_snapshot", route.available_fields)
+
+    def _draft_market_ctx(self) -> dict:
+        return {
+            "draft_snapshot": {
+                "current_pick": 7,
+                "draft_round": 2,
+                "my_next_pick": 18,
+                "user_roster": ["Juan Soto", "Elly De La Cruz"],
+                "canonical_drafted_players": [
+                    "Aaron Judge",
+                    "Juan Soto",
+                    "Corbin Carroll",
+                    "Mookie Betts",
+                    "Elly De La Cruz",
+                    "Cal Raleigh",
+                ],
+                "available_players": [
+                    {"player": "Cal Raleigh", "Primary Position": "C", "Market Rank": 35},
+                    {"player": "William Contreras", "Primary Position": "C", "Market Rank": 40},
+                    {"player": "Adley Rutschman", "Primary Position": "C", "Market Rank": 50},
+                    {"player": "Will Smith", "Primary Position": "C", "Market Rank": 55},
+                    {"player": "Bobby Witt Jr.", "Primary Position": "SS", "Market Rank": 12},
+                ],
+                "recommended_players": [
+                    {"player": "William Contreras", "Primary Position": "C", "Market Rank": 40},
+                ],
+                "needed_positions": ["C", "SS"],
+                "position_scarcity": 2.8,
+            },
+            "player_a": "Julio Rodriguez",
+            "player_b": "Aaron Judge",
+            "_ami_comparison_context": {"HR": "Julio 30 vs Judge 40"},
+            "current_pick": 7,
+            "needed_positions": ["C", "SS"],
+            "position_scarcity": 2.8,
+        }
+
+    def test_next_catcher_routes_draft_not_future_accumulation(self) -> None:
+        q = "Who is likely to be the next catcher picked in this draft?"
+        ctx = self._draft_market_ctx()
+        route = route_suite_question(q, source_app="baseball", context=ctx)
+        self.assertEqual(route.problem_type_id, BASEBALL_DRAFT)
+        self.assertNotEqual(route.problem_type_id, BASEBALL_FUTURE_ACCUMULATION)
+
+    def test_next_catcher_solver_uses_board_not_comparison(self) -> None:
+        q = "Who is likely to be the next catcher picked in this draft?"
+        ctx = self._draft_market_ctx()
+        result = solve_baseball_draft(ctx, q)
+        self.assertEqual(result.computed.get("draft_mode"), "draft_market_prediction")
+        low = result.short_answer.lower()
+        self.assertIn("cal raleigh", low)
+        self.assertIn("william contreras", low)
+        self.assertNotIn("julio", low)
+
+    def test_position_run_solver_mode(self) -> None:
+        ctx = self._draft_market_ctx()
+        result = solve_baseball_draft(ctx, "Which position is likely to run next?")
+        self.assertEqual(result.computed.get("draft_mode"), "draft_market_prediction")
+        self.assertTrue("run" in result.short_answer.lower() or "catcher" in result.short_answer.lower())
+
+    def test_make_it_back_solver_mode(self) -> None:
+        ctx = self._draft_market_ctx()
+        ctx["question_player"] = "William Contreras"
+        result = solve_baseball_draft(ctx, "Will William Contreras make it back to me?")
+        self.assertEqual(result.computed.get("draft_mode"), "draft_market_prediction")
+        self.assertIn("William Contreras", result.short_answer)
+
+    def test_catcher_run_solver_mode(self) -> None:
+        ctx = self._draft_market_ctx()
+        result = solve_baseball_draft(ctx, "Is a catcher run coming?")
+        self.assertEqual(result.computed.get("draft_mode"), "draft_market_prediction")
+        self.assertIn("catcher", result.short_answer.lower())
 
     def test_draft_routes_and_dispatches(self) -> None:
         route = route_suite_question(
