@@ -140,6 +140,41 @@ class TestDraftPickSolver(unittest.TestCase):
         self.assertIn("Junior Caminero", result.short_answer)
         self.assertNotIn("this sleeper", result.short_answer.lower())
 
+    def test_player_why_evaluates_named_player_against_board(self) -> None:
+        ctx = {
+            "question_player": "Jose Ramirez",
+            "player": "Jose Ramirez",
+            "draft_snapshot": {
+                "current_pick": 6,
+                "draft_round": 2,
+                "user_roster": ["Juan Soto", "Elly De La Cruz"],
+                "recommended_players": [
+                    {"player": "Cal Raleigh", "Primary Position": "C", "Fantasy Edge": 7},
+                    {"player": "Jose Ramirez", "Primary Position": "3B", "Fantasy Edge": 4, "Market Rank": 22},
+                ],
+                "available_players": [
+                    {"player": "Jose Ramirez", "Primary Position": "3B", "Fantasy Edge": 4},
+                    {"player": "Bobby Witt Jr.", "Primary Position": "SS"},
+                ],
+                "canonical_drafted_players": ["Aaron Judge", "Juan Soto", "Corbin Carroll"],
+            },
+            "needed_positions": ["C", "SS"],
+            "category_needs": ["HR", "SB"],
+            "draft_status": {"player": "Jose Ramirez", "is_drafted": False, "on_user_roster": False},
+            "current_pick": 6,
+        }
+        result = solve_baseball_draft(
+            ctx,
+            "Why is Jose Ramirez the best player to draft for me right now?",
+        )
+        self.assertEqual(result.computed.get("draft_mode"), "player_why")
+        self.assertIn("Jose Ramirez", result.short_answer)
+        self.assertTrue(
+            "cal raleigh" in result.short_answer.lower()
+            or "better fit" in result.short_answer.lower()
+            or "strong pick" in result.short_answer.lower()
+        )
+
     def test_risk_question_mentions_variance(self) -> None:
         ctx = {
             "draft_snapshot": {

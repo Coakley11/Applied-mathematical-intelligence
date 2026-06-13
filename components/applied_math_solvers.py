@@ -2522,13 +2522,19 @@ def _draft_context_bundle(ctx: dict[str, Any]) -> dict[str, Any]:
 
     position_scarcity = _num(ctx.get("position_scarcity")) or _num(snap.get("position_scarcity")) or _num(proj.get("position_scarcity"))
 
-    player = str(ctx.get("player") or (ctx.get("players") or [""])[0] if isinstance(ctx.get("players"), list) else "").strip()
+    player = str(
+        ctx.get("question_player")
+        or ctx.get("player")
+        or ((ctx.get("players") or [""])[0] if isinstance(ctx.get("players"), list) else "")
+    ).strip()
     if not player and sleepers:
         player = _draft_player_name(sleepers[0])
     if not player and recommendations:
         player = _draft_player_name(recommendations[0])
 
     drafted_exclusions = _ctx_list(ctx.get("drafted_exclusions") or sleepers_snap.get("drafted_exclusions") or drafted_players)
+    question_player_row = ctx.get("question_player_row") if isinstance(ctx.get("question_player_row"), dict) else None
+    draft_status = ctx.get("draft_status") if isinstance(ctx.get("draft_status"), dict) else {}
 
     return {
         "snap": snap,
@@ -2544,6 +2550,9 @@ def _draft_context_bundle(ctx: dict[str, Any]) -> dict[str, Any]:
         "round": int(rnd) if rnd is not None else None,
         "pick": int(pick) if pick is not None else None,
         "player": player,
+        "question_player": str(ctx.get("question_player") or "").strip(),
+        "question_player_row": question_player_row,
+        "draft_status": draft_status,
         "guidance": str(ctx.get("ami_guidance") or "").strip(),
         "needed_positions": needed_positions,
         "category_needs": category_needs,
@@ -2557,8 +2566,64 @@ def _draft_context_bundle(ctx: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _extract_player_from_question_text(question: str) -> str:
+    q = str(question or "").strip()
+    low = q.lower()
+    patterns = (
+        r"why is (.+?) the best",
+        r"why is (.+?) a good",
+        r"why is (.+?) worth",
+        r"should i draft (.+?)(?:\?|\s|$)",
+        r"is (.+?) (?:worth|available|the best)",
+    )
+    for pat in patterns:
+        m = re.search(pat, low, flags=re.I)
+        if m:
+            name = q[m.start(1) : m.end(1)].strip().strip("?").strip()
+            if len(name) >= 3:
+                return name
+    return ""
+
+
+def _player_name_token(name: str) -> str:
+    return str(name or "").split(" (")[0].strip().lower()
+
+
+def _name_in_player_list(name: str, names: list[str]) -> bool:
+    token = _player_name_token(name)
+    return bool(token) and any(_player_name_token(n) == token for n in names)
+
+
+def _find_player_row_in_bundle(name: str, bundle: dict[str, Any]) -> dict[str, Any] | None:
+    qrow = bundle.get("question_player_row")
+    if isinstance(qrow, dict) and _player_name_token(_draft_player_name(qrow)) == _player_name_token(name):
+        return qrow
+    token = _player_name_token(name)
+    for pool_key in ("recommendations", "available", "best_available", "sleepers"):
+        for row in bundle.get(pool_key) or []:
+            if isinstance(row, dict) and _player_name_token(_draft_player_name(row)) == token:
+                return row
+    return None
+
+
+def _resolve_focus_player(question: str, ctx: dict[str, Any], bundle: dict[str, Any]) -> str:
+    named = str(bundle.get("question_player") or ctx.get("question_player") or "").strip()
+    if named:
+        return named
+    parsed = _extract_player_from_question_text(question)
+    if parsed:
+        return parsed
+    return str(bundle.get("player") or "").strip()
+
+
 def _draft_question_mode(question: str) -> str:
     low = question.lower()
+    if re.search(r"why is .+ the best", low) or (
+        "why is" in low and "best" in low and any(w in low for w in ("draft", "pick", "player"))
+    ):
+        return "player_why"
+    if "why is" in low and any(w in low for w in ("good pick", "worth drafting", "right pick", "strong pick", "worth it")):
+        return "player_why"
     if "roster need" in low or "what does my roster" in low:
         return "roster_needs"
     if any(p in low for p in ("best values", "values left", "best value", "value left", "values available")):
@@ -2723,7 +2788,65 @@ def _build_baseball_draft_coach_sections(
     scarcity_line = _draft_scarcity_line(bundle)
     risk_line = _draft_risk_line(bundle, player or top, mode=mode)
 
-    if mode == "roster_needs":
+    if mode == "player_why":
+        focus = player or top
+        row = _find_player_row_in_bundle(focus, bundle) or {}
+        ds = bundle.get("draft_status") if isinstance(bundle.get("draft_status"), dict) else {}
+        drafted = bundle.get("drafted_players") or []
+        is_drafted = bool(ds.get("is_drafted")) or _name_in_player_list(focus, drafted)
+        on_roster = bool(ds.get("on_user_roster"))
+        in_available = _name_in_player_list(focus, avail_names) or bool(row)
+        is_top_rec = _player_name_token(focus) == _player_name_token(top)
+        pos = _player_metric(row, "Primary Position", "position", "pos")
+        edge = _player_metric(row, "Fantasy Edge", "fantasy_edge")
+        market = _player_metric(row, "Market Rank", "market_rank")
+        reason = _player_metric(row, "Reason", "reason")
+
+        if is_drafted and not on_roster:
+            direct = f"**{focus}** is **not available** — already drafted on your saved board."
+        elif on_roster:
+            direct = f"**{focus}** is already on **your roster**; you do not need to draft him again."
+        elif is_top_rec or (rec_names and _player_name_token(focus) == _player_name_token(rec_names[0])):
+            direct = (
+                f"**{focus}** is a strong pick for you right now because he matches your board recommendation "
+                f"and fits **{needs_label}** at {pick_note}."
+            )
+        elif focus and top and _player_name_token(focus) != _player_name_token(top):
+            direct = (
+                f"**{focus}** is a good player, but **{top}** is the better fit on your current board "
+                f"because **{needs_label}** and recommendation priority favor **{top}**."
+            )
+        else:
+            direct = (
+                f"**{focus}** can work at {pick_note} if he addresses **{needs_label}**, "
+                "but verify he is still available on your saved board."
+            )
+
+        avail_note = "available in your tracked pool" if in_available else "not in your top cached available slice — check full board"
+        framing = (
+            f"**{focus}** ({pos or 'position n/a'}) on your board: {avail_note}; "
+            f"draft status: {'drafted' if is_drafted else 'not drafted'}. "
+            f"Roster fit vs **{needs_label}** in **{scoring_label}**.{context_suffix}"
+        )
+        if reason:
+            framing += f" Model note: {reason}."
+        if edge is not None or market is not None:
+            framing += f" Value snapshot: Fantasy Edge **{edge}**, Market Rank **{market}**."
+
+        tradeoffs = (
+            f"Compared with **{alt or top}**: **{focus}** vs **{top}** trades recommendation priority "
+            f"against your stated interest in **{focus}**."
+            if alt or (top and not is_top_rec)
+            else f"Alternatives on board: {', '.join(avail_names[:3]) or 'see available_players'}."
+        )
+        what_if = [
+            f"If you prioritize power → weigh **{focus}** HR/OBP vs **{alt or top}**.",
+            f"If you prioritize speed → compare SB upside vs queue **{', '.join(bundle.get('draft_queue')[:2]) or '—'}**.",
+            f"If you prioritize safety → favor **{top}** unless **{focus}** has clearer floor.",
+            f"If you prioritize upside → **{focus}** vs higher-ceiling alt **{sleeper_names[0] if sleeper_names else alt or '—'}**.",
+        ]
+        risk_line = _draft_risk_line(bundle, focus, mode=mode)
+    elif mode == "roster_needs":
         pos = bundle.get("needed_positions") or []
         cats = bundle.get("category_needs") or []
         pos_text = ", ".join(pos[:6]) if pos else "no major positional gaps"
@@ -2909,7 +3032,9 @@ def solve_baseball_draft(
 ) -> SolverResult:
     """Draft value edge — rank_edge = ADP − current pick; uses live draft_snapshot when present."""
     bundle = _draft_context_bundle(ctx)
-    player = bundle["player"]
+    player = _resolve_focus_player(question, ctx, bundle)
+    if player:
+        bundle["player"] = player
     proj_raw = ctx.get("draft_projection")
     parsed = _parse_draft_projection(proj_raw)
     mode = _draft_question_mode(question)
@@ -2922,12 +3047,12 @@ def solve_baseball_draft(
     if pick is None:
         pick = (rnd - 1) * num_teams + (num_teams // 2) + 1
 
-    focus_row = None
-    if bundle["recommendations"]:
+    focus_row = _find_player_row_in_bundle(player, bundle) if player else None
+    if focus_row is None and bundle["recommendations"]:
         focus_row = bundle["recommendations"][0]
-    elif bundle["sleepers"]:
+    elif focus_row is None and bundle["sleepers"]:
         focus_row = bundle["sleepers"][0]
-    elif bundle["best_available"]:
+    elif focus_row is None and bundle["best_available"]:
         focus_row = bundle["best_available"][0]
 
     adp_val = adp if adp is not None else _player_adp_from_row(focus_row)
@@ -3028,6 +3153,8 @@ def solve_baseball_draft(
         missing.append("needed_positions or category_needs")
     if mode == "best_values" and not bundle.get("best_available") and not bundle.get("available"):
         missing.append("best_available or available_players")
+    if mode == "player_why" and not player:
+        missing.append("question_player or player name in question")
     if mode == "sleeper" and not bundle.get("sleepers") and not bundle.get("sleeper_candidates"):
         missing.append("sleeper_candidates or sleepers")
 
