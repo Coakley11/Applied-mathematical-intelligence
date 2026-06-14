@@ -48,9 +48,27 @@ def _load_suite_context() -> tuple[str, str, str, dict]:
             blob_ctx = payload.get("context") if isinstance(payload.get("context"), dict) else {}
             if blob_ctx:
                 ctx_dict = blob_ctx
-                hydrate_source = "question_id_blob"
+                load_source = str(payload.get("blob_load_source") or "saved_items")
+                hydrate_source = "resume_subtitle" if load_source == "resume_subtitle" else "question_id_blob"
                 st.session_state["_suite_ai_context"] = json.dumps(ctx_dict, ensure_ascii=False)
                 st.session_state["_suite_ai_hydrate_source"] = hydrate_source
+                try:
+                    from suite_analytical_question import _context_payload_hash
+
+                    st.session_state["_suite_ai_blob_meta"] = {
+                        "url_question_id": qid,
+                        "loaded_question_id": qid,
+                        "payload_question_id": payload.get("question_id"),
+                        "blob_load_source": load_source,
+                        "blob_updated_at": payload.get("blob_store_updated_at") or payload.get("saved_at"),
+                        "blob_payload_hash": payload.get("payload_hash"),
+                        "loaded_context_hash": _context_payload_hash(ctx_dict),
+                        "blob_diagnostics": payload.get("blob_diagnostics"),
+                        "blob_store_app": payload.get("blob_store_app"),
+                        "blob_load_candidates": payload.get("blob_load_candidates"),
+                    }
+                except Exception:
+                    pass
         except Exception:
             pass
 

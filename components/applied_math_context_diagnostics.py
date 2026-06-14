@@ -26,6 +26,71 @@ def render_developer_mode_sidebar_toggle(st: Any) -> None:
     )
 
 
+def _query_param(st: Any, name: str) -> str:
+    try:
+        raw = st.query_params.get(name)
+    except Exception:
+        return ""
+    if raw is None:
+        return ""
+    if isinstance(raw, list):
+        return str(raw[0] or "").strip()
+    return str(raw).strip()
+
+
+def build_load_identity_diagnostics(
+    st: Any,
+    *,
+    context: dict[str, Any],
+    question_id: str,
+) -> dict[str, Any]:
+    try:
+        from applied_math_build_info import GIT_COMMIT, SOLVER_BUILD_MARKER
+    except ImportError:
+        SOLVER_BUILD_MARKER, GIT_COMMIT = "unknown", "unknown"
+
+    blob_meta = st.session_state.get("_suite_ai_blob_meta")
+    meta = dict(blob_meta) if isinstance(blob_meta, dict) else {}
+    url_qid = _query_param(st, "suite_ai_question_id") or meta.get("url_question_id") or ""
+    loaded_qid = str(question_id or st.session_state.get("_suite_ai_question_id") or meta.get("loaded_question_id") or "").strip()
+    payload_qid = str(meta.get("payload_question_id") or "").strip()
+
+    snap = context.get("draft_snapshot") if isinstance(context.get("draft_snapshot"), dict) else {}
+    avail = context.get("available_players") or snap.get("available_players") or []
+    best = context.get("best_available") or snap.get("best_available_players") or []
+
+    try:
+        from suite_analytical_question import _context_payload_hash
+
+        loaded_context_hash = _context_payload_hash(context) if context else meta.get("loaded_context_hash")
+    except Exception:
+        loaded_context_hash = meta.get("loaded_context_hash")
+
+    hash_match = bool(meta.get("blob_payload_hash") and loaded_context_hash == meta.get("blob_payload_hash"))
+
+    return {
+        "deploy_build": SOLVER_BUILD_MARKER,
+        "deploy_commit": GIT_COMMIT,
+        "url_question_id": url_qid or None,
+        "loaded_question_id": loaded_qid or None,
+        "payload_question_id": payload_qid or None,
+        "question_id_match": bool(url_qid and loaded_qid and url_qid == loaded_qid == (payload_qid or loaded_qid)),
+        "blob_load_source": meta.get("blob_load_source") or st.session_state.get("_suite_ai_hydrate_source"),
+        "blob_store_app": meta.get("blob_store_app"),
+        "blob_updated_at": meta.get("blob_updated_at"),
+        "blob_payload_hash": meta.get("blob_payload_hash"),
+        "loaded_context_hash": loaded_context_hash,
+        "payload_hash_matches_loaded_context": hash_match,
+        "available_players_count_hydrated": len(avail) if isinstance(avail, list) else 0,
+        "draft_snapshot_available_players_count": len(snap.get("available_players") or [])
+        if isinstance(snap.get("available_players"), list)
+        else 0,
+        "best_available_count": len(best) if isinstance(best, list) else 0,
+        "current_pick": context.get("current_pick") or snap.get("current_pick"),
+        "blob_load_candidates": meta.get("blob_load_candidates"),
+    }
+
+
 def render_applied_math_context_diagnostics(
     st: Any,
     *,
@@ -38,6 +103,18 @@ def render_applied_math_context_diagnostics(
     if not applied_math_developer_mode_enabled(st):
         return
 
+    identity = build_load_identity_diagnostics(st, context=context, question_id=question_id)
+    with st.expander("Blob identity (AMI load)", expanded=True):
+        for key, val in identity.items():
+            if val is None or val == "" or val == {} or val == []:
+                continue
+            st.text(f"{key}: {val}")
+        if identity.get("blob_payload_hash") and identity.get("loaded_context_hash"):
+            if not identity.get("payload_hash_matches_loaded_context"):
+                st.warning("Loaded context hash does not match blob_payload_hash — stale or merged payload.")
+        if identity.get("available_players_count_hydrated", 0) == 0 and identity.get("blob_load_source") == "resume_subtitle":
+            st.warning("Loaded from resume subtitle fallback — not full saved blob.")
+
     req_keys, nested = expected_fields_for_page(source_app, source_page)
     present, missing = audit_context(context, required_keys=req_keys, nested_required=nested)
 
@@ -45,6 +122,8 @@ def render_applied_math_context_diagnostics(
     hydrate = str(st.session_state.get("_suite_ai_hydrate_source") or "").strip()
     if hydrate == "question_id_blob":
         hydration = "question_id blob (full payload)"
+    elif hydrate == "resume_subtitle":
+        hydration = "resume subtitle (truncated fallback)"
     elif hydrate == "metrics":
         hydration = "resume metrics"
     elif hydrate == "url_query":

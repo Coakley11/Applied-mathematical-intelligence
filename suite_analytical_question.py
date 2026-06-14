@@ -274,6 +274,46 @@ def _is_draft_context(ctx: dict[str, Any], source_page: str = "") -> bool:
     return "draft" in workflow or bool(ctx.get("draft_snapshot"))
 
 
+def _context_payload_hash(ctx: dict[str, Any]) -> str:
+    text = json.dumps(ctx, sort_keys=True, ensure_ascii=False, default=str)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
+def _blob_candidate_score(payload: dict[str, Any], updated_at: str) -> tuple[str, int]:
+    ctx = payload.get("context") if isinstance(payload.get("context"), dict) else {}
+    snap = ctx.get("draft_snapshot") if isinstance(ctx.get("draft_snapshot"), dict) else {}
+    diag = payload.get("blob_diagnostics") if isinstance(payload.get("blob_diagnostics"), dict) else {}
+    avail = diag.get("available_players_count")
+    if avail is None:
+        avail = len(ctx.get("available_players") or snap.get("available_players") or [])
+    ts = str(updated_at or payload.get("saved_at") or payload.get("blob_store_updated_at") or "")
+    return (ts, int(avail or 0))
+
+
+def _select_best_blob_payload(candidates: list[tuple[str, str, dict[str, Any]]]) -> dict[str, Any] | None:
+    if not candidates:
+        return None
+    best_ts, best_app, best_payload = max(
+        candidates,
+        key=lambda item: _blob_candidate_score(item[2], item[0]),
+    )
+    out = copy.deepcopy(best_payload)
+    out["blob_store_updated_at"] = best_ts or out.get("saved_at")
+    out["blob_store_app"] = best_app
+    out["blob_load_source"] = "saved_items"
+    if len(candidates) > 1:
+        out["blob_load_candidates"] = [
+            {
+                "app": app,
+                "updated_at": ts,
+                "payload_hash": (payload or {}).get("payload_hash"),
+                "available_players_count": _blob_candidate_score(payload, ts)[1],
+            }
+            for ts, app, payload in candidates
+        ]
+    return out
+
+
 def _player_name(raw: Any) -> str:
     return str(raw or "").split(" (")[0].strip()
 
@@ -416,6 +456,7 @@ def load_analytical_question_payload(question_id: str) -> dict[str, Any]:
     try:
         from suite_account import load_saved_items
 
+        candidates: list[tuple[str, str, dict[str, Any]]] = []
         for app_name in search_apps:
             rows = load_saved_items(app=app_name, item_type=_CONTEXT_ITEM_TYPE, limit=80)
             for row in rows:
@@ -423,10 +464,10 @@ def load_analytical_question_payload(question_id: str) -> dict[str, Any]:
                     continue
                 payload = row.get("payload")
                 if isinstance(payload, dict):
-                    out = copy.deepcopy(payload)
-                    out["blob_store_updated_at"] = row.get("updated_at") or out.get("saved_at")
-                    out["blob_store_app"] = app_name
-                    return out
+                    candidates.append((str(row.get("updated_at") or ""), app_name, payload))
+        picked = _select_best_blob_payload(candidates)
+        if picked:
+            return picked
     except Exception as exc:
         log.warning("load_saved_items failed for question context: %s", exc)
     try:
@@ -439,7 +480,12 @@ def load_analytical_question_payload(question_id: str) -> dict[str, Any]:
                 continue
             ctx = _parse_context_from_resume_subtitle(str(row.get("subtitle") or ""))
             if ctx:
-                return {"context": ctx, "question_id": qid}
+                return {
+                    "context": ctx,
+                    "question_id": qid,
+                    "blob_load_source": "resume_subtitle",
+                    "payload_hash": _context_payload_hash(ctx),
+                }
     except Exception:
         pass
     return {}
@@ -469,7 +515,8 @@ def hydrate_applied_intelligence_session(st: Any, *, metrics: dict[str, Any] | N
 
     m = dict(metrics or {})
     question = str(m.get("question") or _qp("suite_ai_question") or "").strip()
-    qid = str(m.get("question_id") or m.get("dedupe_fingerprint") or _qp("suite_ai_question_id") or "").strip()
+    url_question_id = str(m.get("question_id") or m.get("dedupe_fingerprint") or _qp("suite_ai_question_id") or "").strip()
+    qid = url_question_id
     source_app = str(m.get("source_app") or _qp("suite_ai_source_app") or "").strip()
     source_page = str(m.get("source_page") or _qp("suite_ai_source_page") or "").strip()
     area = str(m.get("quant_area") or m.get("area") or _qp("suite_ai_area") or "").strip()
@@ -483,17 +530,29 @@ def hydrate_applied_intelligence_session(st: Any, *, metrics: dict[str, Any] | N
     if qid:
         blob_payload = load_analytical_question_payload(qid)
         blob_ctx = blob_payload.get("context") if isinstance(blob_payload.get("context"), dict) else {}
+        blob_load_source = str(blob_payload.get("blob_load_source") or "saved_items").strip()
         if blob_ctx:
             ctx = copy.deepcopy(blob_ctx)
-            hydrate_source = "question_id_blob"
+            if blob_load_source == "resume_subtitle":
+                hydrate_source = "resume_subtitle"
+            else:
+                hydrate_source = "question_id_blob"
         blob_ss = blob_payload.get("source_state") if isinstance(blob_payload.get("source_state"), dict) else {}
         if blob_ss:
             source_state = copy.deepcopy(blob_ss)
+        loaded_hash = _context_payload_hash(ctx) if ctx else ""
         ss["_suite_ai_blob_meta"] = {
+            "url_question_id": url_question_id,
+            "loaded_question_id": qid,
+            "payload_question_id": blob_payload.get("question_id"),
+            "question_id_match": url_question_id == str(blob_payload.get("question_id") or qid).strip(),
+            "blob_load_source": blob_load_source,
             "blob_updated_at": blob_payload.get("blob_store_updated_at") or blob_payload.get("saved_at"),
             "blob_payload_hash": blob_payload.get("payload_hash"),
+            "loaded_context_hash": loaded_hash,
             "blob_diagnostics": blob_payload.get("blob_diagnostics"),
             "blob_store_app": blob_payload.get("blob_store_app"),
+            "blob_load_candidates": blob_payload.get("blob_load_candidates"),
         }
 
     metrics_ctx: dict[str, Any] = {}
