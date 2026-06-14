@@ -923,6 +923,32 @@ def render_solver_dev_diagnostics(
         hydrate = str(st.session_state.get("_suite_ai_hydrate_source") or "").strip()
         if hydrate:
             st.markdown(f"- **hydrate_source:** `{hydrate}`")
+
+        try:
+            from components.draft_context_diagnostics import (
+                build_draft_context_diagnostics,
+                build_solver_bundle_diagnostics,
+                render_draft_context_diagnostics_block,
+            )
+
+            ctx_debug = dict(ctx)
+            ctx_debug["_debug_question"] = str(st.session_state.get("_suite_ai_question") or st.session_state.get("ps_library_problem") or "")
+            hydrated = build_draft_context_diagnostics(ctx_debug, hydrate_source=hydrate)
+            bundle = build_solver_bundle_diagnostics(ctx_debug)
+            render_draft_context_diagnostics_block(st, hydrated, title="Hydrated available pool")
+            render_draft_context_diagnostics_block(st, bundle, title="Solver bundle (consumed)")
+            if hydrated.get("available_players_count_hydrated", 0) > 0 and bundle.get("bundle_available_count", 0) == 0:
+                st.warning("Hydrated pool has rows but solver bundle is empty — check draft_snapshot vs ctx merge.")
+            if hydrated.get("available_players_count_hydrated", 0) == 0:
+                st.warning("Hydrated available_players is empty — likely hydration (not Baseball packaging) if send had pool.")
+            elif bundle.get("bundle_available_count", 0) > 0:
+                st.info(
+                    "Hydrated and bundle counts are both > 0. If the answer still says "
+                    "'Fair price for the best player', 'pick 1', or '0 available names', classify as **C — reasoning/mode bug**."
+                )
+        except Exception as exc:
+            st.markdown(f"- **draft_pool_diag_error:** `{exc}`")
+
         coach = result.computed.get("coach_sections") if isinstance(result.computed, dict) else None
         if isinstance(coach, dict):
             st.markdown(f"- **coach_sections:** {', '.join(sorted(coach.keys()))}")

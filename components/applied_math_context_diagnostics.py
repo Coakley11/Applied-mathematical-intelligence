@@ -86,23 +86,33 @@ def render_applied_math_context_diagnostics(
             for key in missing:
                 st.markdown(f"- `{key}`")
 
-        draft_snap = context.get("draft_snapshot")
-        if isinstance(draft_snap, dict) and draft_snap:
-            st.markdown("**Draft snapshot (received)**")
-            for key in (
-                "current_pick",
-                "draft_round",
-                "user_roster",
-                "recommended_players",
-                "available_players",
-                "sleepers",
-                "scoring_settings",
-            ):
-                if key in draft_snap:
-                    st.markdown(f"- `{key}`: {_preview_value(draft_snap.get(key))}")
+    draft_snap = context.get("draft_snapshot")
+    if isinstance(draft_snap, dict) and draft_snap:
+        st.markdown("**Draft snapshot (received)**")
+        for key in (
+            "current_pick",
+            "draft_round",
+            "user_roster",
+            "recommended_players",
+            "available_players",
+            "sleepers",
+            "scoring_settings",
+        ):
+            if key in draft_snap:
+                st.markdown(f"- `{key}`: {_preview_value(draft_snap.get(key))}")
 
-        with st.expander("Raw context JSON", expanded=False):
-            st.code(json.dumps(context, indent=2, ensure_ascii=False, default=str)[:12000])
+    try:
+        from components.draft_context_diagnostics import build_draft_context_diagnostics, render_draft_context_diagnostics_block
+
+        hydrate_src = str(st.session_state.get("_suite_ai_hydrate_source") or hydrate or "").strip()
+        pool_diag = build_draft_context_diagnostics(context, hydrate_source=hydrate_src)
+        with st.expander("Draft pool diagnostics (Developer Mode)", expanded=True):
+            render_draft_context_diagnostics_block(st, pool_diag, title="Hydrated context (pre-solver)")
+    except Exception:
+        pass
+
+    with st.expander("Raw context JSON", expanded=False):
+        st.code(json.dumps(context, indent=2, ensure_ascii=False, default=str)[:12000])
 
 
 def _preview_value(val: Any, limit: int = 120) -> str:
