@@ -241,6 +241,39 @@ def _normalize_question(text: str) -> str:
     return re.sub(r"\s+", " ", str(text or "").strip().lower())
 
 
+def _draft_board_fingerprint_parts(ctx: dict[str, Any]) -> list[str]:
+    """Draft board state for question_id — avoids stale blob collisions across pick/pool changes."""
+    parts: list[str] = []
+    snap = ctx.get("draft_snapshot") if isinstance(ctx.get("draft_snapshot"), dict) else {}
+    pick = ctx.get("current_pick")
+    if pick is None:
+        pick = snap.get("current_pick")
+    rnd = ctx.get("draft_round")
+    if rnd is None:
+        rnd = snap.get("draft_round")
+    if pick is not None:
+        parts.append(f"pick={int(pick)}")
+    if rnd is not None:
+        parts.append(f"round={int(rnd)}")
+    diag = ctx.get("send_pipeline_diagnostics") if isinstance(ctx.get("send_pipeline_diagnostics"), dict) else {}
+    board_picks = diag.get("session_pick_count")
+    if board_picks is not None:
+        parts.append(f"board_picks={int(board_picks)}")
+    pool_n = diag.get("session_projection_available_count")
+    if pool_n is None:
+        pool_n = diag.get("ctx_available_players_count")
+    if pool_n is not None:
+        parts.append(f"pool={int(pool_n)}")
+    return parts
+
+
+def _is_draft_context(ctx: dict[str, Any], source_page: str = "") -> bool:
+    if "draft" in str(source_page or "").lower():
+        return True
+    workflow = str(ctx.get("workflow") or "").lower()
+    return "draft" in workflow or bool(ctx.get("draft_snapshot"))
+
+
 def _player_name(raw: Any) -> str:
     return str(raw or "").split(" (")[0].strip()
 
@@ -277,6 +310,8 @@ def question_dedupe_fingerprint(
             parts.append(",".join(sorted(str(v).lower() for v in val)))
         else:
             parts.append(str(val).lower())
+    if _is_draft_context(ctx, source_page):
+        parts.extend(_draft_board_fingerprint_parts(ctx))
     blob = "|".join(parts)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:12]
 
@@ -377,26 +412,21 @@ def load_analytical_question_payload(question_id: str) -> dict[str, Any]:
     if not qid:
         return {}
     resume_key = f"ai:question:{qid}"
-    search_apps = ["applied_intelligence"]
+    search_apps = ["applied_intelligence", "baseball", "investment", "nba", "music"]
     try:
         from suite_account import load_saved_items
 
         for app_name in search_apps:
             rows = load_saved_items(app=app_name, item_type=_CONTEXT_ITEM_TYPE, limit=80)
             for row in rows:
-                if str(row.get("item_key") or "") == qid:
-                    payload = row.get("payload")
-                    if isinstance(payload, dict):
-                        return copy.deepcopy(payload)
-        for app_name in ("investment", "baseball", "nba", "music"):
-            if app_name in search_apps:
-                continue
-            rows = load_saved_items(app=app_name, item_type=_CONTEXT_ITEM_TYPE, limit=80)
-            for row in rows:
-                if str(row.get("item_key") or "") == qid:
-                    payload = row.get("payload")
-                    if isinstance(payload, dict):
-                        return copy.deepcopy(payload)
+                if str(row.get("item_key") or "") != qid:
+                    continue
+                payload = row.get("payload")
+                if isinstance(payload, dict):
+                    out = copy.deepcopy(payload)
+                    out["blob_store_updated_at"] = row.get("updated_at") or out.get("saved_at")
+                    out["blob_store_app"] = app_name
+                    return out
     except Exception as exc:
         log.warning("load_saved_items failed for question context: %s", exc)
     try:
@@ -459,6 +489,12 @@ def hydrate_applied_intelligence_session(st: Any, *, metrics: dict[str, Any] | N
         blob_ss = blob_payload.get("source_state") if isinstance(blob_payload.get("source_state"), dict) else {}
         if blob_ss:
             source_state = copy.deepcopy(blob_ss)
+        ss["_suite_ai_blob_meta"] = {
+            "blob_updated_at": blob_payload.get("blob_store_updated_at") or blob_payload.get("saved_at"),
+            "blob_payload_hash": blob_payload.get("payload_hash"),
+            "blob_diagnostics": blob_payload.get("blob_diagnostics"),
+            "blob_store_app": blob_payload.get("blob_store_app"),
+        }
 
     metrics_ctx: dict[str, Any] = {}
     if isinstance(m.get("context"), dict):

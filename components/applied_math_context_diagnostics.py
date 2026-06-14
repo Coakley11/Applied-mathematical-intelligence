@@ -65,6 +65,20 @@ def render_applied_math_context_diagnostics(
         st.markdown(f"**Context size:** {ctx_size} chars ({hydration})")
         if hydrate:
             st.markdown(f"**Hydrate source:** `{hydrate}`")
+        blob_meta = st.session_state.get("_suite_ai_blob_meta")
+        if isinstance(blob_meta, dict) and blob_meta:
+            st.markdown("**Blob store (loaded)**")
+            for key in (
+                "blob_updated_at",
+                "blob_payload_hash",
+                "blob_store_app",
+            ):
+                if blob_meta.get(key):
+                    st.markdown(f"- `{key}`: `{blob_meta[key]}`")
+            diag = blob_meta.get("blob_diagnostics")
+            if isinstance(diag, dict):
+                for key, val in diag.items():
+                    st.markdown(f"- `blob_{key}`: `{val}`")
         st.markdown(f"**Question:** {question[:200]}{'…' if len(question) > 200 else ''}")
         st.caption(
             "Normal view shows 3–5 key inputs only. This panel is the full transferred payload."
