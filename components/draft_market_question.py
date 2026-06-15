@@ -42,10 +42,36 @@ _POSITION_ALIASES: dict[str, tuple[str, ...]] = {
 }
 
 
+def is_player_explanation_question(question: str) -> bool:
+    """True when the user asks why a named player is the right draft pick."""
+    low = str(question or "").strip().lower()
+    if "why is" not in low:
+        return False
+    if re.search(r"why is .+? (?:the best|worth|a good|the right|the top)", low):
+        return True
+    if any(
+        phrase in low
+        for phrase in (
+            "good pick",
+            "worth drafting",
+            "right pick",
+            "strong pick",
+            "worth it",
+            "best catcher",
+            "best player",
+            "best pick",
+        )
+    ):
+        return True
+    return False
+
+
 def is_draft_market_prediction_question(question: str) -> bool:
     """True when question is about draft board flow, not player career projection."""
     low = str(question or "").strip().lower()
     if not low:
+        return False
+    if is_player_explanation_question(question):
         return False
     if any(re.search(pat, low) for pat in _DRAFT_MARKET_PATTERNS):
         return True

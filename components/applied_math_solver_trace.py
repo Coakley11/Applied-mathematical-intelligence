@@ -11,6 +11,7 @@ class SolverRunTrace:
     renderer_path: str = "render_suite_solver_answer"
     used_fallback: bool = False
     fallback_error: str = ""
+    failure_stage: str = ""
     generic_flow_rendered: bool = False
     source_app: str = ""
     source_page: str = ""
@@ -32,6 +33,7 @@ class SolverRunTrace:
             "renderer_path": self.renderer_path,
             "used_fallback": self.used_fallback,
             "fallback_error": self.fallback_error,
+            "failure_stage": self.failure_stage,
             "generic_flow_rendered": self.generic_flow_rendered,
             "source_app": self.source_app,
             "source_page": self.source_page,

@@ -276,6 +276,31 @@ class TestDraftPickSolver(unittest.TestCase):
         self.assertEqual(result.computed.get("draft_mode"), "draft_market_prediction")
         self.assertIn("catcher", result.short_answer.lower())
 
+    def test_contreras_catcher_why_explains_position_not_overall_rec(self) -> None:
+        ctx = self._draft_market_ctx()
+        ctx["draft_snapshot"]["recommended_players"] = [
+            {"player": "Jose Ramirez", "Primary Position": "3B", "Market Rank": 8, "Fantasy Edge": 12},
+            {"player": "Kyle Schwarber", "Primary Position": "OF", "Market Rank": 14, "Fantasy Edge": 10},
+            {"player": "Matt Olson", "Primary Position": "1B", "Market Rank": 16, "Fantasy Edge": 9},
+        ]
+        ctx["draft_snapshot"]["available_players"].extend(
+            [
+                {"player": "Shea Langeliers", "Primary Position": "C", "Market Rank": 45},
+                {"player": "Salvador Perez", "Primary Position": "C", "Market Rank": 52},
+            ]
+        )
+        ctx["question_player"] = "William Contreras"
+        q = "Why is William Contreras the best catcher to draft now?"
+        result = solve_baseball_draft(ctx, q)
+        self.assertEqual(result.computed.get("draft_mode"), "player_why")
+        text = (result.short_answer + " " + result.why).lower()
+        self.assertIn("william contreras", text)
+        self.assertIn("catcher", text)
+        self.assertNotIn("jose ramirez is the better fit", text)
+        self.assertTrue(
+            "langeliers" in text or "perez" in text or "top remaining" in text or "market rank" in text
+        )
+
     def test_draft_routes_and_dispatches(self) -> None:
         route = route_suite_question(
             "Is Corbin Carroll worth a Round 2 pick?",

@@ -22,7 +22,11 @@ from components.applied_math_problem_interpreter import (
     ProblemInterpretation,
     interpret_suite_question,
 )
-from components.draft_market_question import is_draft_market_prediction_question, is_draft_head_to_head_question
+from components.draft_market_question import (
+    is_draft_head_to_head_question,
+    is_draft_market_prediction_question,
+    is_player_explanation_question,
+)
 
 # Stable IDs consumed by solvers and tests.
 NBA_STAT_CHASE = "nba_stat_chase"
@@ -331,6 +335,27 @@ def _route_baseball(
     intent: QuestionIntent,
 ) -> ProblemRoute:
     low = question.lower()
+    if is_player_explanation_question(question):
+        req = ("draft_snapshot", "question_player")
+        avail, miss = _audit_fields(ctx, req)
+        has_draft_page = _has_draft_context(ctx) or "draft" in topics or "draft" in workflow or "draft" in page.lower()
+        if "draft_snapshot" in avail:
+            conf = 0.9
+        elif avail:
+            conf = 0.78
+        elif has_draft_page:
+            conf = 0.58
+        else:
+            conf = 0.45
+        return ProblemRoute(
+            problem_type_id=BASEBALL_DRAFT,
+            problem_type="Draft player explanation",
+            confidence=conf,
+            source_app="baseball",
+            required_fields=list(req),
+            available_fields=avail,
+            missing_fields=miss,
+        )
     if is_draft_market_prediction_question(question):
         req = ("draft_snapshot", "drafted_players", "available_players")
         avail, miss = _audit_fields(ctx, req)

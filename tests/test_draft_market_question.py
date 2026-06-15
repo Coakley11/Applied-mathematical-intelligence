@@ -8,6 +8,7 @@ from components.draft_market_question import (
     extract_draft_position_query,
     is_draft_head_to_head_question,
     is_draft_market_prediction_question,
+    is_player_explanation_question,
     position_matches_row,
 )
 
@@ -41,6 +42,16 @@ class TestDraftMarketQuestionDetection(unittest.TestCase):
     def test_position_matches_catcher_row(self) -> None:
         self.assertTrue(position_matches_row("catcher", "C"))
         self.assertTrue(position_matches_row("catcher", "C/1B"))
+
+    def test_why_contreras_best_catcher_is_player_explanation_not_market(self) -> None:
+        q = "Why is William Contreras the best catcher to draft now?"
+        self.assertTrue(is_player_explanation_question(q))
+        self.assertFalse(is_draft_market_prediction_question(q))
+
+    def test_why_contreras_draft_next_is_player_explanation(self) -> None:
+        q = "Why is William Contreras the best catcher to draft next?"
+        self.assertTrue(is_player_explanation_question(q))
+        self.assertFalse(is_draft_market_prediction_question(q))
 
 
 if __name__ == "__main__":

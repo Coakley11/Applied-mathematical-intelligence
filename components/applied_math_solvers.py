@@ -50,6 +50,7 @@ from components.draft_market_question import (
     extract_draft_position_query,
     is_draft_head_to_head_question,
     is_draft_market_prediction_question,
+    is_player_explanation_question,
     position_matches_row,
 )
 
@@ -532,6 +533,7 @@ def solve_baseball_trend(
     metrics = _ctx_list(ctx.get("metrics"))
     stat = str(trend.get("stat") or (metrics[0] if metrics else "stat")).strip()
     low_q = question.lower()
+    improve_q = any(w in low_q for w in ("improve", "next season", "future season"))
     if any(w in low_q for w in ("double", "doubles", "2b")):
         answer_stat = "2B"
     elif any(w in low_q for w in ("home run", " homer", " hr")):
@@ -643,8 +645,42 @@ def solve_baseball_trend(
     model_note = math_idea
 
     if slope is not None and r2 is not None:
-        if meaningful:
-            short_answer = f"Yes — the {direction} {answer_stat} trend looks meaningful at your thresholds."
+        if improve_q:
+            if meaningful and str(direction).lower() in ("up", "positive", "rising"):
+                short_answer = (
+                    f"**{player}** is likely to **improve next season** — {answer_stat} trend is **{direction}** "
+                    f"(slope **{slope:g}**/year, R² **{r2:g}**) above your thresholds."
+                )
+                why = (
+                    f"The **{answer_stat}** slope (**{slope:g}**/season) and R² (**{r2:g}**) suggest real growth, "
+                    f"not a one-year spike — monitor playing time and role stability."
+                )
+            elif strength == "noisy":
+                short_answer = (
+                    f"**{player}** may improve next season, but the **{answer_stat}** trend is **noisy** "
+                    f"(R² **{r2:g}** vs **{min_r2}** floor) — treat improvement as possible, not probable."
+                )
+                why = (
+                    f"Direction is **{direction}** (slope **{slope:g}**), but low R² means year-to-year variance "
+                    f"could reverse the gain."
+                )
+            else:
+                short_answer = (
+                    f"**{player}** is **unlikely to improve much next season** — {answer_stat} trend is weak "
+                    f"(slope **{slope:g}**, R² **{r2:g}**) vs your meaningful thresholds."
+                )
+                why = (
+                    f"Without a consistent upward fit (R² **{r2:g}**), projecting **improvement** "
+                    f"from this {answer_stat} line is not supported."
+                )
+            live_metrics = {
+                "Player": player,
+                "Next-season read": "Likely improve" if meaningful and str(direction).lower() in ("up", "positive", "rising") else "Uncertain",
+                f"Slope ({stat}/season)": f"{slope:g}",
+                "R²": f"{r2:g}",
+            }
+        elif meaningful:
+            short_answer = f"Yes — **{player}**'s {direction} {answer_stat} trend looks meaningful at your thresholds."
             why = (
                 f"|slope| = **{abs(slope):g}** ≥ **{min_slope}** and R² = **{r2:g}** ≥ **{min_r2}** — "
                 f"the {answer_stat} line fits consistently enough to trust."
@@ -657,11 +693,11 @@ def solve_baseball_trend(
             }
         elif strength == "noisy":
             short_answer = (
-                f"The trend is **{direction}**, but only meaningful if R² is high enough — "
-                f"currently **{r2:g}** vs your **{min_r2}** floor."
+                f"For **{player}**, the trend is **{direction}**, but only meaningful if R² is high enough — "
+                f"currently **{r2:g}** vs your **{min_r2}** floor (likely **noise**)."
             )
             why = (
-                f"Slope is **{slope:g}** {stat}/season ({direction}), but R² **{r2:g}** "
+                f"**{player}**'s slope is **{slope:g}** {stat}/season ({direction}), but R² **{r2:g}** "
                 f"is below **{min_r2}** — year-to-year noise may dominate."
             )
             live_metrics = {
@@ -671,7 +707,7 @@ def solve_baseball_trend(
                 "R²": f"{r2:g}",
             }
         elif strength == "weak":
-            short_answer = f"No — the {stat} trend is too weak to rely on for decisions."
+            short_answer = f"No — **{player}**'s {stat} trend is too weak to rely on for decisions."
             why = (
                 f"|slope| (**{abs(slope):g}**) or R² (**{r2:g}**) falls below your thresholds "
                 f"(slope ≥ **{min_slope}**, R² ≥ **{min_r2}**)."
@@ -683,15 +719,18 @@ def solve_baseball_trend(
                 "R²": f"{r2:g}",
             }
         else:
-            short_answer = f"Inconclusive — review slope **{slope:g}** and R² **{r2:g}** against your thresholds."
-            why = f"Slope **{slope:g}**/season, R² **{r2:g}** — adjust thresholds below to see when the verdict flips."
+            short_answer = f"Inconclusive for **{player}** — review slope **{slope:g}** and R² **{r2:g}** against your thresholds."
+            why = f"**{player}**: slope **{slope:g}**/season, R² **{r2:g}** — adjust thresholds below to see when the verdict flips."
             live_metrics = {
                 "Trend verdict": "Inconclusive",
                 f"Slope ({stat}/season)": f"{slope:g}",
                 "R²": f"{r2:g}",
             }
 
-        if meaningful:
+        if improve_q:
+            conclusion = short_answer
+            reasons = [why] if why else []
+        elif meaningful:
             conclusion = short_answer
             reasons = [why] if why else [
                 f"Slope is **{slope:g}** {stat}/season with R² **{r2:g}**, above your thresholds (slope ≥ {min_slope}, R² ≥ {min_r2}).",
@@ -807,7 +846,17 @@ def solve_baseball_valuation(
     ds = ctx.get("draft_status") if isinstance(ctx.get("draft_status"), dict) else {}
 
     low = question.lower()
-    if val_score is not None:
+    why_rated = "why" in low and any(w in low for w in ("rated", "rating", "highly", "high"))
+    if why_rated and val_score is not None:
+        verdict = "explained"
+        short = (
+            f"**{player}** is **rated highly** (Valuation Score **{val_score:.2f}**) because "
+            f"**Perf_Score {perf}** reflects recent production and **Trend_Score {trend}** captures momentum — "
+            f"not just a single headline number."
+        )
+        if edge is not None and market is not None:
+            short += f" Model Rank vs Market Rank (**{edge}** Fantasy Edge) adds upside vs ADP."
+    elif val_score is not None:
         if val_score >= over_threshold or (edge is not None and edge < -10):
             verdict = "overvalued"
             short = f"**{player}** looks **overvalued** at Valuation Score **{val_score:.2f}** — market may be ahead of recent production/trend."
@@ -825,6 +874,12 @@ def solve_baseball_valuation(
         f"Valuation blends **Current Score** (**{perf}**) and **Trend Score** (**{trend}**) "
         f"with your page weights. Market Rank **{market}**, Fantasy Edge **{edge}**."
     )
+    if why_rated and val_score is not None:
+        why = (
+            f"**Rated highly** because Perf_Score (**{perf}**) and Trend_Score (**{trend}**) "
+            f"both contribute to Valuation Score **{val_score:.2f}** — "
+            f"strong recent output plus positive momentum vs peers in your filtered pool."
+        )
     if ds.get("is_drafted"):
         why += f" **{player}** is already drafted on your board."
     elif ds.get("on_user_roster"):
@@ -873,6 +928,96 @@ def solve_baseball_valuation(
         short_answer=short,
         why=why,
         live_metrics=bool(val_score is not None),
+    )
+
+
+def solve_baseball_historical(ctx: dict[str, Any], question: str) -> SolverResult:
+    """Explain historical leaderboard results — filters, comparison, and outlier rows."""
+    snap = ctx.get("historical_snapshot") if isinstance(ctx.get("historical_snapshot"), dict) else {}
+    player = str(ctx.get("player") or snap.get("selected_player") or "").strip()
+    sort_stat = str(snap.get("sort_stat") or ctx.get("historical_sort_stat") or "stat").strip()
+    filters = ctx.get("filters_applied") or snap.get("filters_applied") or snap.get("year_range") or "active filters"
+    rows = snap.get("top_rows") if isinstance(snap.get("top_rows"), list) else []
+    row_bits: list[str] = []
+    for row in rows[:5]:
+        if not isinstance(row, dict):
+            continue
+        name = str(row.get("player") or "").strip()
+        val = row.get(sort_stat) or row.get(str(sort_stat))
+        if name and val is not None:
+            row_bits.append(f"**{name}** ({sort_stat}={val})")
+
+    low = question.lower()
+    comparison_q = "comparison" in low or ("what does" in low and "show" in low)
+    filter_cause_q = "filter" in low and ("caus" in low or "outcome" in low)
+    bonds_q = "bonds" in low or "why does" in low
+
+    if comparison_q and row_bits:
+        short = (
+            f"This **historical comparison** shows top **{sort_stat}** seasons under **{filters}**: "
+            + ", ".join(row_bits[:3])
+            + f". It ranks who dominated **{sort_stat}** in that window — not a projection for today."
+        )
+    elif filter_cause_q and row_bits:
+        short = (
+            f"These **filters** (**{filters}**, sorted by **{sort_stat}**) surface extreme counting-stat seasons — "
+            f"**{row_bits[0].split('(')[0].strip()}** leads because {sort_stat} totals rank highest in the filtered set."
+        )
+    elif bonds_q and row_bits:
+        short = (
+            f"**Barry Bonds** keeps appearing because your **filters** (**{filters}**) and **{sort_stat}** sort "
+            f"favor his peak seasons ({row_bits[0] if row_bits else 'top HR totals'})."
+        )
+    elif row_bits:
+        short = f"**Historical** snapshot on **{sort_stat}** under **{filters}**: " + ", ".join(row_bits[:3])
+    else:
+        short = "Attach **historical_snapshot.top_rows** with filters to interpret this leaderboard."
+
+    why = (
+        f"The table is sorted by **{sort_stat}** with filters **{filters}**. "
+        + (
+            f"Top rows: {', '.join(row_bits[:3])}."
+            if row_bits
+            else "Compare the selected player's row to neighbors in the filtered window."
+        )
+    )
+    calc_detail = "; ".join(row_bits[:3])
+    tradeoffs = (
+        "Rate stats (OBP, SLG) need playing-time context; counting stats (HR) need era and park adjustments."
+    )
+    what_if = [
+        f"If you widen the year range → different players may top **{sort_stat}**.",
+        f"If you switch sort stat → **{player or 'top rows'}** may drop in rank.",
+        "If you add PA/AB filters → small-sample outliers may disappear.",
+    ]
+
+    return _coach_result(
+        question=question,
+        problem_type="Historical comparison",
+        math_idea="Leaderboard = filtered seasons ranked by sort stat; outliers reflect filters + era effects.",
+        variables="sort_stat = ranking column\nfilters = year range + stat thresholds\npeers = neighboring rows",
+        data_used=_cap_data_used([
+            f"Sort stat: **{sort_stat}**",
+            f"Filters: **{filters}**",
+            f"Player: **{player}**" if player else "",
+        ] + row_bits[:2]),
+        calculation=f"Compare **{sort_stat}** across filtered rows.\n\n{calc_detail}",
+        result=short,
+        interpretation=why,
+        assumptions=[f"Filters: {filters}"],
+        sensitivity_notes="Changing year range or sort stat reshuffles who appears at the top.",
+        missing_fields=[] if row_bits else ["historical_snapshot.top_rows"],
+        partial=not row_bits,
+        problem_type_id=BASEBALL_HISTORICAL,
+        computed={"top_rows": rows[:5], "coach_sections": {
+            "direct_answer": short,
+            "analyst_framing": why,
+            "tradeoffs": tradeoffs,
+            "what_if": what_if,
+        }},
+        short_answer=short,
+        why=why,
+        live_metrics=bool(row_bits),
     )
 
 
@@ -2559,6 +2704,61 @@ def _parse_pct(val: Any) -> float | None:
         return None
 
 
+def _drafted_name_tokens(names: list[str] | None) -> set[str]:
+    return {_player_name_token(str(n).split(" (")[0].strip()) for n in (names or []) if str(n).strip()}
+
+
+def _filter_undrafted_player_rows(
+    rows: list[dict[str, Any]],
+    drafted_tokens: set[str],
+) -> list[dict[str, Any]]:
+    """Drop players already drafted — recommendations must never include off-board names."""
+    if not drafted_tokens:
+        return rows
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        name = _draft_player_name(row)
+        if name and _player_name_token(name) in drafted_tokens:
+            continue
+        out.append(row)
+    return out
+
+
+def _draft_roster_note(bundle: dict[str, Any]) -> str:
+    """Describe roster without implying drafted roster players are draft targets."""
+    roster = bundle.get("roster") or []
+    if not roster:
+        return "your roster"
+    drafted_tokens = _drafted_name_tokens(bundle.get("drafted_players"))
+    parts: list[str] = []
+    for name in roster[:4]:
+        clean = str(name).split(" (")[0].strip()
+        if _player_name_token(clean) in drafted_tokens:
+            parts.append(f"**{clean}** (already on your roster)")
+        else:
+            parts.append(f"**{clean}**")
+    tail = "…" if len(roster) > 4 else ""
+    return f"your **{len(roster)}**-player roster ({', '.join(parts)}{tail})"
+
+
+def _hitter_pool_rows(bundle: dict[str, Any]) -> list[dict[str, Any]]:
+    drafted_tokens = _drafted_name_tokens(bundle.get("drafted_players"))
+    hitters: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for row in _all_pool_rows(bundle):
+        pos = str(_player_metric(row, "Primary Position", "position", "pos") or "").upper()
+        if pos in ("SP", "RP", "P") or "PITCH" in pos:
+            continue
+        name = _draft_player_name(row)
+        if not name or name.lower() in seen:
+            continue
+        if _player_name_token(name) in drafted_tokens:
+            continue
+        seen.add(name.lower())
+        hitters.append(row)
+    return sorted(hitters, key=_row_market_rank)
+
+
 def _draft_player_name(row: Any) -> str:
     if isinstance(row, dict):
         return str(row.get("player") or row.get("Player") or row.get("fullName") or "").strip()
@@ -2826,6 +3026,8 @@ def _resolve_focus_player(question: str, ctx: dict[str, Any], bundle: dict[str, 
 
 def _draft_question_mode(question: str) -> str:
     low = question.lower()
+    if is_player_explanation_question(question):
+        return "player_why"
     if is_draft_market_prediction_question(question):
         return "draft_market_prediction"
     if is_draft_head_to_head_question(question):
@@ -2834,6 +3036,10 @@ def _draft_question_mode(question: str) -> str:
         return "hitter_pitcher"
     if "weakest" in low and "category" in low:
         return "weakest_category"
+    if any(p in low for p in ("biggest roster weakness", "roster weakness", "biggest weakness", "weakest spot")):
+        return "roster_weakness"
+    if re.search(r"which hitter.*(fit|fits).*(roster|team)|hitter.*fits.*better", low):
+        return "hitter_fit"
     if any(p in low for p in ("fits my team", "fit my team", "fits my roster", "who fits")):
         return "team_fit"
     if ("safest" in low and "upside" in low) or re.search(r"safest.*upside|upside.*safest", low):
@@ -2848,6 +3054,8 @@ def _draft_question_mode(question: str) -> str:
         return "roster_needs"
     if any(p in low for p in ("best values", "values left", "best value", "value left", "values available")):
         return "best_values"
+    if "sleeper" in low and any(w in low for w in ("risk", "worth the risk", "how risky", "worth it")):
+        return "sleeper_risk"
     if "sleeper" in low:
         return "sleeper"
     if any(w in low for w in ("risky", "take a risk", "risk in", "risk on", "how risky")):
@@ -2894,6 +3102,43 @@ def _row_market_rank(row: dict[str, Any]) -> float:
         return float(val)
     except (TypeError, ValueError):
         return 9999.0
+
+
+def _player_profile_bits(row: dict[str, Any]) -> str:
+    if not isinstance(row, dict):
+        return ""
+    parts: list[str] = []
+    for keys, label in (
+        (("HR", "hr", "Projected HR", "projected_hr"), "HR"),
+        (("RBI", "rbi", "Projected RBI", "projected_rbi"), "RBI"),
+        (("AVG", "avg", "BA", "batting_avg"), "AVG"),
+        (("OBP", "obp"), "OBP"),
+        (("SB", "sb"), "SB"),
+    ):
+        val = _player_metric(row, *keys)
+        if val is not None:
+            parts.append(f"{label} **{val}**")
+    return ", ".join(parts[:5])
+
+
+def _position_alt_names(
+    bundle: dict[str, Any],
+    *,
+    position_query: str,
+    exclude_name: str,
+    limit: int = 3,
+) -> list[str]:
+    pool = _pool_rows_by_position(bundle, position_query)
+    focus_token = _player_name_token(exclude_name)
+    names: list[str] = []
+    for row in pool:
+        name = _draft_player_name(row)
+        if not name or _player_name_token(name) == focus_token:
+            continue
+        names.append(name)
+        if len(names) >= limit:
+            break
+    return names
 
 
 def _pool_rows_by_position(bundle: dict[str, Any], position_query: str) -> list[dict[str, Any]]:
@@ -3079,7 +3324,7 @@ def _build_baseball_draft_coach_sections(
     avail_names = [_draft_player_name(r) for r in bundle["available"][:6] if _draft_player_name(r)]
     roster = bundle["roster"]
     scoring_label = _draft_scoring_label(bundle["scoring"])
-    roster_note = f"your **{len(roster)}**-player roster ({', '.join(roster[:3])}{'…' if len(roster) > 3 else ''})" if roster else "your roster"
+    roster_note = _draft_roster_note(bundle)
     pick_note = _format_pick_note(pick, rnd, pick_known=pick_known, round_known=round_known)
     context_notes = _draft_context_notes(bundle)
     context_suffix = f" Context: {' · '.join(context_notes)}." if context_notes else ""
@@ -3351,30 +3596,91 @@ def _build_baseball_draft_coach_sections(
         edge = _player_metric(row, "Fantasy Edge", "fantasy_edge")
         market = _player_metric(row, "Market Rank", "market_rank")
         reason = _player_metric(row, "Reason", "reason")
+        profile = _player_profile_bits(row)
+        pos_query = extract_draft_position_query(question)
+        pos_pool = _pool_rows_by_position(bundle, pos_query) if pos_query else []
+        pos_label = pos_query.title() if pos_query else (str(pos or "").strip() or "position")
+        pos_alts = _position_alt_names(bundle, position_query=pos_query, exclude_name=focus) if pos_query else []
+        focus_in_pos_pool = bool(
+            pos_query
+            and pos_pool
+            and any(_player_name_token(_draft_player_name(r)) == _player_name_token(focus) for r in pos_pool)
+        )
+        top_at_pos = _draft_player_name(pos_pool[0]) if pos_pool else ""
+        focus_leads_pos = bool(
+            focus_in_pos_pool
+            and top_at_pos
+            and _player_name_token(top_at_pos) == _player_name_token(focus)
+        )
 
         if is_drafted and not on_roster:
             direct = f"**{focus}** is **not available** — already drafted on your saved board."
         elif on_roster:
             direct = f"**{focus}** is already on **your roster**; you do not need to draft him again."
+        elif pos_query and focus_in_pos_pool:
+            scarcity_note = (
+                f"Catcher scarcity index **{bundle['position_scarcity']:g}** — "
+                if pos_query == "catcher" and bundle.get("position_scarcity") is not None
+                else (
+                    f"**{pos_label}** replacement pool is thinning — "
+                    if len(pos_pool) <= 4
+                    else f"Among **{len(pos_pool)}** remaining **{pos_label}** options — "
+                )
+            )
+            value_bits = []
+            if market is not None:
+                value_bits.append(f"Market Rank **{market}**")
+            if edge is not None:
+                value_bits.append(f"Fantasy Edge **{edge}**")
+            value_line = ", ".join(value_bits)
+            if focus_leads_pos:
+                direct = (
+                    f"**{focus}** is the top remaining **{pos_label}** at {pick_note}. "
+                    f"{scarcity_note}"
+                    f"{value_line + '.' if value_line else ''}"
+                )
+                if profile:
+                    direct += f" Category profile: {profile}."
+                if pos_alts:
+                    direct += (
+                        f" He ranks above **{', '.join(pos_alts[:2])}** on your board "
+                        f"by market rank and replacement value at this pick."
+                    )
+                if needs_label and needs_label != "balanced coverage":
+                    direct += f" That closes **{needs_label}** on your roster."
+            else:
+                direct = (
+                    f"**{focus}** is a viable **{pos_label}** at {pick_note}"
+                    f"{(' (' + value_line + ')') if value_line else ''}, "
+                    f"but **{top_at_pos}** leads remaining **{pos_label}** on market rank."
+                )
+                if profile:
+                    direct += f" **{focus}** profile: {profile}."
         elif is_top_rec or (rec_names and _player_name_token(focus) == _player_name_token(rec_names[0])):
             direct = (
                 f"**{focus}** is a strong pick for you right now because he matches your board recommendation "
                 f"and fits **{needs_label}** at {pick_note}."
             )
-        elif focus and top and _player_name_token(focus) != _player_name_token(top):
+            if profile:
+                direct += f" Profile: {profile}."
+        elif focus and top and _player_name_token(focus) != _player_name_token(top) and not pos_query:
             direct = (
-                f"**{focus}** is a good player, but **{top}** is the better fit on your current board "
+                f"**{focus}** is a good player, but **{top}** is the better overall fit on your current board "
                 f"because **{needs_label}** and recommendation priority favor **{top}**."
             )
+            if profile:
+                direct += f" **{focus}** still offers: {profile}."
         else:
             direct = (
                 f"**{focus}** can work at {pick_note} if he addresses **{needs_label}**, "
                 "but verify he is still available on your saved board."
             )
+            if profile:
+                direct += f" Profile: {profile}."
 
         avail_note = "available in your tracked pool" if in_available else "not in your top cached available slice — check full board"
         framing = (
-            f"**{focus}** ({pos or 'position n/a'}) on your board: {avail_note}; "
+            f"**{focus}** ({pos or pos_label}) on your board: {avail_note}; "
             f"draft status: {'drafted' if is_drafted else 'not drafted'}. "
             f"Roster fit vs **{needs_label}** in **{scoring_label}**.{context_suffix}"
         )
@@ -3382,19 +3688,33 @@ def _build_baseball_draft_coach_sections(
             framing += f" Model note: {reason}."
         if edge is not None or market is not None:
             framing += f" Value snapshot: Fantasy Edge **{edge}**, Market Rank **{market}**."
+        if pos_query and pos_pool:
+            remaining_pos = [_draft_player_name(r) for r in pos_pool[:5] if _draft_player_name(r)]
+            framing += f" Remaining **{pos_label}** pool: {', '.join(remaining_pos) or '—'}."
 
-        tradeoffs = (
-            f"Compared with **{alt or top}**: **{focus}** vs **{top}** trades recommendation priority "
-            f"against your stated interest in **{focus}**."
-            if alt or (top and not is_top_rec)
-            else f"Alternatives on board: {', '.join(avail_names[:3]) or 'see available_players'}."
-        )
+        if pos_query and pos_alts:
+            tradeoffs = (
+                f"At **{pos_label}**, **{focus}** vs **{', '.join(pos_alts[:2])}**: "
+                f"compare Market Rank, Fantasy Edge, and category contribution for **{needs_label}**."
+            )
+        elif alt or (top and not is_top_rec and not pos_query):
+            tradeoffs = (
+                f"Compared with **{alt or top}**: **{focus}** vs **{top}** trades recommendation priority "
+                f"against your stated interest in **{focus}**."
+            )
+        else:
+            tradeoffs = f"Alternatives on board: {', '.join(avail_names[:3]) or 'see available_players'}."
         what_if = [
-            f"If you prioritize power → weigh **{focus}** HR/OBP vs **{alt or top}**.",
+            f"If you prioritize power → weigh **{focus}** HR/OBP vs **{pos_alts[0] if pos_alts else (alt or top)}**.",
             f"If you prioritize speed → compare SB upside vs queue **{', '.join(bundle.get('draft_queue')[:2]) or '—'}**.",
-            f"If you prioritize safety → favor **{top}** unless **{focus}** has clearer floor.",
+            (
+                f"If you prioritize safety → **{focus}** floor vs **{pos_alts[0] if pos_alts else (alt or top)}**."
+                if pos_query
+                else f"If you prioritize safety → favor **{top}** unless **{focus}** has clearer floor."
+            ),
             f"If you prioritize upside → **{focus}** vs higher-ceiling alt **{sleeper_names[0] if sleeper_names else alt or '—'}**.",
         ]
+        scarcity_line = _draft_scarcity_line(bundle, available_count=len(pos_pool) if pos_pool else None)
         risk_line = _draft_risk_line(bundle, focus, mode=mode)
     elif mode == "hitter_pitcher":
         direct = (
@@ -3436,6 +3756,58 @@ def _build_baseball_draft_coach_sections(
         ]
         scarcity_line = _draft_scarcity_line(bundle)
         risk_line = _draft_risk_line(bundle, player or top, mode=mode)
+    elif mode == "hitter_fit":
+        hitters = _hitter_pool_rows(bundle)
+        h_names = [_draft_player_name(r) for r in hitters[:4] if _draft_player_name(r)]
+        h_a = h_names[0] if h_names else top
+        h_b = h_names[1] if len(h_names) > 1 else alt
+        row_a = hitters[0] if hitters else {}
+        row_b = hitters[1] if len(hitters) > 1 else {}
+        edge_a = _player_metric(row_a, "Fantasy Edge", "fantasy_edge")
+        edge_b = _player_metric(row_b, "Fantasy Edge", "fantasy_edge")
+        pos_a = _player_metric(row_a, "Primary Position", "position", "pos") or "?"
+        pos_b = _player_metric(row_b, "Primary Position", "position", "pos") or "?"
+        needs = bundle.get("needed_positions") or []
+        score_a = score_b = 0.0
+        if pos_a in needs or str(pos_a).upper() in [str(n).upper() for n in needs]:
+            score_a += 2
+        if pos_b in needs or str(pos_b).upper() in [str(n).upper() for n in needs]:
+            score_b += 2
+        try:
+            if edge_a is not None and edge_b is not None:
+                if float(edge_a) > float(edge_b):
+                    score_a += 1
+                elif float(edge_b) > float(edge_a):
+                    score_b += 1
+        except (TypeError, ValueError):
+            pass
+        if score_a >= score_b and h_a:
+            winner, loser = h_a, h_b
+        else:
+            winner, loser = h_b or h_a, h_a
+        direct = (
+            f"**Lean {winner}** — the **better hitter fit** for your roster over **{loser}** at {pick_note} "
+            f"because he closes **{needs_label}** ({pos_a} vs {pos_b}; Fantasy Edge {edge_a} vs {edge_b})."
+            if h_b
+            else f"**Lean {h_a}** — the best available **hitter fit** for **{needs_label}** on your roster at {pick_note}."
+        )
+        framing = (
+            f"Hitter comparison vs {roster_note}: **{h_a}** ({pos_a}) vs **{h_b or '—'}** ({pos_b}). "
+            f"Ranked by roster need + Fantasy Edge from your available hitter pool.{context_suffix}"
+        )
+        tradeoffs = (
+            f"**{h_a}** ({pos_a}, Edge {edge_a}) vs **{h_b}** ({pos_b}, Edge {edge_b}) — "
+            f"choose **{winner}** for roster fit or **{loser}** for raw rank."
+            if h_b
+            else f"Only one strong hitter fit in context — **{h_a}** addresses **{needs_label}**."
+        )
+        what_if = [
+            f"If you need **{pos_a}** → lean **{h_a}**.",
+            f"If you need **{pos_b}** → lean **{h_b or h_a}**.",
+            "If a position run starts → take the scarce hitter before the tier drops.",
+        ]
+        scarcity_line = _draft_scarcity_line(bundle)
+        risk_line = _draft_risk_line(bundle, winner, mode=mode)
     elif mode == "team_fit":
         direct = (
             f"**{top}** fits your team best at {pick_note} because he closes **{needs_label}** "
@@ -3466,6 +3838,34 @@ def _build_baseball_draft_coach_sections(
         ]
         scarcity_line = _draft_scarcity_line(bundle)
         risk_line = _draft_risk_line(bundle, upside, mode="sleeper")
+    elif mode == "roster_weakness":
+        pos = bundle.get("needed_positions") or []
+        cats = bundle.get("category_needs") or []
+        pos_text = ", ".join(pos[:6]) if pos else "positional depth"
+        cat_text = ", ".join(cats[:6]) if cats else "counting categories"
+        gap_pos = pos[0] if pos else "depth"
+        gap_cat = cats[0] if cats else "production"
+        direct = (
+            f"Your biggest **roster weakness** is **{gap_pos}** depth with a **{gap_cat}** category gap "
+            f"on {roster_note} at {pick_note}. **Target {top}** next to close the gap."
+        )
+        framing = (
+            f"**Weakness diagnosis:** positional gap at **{pos_text}**; category pressure on **{cat_text}**. "
+            f"Your saved board flags **{needs_label}** as the priority fix.{context_suffix}"
+        )
+        tradeoffs = (
+            f"Closing the **{gap_cat}** weakness may mean targeting **{top}** over higher-ADP names "
+            f"with less category impact; pivot **{alt or 'next tier'}** if you want raw rank."
+            if alt
+            else f"Target **{top}** to address the **{gap_pos}** weakness before the tier drops."
+        )
+        what_if = [
+            f"If you ignore the **{gap_cat}** gap → you need a late-round specialist.",
+            f"If a **{gap_pos} run** starts → take **{top}** before the tier clears.",
+            f"If you prioritize BPA → **{alt or top}** still helps **{cat_text}** most among available names.",
+        ]
+        scarcity_line = _draft_scarcity_line(bundle)
+        risk_line = _draft_risk_line(bundle, player or top, mode=mode)
     elif mode == "roster_needs":
         pos = bundle.get("needed_positions") or []
         cats = bundle.get("category_needs") or []
@@ -3514,11 +3914,18 @@ def _build_baseball_draft_coach_sections(
             "If you prioritize safety → favor higher-floor Market Rank values over edge bets.",
         ]
     elif mode == "next_pick" and rec_names:
-        direct = f"Given {roster_note} at {pick_note}, lean **{top}** for the next selection."
+        undrafted_roster_names = [
+            n for n in (bundle.get("drafted_players") or [])
+            if _player_name_token(n) not in {_player_name_token(r) for r in roster}
+        ]
+        avoid_note = ""
+        if undrafted_roster_names:
+            avoid_note = f" (off the board: {', '.join(str(x).split(' (')[0] for x in undrafted_roster_names[:3])})"
+        direct = f"Given {roster_note} at {pick_note}, lean **{top}** for the next selection{avoid_note}."
         if alt:
             direct = (
                 f"Given {roster_note} at {pick_note}, lean **{top}** over **{alt}** "
-                "for the next selection."
+                f"for the next selection — both are available; do not re-draft roster players{avoid_note}."
             )
         framing = (
             f"This fits **{needs_label}** in **{scoring_label}** — not just raw rank. "
@@ -3535,6 +3942,38 @@ def _build_baseball_draft_coach_sections(
             f"If you prioritize safety → favor **{top}** (higher-floor recommendation).",
             f"If you prioritize upside → consider **{sleeper_names[0] if sleeper_names else alt or top}** from sleepers/tracked.",
         ]
+    elif mode == "sleeper_risk":
+        target = sleeper_names[0] if sleeper_names else (player or "this sleeper")
+        row = next((r for r in bundle.get("sleepers") or [] if _draft_player_name(r) == target), None)
+        edge = _player_metric(row, "Fantasy Edge", "fantasy_edge") if row else None
+        market = _player_metric(row, "Market Rank", "market_rank") if row else None
+        model = _player_metric(row, "Model Rank", "model_rank") if row else None
+        reason = _player_metric(row, "Reason", "reason") if row else ""
+        pool_bits = _rank_value_players(bundle.get("sleepers") or [], limit=3)
+        pool_line = "; ".join(pool_bits) if pool_bits else f"**{target}** from your sleeper board"
+        direct = (
+            f"**{target}** is worth the risk as a sleeper when the upside (Fantasy Edge **{edge}**, "
+            f"Model **{model}** vs Market **{market}**) outweighs the bust probability at this cost."
+            if edge is not None
+            else f"**{target}** is worth the risk only if draft cost stays low — see Fantasy Edge vs market on your sleeper board."
+        )
+        framing = (
+            f"Sleeper pool in context: {pool_line}. "
+            f"**{target}** fits roster needs **{needs_label}**; reward is ceiling, risk is playing-time/variance."
+            + (f" Model note: {reason}." if reason else "")
+            + context_suffix
+        )
+        tradeoffs = (
+            f"**Upside:** **{target}** (Edge **{edge}**) can outperform ADP. "
+            f"**Risk:** safer pivot **{top or 'next tier'}** from recommendations if you need floor."
+        )
+        what_if = [
+            f"If **{target}** hits → league-winning surplus value at Market Rank **{market}**.",
+            f"If **{target}** busts → opportunity cost vs **{top or 'safer pick'}**.",
+            f"If similar sleepers remain ({', '.join(sleeper_names[:2]) or target}) → compare Edge before committing.",
+        ]
+        scarcity_line = _draft_scarcity_line(bundle, available_count=len(sleeper_names))
+        risk_line = _draft_risk_line(bundle, target, mode="sleeper")
     elif mode == "sleeper":
         target = sleeper_names[0] if sleeper_names else (player or "this sleeper")
         exclusions = bundle.get("drafted_exclusions") or bundle.get("drafted_players") or []
@@ -3905,8 +4344,8 @@ def solve_baseball_draft(
             "coach_sections": coach,
         },
         default_controls={
-            "draft_round": rnd,
-            "current_pick": pick,
+            **({"draft_round": rnd} if rnd is not None else {}),
+            **({"current_pick": pick} if pick_known and pick is not None else {}),
             "adp": adp_val,
             "projected_rank": rank,
             "replacement_value": replacement_value,
@@ -4428,39 +4867,7 @@ def dispatch_solver(
         )
 
     if pid == BASEBALL_HISTORICAL:
-        snap = ctx.get("historical_snapshot") if isinstance(ctx.get("historical_snapshot"), dict) else {}
-        player = str(ctx.get("player") or "").strip()
-        sort_stat = str(snap.get("sort_stat") or "stat")
-        rows = snap.get("top_rows") if isinstance(snap.get("top_rows"), list) else []
-        row_bits = []
-        for row in rows[:3]:
-            if not isinstance(row, dict):
-                continue
-            name = str(row.get("player") or "").strip()
-            val = row.get(sort_stat) or row.get(str(sort_stat))
-            if name and val is not None:
-                row_bits.append(f"{name}: {sort_stat}={val}")
-        calc_detail = "; ".join(row_bits[:3])
-        return _coach_result(
-            question=question,
-            problem_type=route.problem_type,
-            math_idea="Outlier check — is this row unusual vs peers in the filter window?",
-            variables="x = stat value\npeers = neighboring rows in the filtered table",
-            data_used=_cap_data_used([f"Sort stat: **{sort_stat}**", f"Player: **{player}**"] + row_bits[:2]),
-            calculation=f"Compare **{sort_stat}** to next-ranked rows. Outlier if >1.5× next rank.\n\n{calc_detail}",
-            result=f"Snapshot on **{sort_stat}**" if row_bits else "Attach historical_snapshot.top_rows",
-            interpretation=(
-                f"With filters **{ctx.get('filters_applied') or snap.get('year_range') or 'active'}**, "
-                f"**{player or 'top rows'}** ranks high on **{sort_stat}** — "
-                + (f"top rows: {calc_detail}." if row_bits else f"compare {player}'s row to neighbors.")
-            ),
-            assumptions=[f"Filters: {ctx.get('filters_applied') or snap.get('year_range') or 'see snapshot'}"],
-            sensitivity_notes="Rate stats need playing-time context; counting stats need AB/PA.",
-            missing_fields=route.missing_fields,
-            partial=not row_bits,
-            problem_type_id=pid,
-            computed={"top_rows": rows[:3]},
-        )
+        return solve_baseball_historical(ctx, question)
 
     if pid == BASEBALL_PLAYER_COMPARE:
         return solve_baseball_player_compare(
@@ -4493,6 +4900,48 @@ def dispatch_solver(
     return _generic_solver(route, question, ctx, p)
 
 
+def _solver_dispatch_error_result(
+    route: ProblemRoute,
+    question: str,
+    ctx: dict[str, Any],
+    exc: Exception,
+) -> SolverResult:
+    """Honest partial answer when a specific solver raises — never crash the UI path."""
+    solver_id = route.problem_type_id
+    missing = list(route.missing_fields)
+    err_note = f"{type(exc).__name__}: {exc}"
+    short = (
+        f"I could not finish a full **{route.problem_type}** answer from the context attached. "
+        "Return to the source app, load the relevant page, and re-send the question."
+    )
+    improve = [f"**{m}**" for m in missing[:4]] or [
+        "Re-send with draft board / filters loaded on the source page.",
+    ]
+    return _coach_result(
+        question=question,
+        problem_type=route.problem_type,
+        math_idea="Solver could not run — insufficient or incompatible context.",
+        variables="context keys · required fields · solver inputs",
+        data_used=[f"Source: **{route.source_app or 'suite'}**", f"Solver: **{solver_id}**"],
+        calculation="Solver dispatch aborted before completion.",
+        result="Insufficient context for a firm answer",
+        interpretation=short,
+        assumptions=["Context reflects the user's view at send time."],
+        sensitivity_notes="Re-send after the source page has fully loaded.",
+        missing_fields=missing,
+        partial=True,
+        problem_type_id=solver_id,
+        computed={"solver_error": err_note, "solver_id": solver_id, "fallback": True},
+        conclusion=short,
+        confidence_pct=30,
+        confidence_label="Low",
+        reasons=[f"**{solver_id}** failed: {err_note}"],
+        data_would_improve=improve,
+        short_answer=short,
+        why=improve[0] if improve else "",
+    )
+
+
 def solve_suite_question(
     question: str,
     *,
@@ -4508,7 +4957,10 @@ def solve_suite_question(
         context=ctx,
         purpose_override=purpose_override,
     )
-    result = dispatch_solver(route, question, ctx, params)
+    try:
+        result = dispatch_solver(route, question, ctx, params)
+    except Exception as exc:
+        result = _solver_dispatch_error_result(route, question, ctx, exc)
     if result is None:
         raise ValueError("dispatch_solver returned None")
     return route, _finalize_result(route, result)
