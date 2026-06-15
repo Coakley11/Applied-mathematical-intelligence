@@ -301,6 +301,33 @@ class TestDraftPickSolver(unittest.TestCase):
             "langeliers" in text or "perez" in text or "top remaining" in text or "market rank" in text
         )
 
+    def test_best_available_catcher_ranks_pool(self) -> None:
+        ctx = self._draft_market_ctx()
+        ctx["draft_snapshot"]["available_players"].extend(
+            [
+                {"player": "Shea Langeliers", "Primary Position": "C", "Market Rank": 45},
+                {"player": "Salvador Perez", "Primary Position": "C", "Market Rank": 52},
+            ]
+        )
+        ctx["draft_snapshot"]["draft_room_board"] = [
+            {"player": "Cal Raleigh", "Primary Position": "C", "Team": "Team B"},
+            {"player": "William Contreras", "Primary Position": "C", "Team": ""},
+        ]
+        q = "Who is the best available catcher?"
+        result = solve_baseball_draft(ctx, q)
+        self.assertEqual(result.computed.get("draft_mode"), "position_best_available")
+        text = (result.short_answer + " " + result.why).lower()
+        self.assertIn("william contreras", text)
+        self.assertIn("langeliers", text)
+        self.assertIn("cal raleigh", text)
+        self.assertNotIn("jose ramirez", text)
+
+    def test_next_best_catcher_mode(self) -> None:
+        ctx = self._draft_market_ctx()
+        result = solve_baseball_draft(ctx, "Who is the next best catcher?")
+        self.assertEqual(result.computed.get("draft_mode"), "position_best_available")
+        self.assertIn("catcher", result.short_answer.lower())
+
     def test_draft_routes_and_dispatches(self) -> None:
         route = route_suite_question(
             "Is Corbin Carroll worth a Round 2 pick?",

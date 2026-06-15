@@ -45,8 +45,22 @@ def build_applied_intelligence_disk_state(st: Any) -> dict[str, Any]:
 
 
 def apply_applied_intelligence_disk_state(st: Any, state: dict[str, Any]) -> None:
+    url_authoritative = bool(st.session_state.get("_suite_ai_url_authoritative"))
+    url_qid = str(st.session_state.get("_suite_ai_url_question_id") or "").strip()
+    skip_when_url = {
+        "_suite_ai_question",
+        "ps_library_problem",
+        "_suite_ai_context",
+        "_suite_ai_source_app",
+        "_suite_ai_source_page",
+        "_suite_ai_area",
+    }
     for key, val in state.items():
+        if url_authoritative and key in skip_when_url:
+            continue
         st.session_state[key] = copy.deepcopy(val)
+    if url_authoritative and url_qid:
+        st.session_state["_suite_ai_question_id"] = url_qid
     ensure_applied_intelligence_view_from_restore(st)
 
 

@@ -318,6 +318,14 @@ def _solvability(relevant: list[str], missing: list[str]) -> str:
 
 
 def _build_restatement(question: str, intent: QuestionIntent, purpose: str, entities: dict[str, Any]) -> str:
+    try:
+        from components.draft_market_question import draft_question_restatement
+
+        draft_rest = draft_question_restatement(question)
+        if draft_rest:
+            return draft_rest
+    except ImportError:
+        pass
     pa = entities.get("player_a") or "Player A"
     pb = entities.get("player_b") or "Player B"
     stat = entities.get("focus_stat") or "the stat"

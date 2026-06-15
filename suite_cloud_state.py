@@ -78,6 +78,12 @@ _WORKSPACE_RESTORE_BLOCKING_QUERY_KEYS: dict[str, tuple[str, ...]] = {
         "suite_ami_insight",
         "suite_ai_question_id",
     ),
+    "applied_intelligence": (
+        "suite_resume",
+        "suite_page",
+        "suite_ai_question_id",
+        "suite_ai_question",
+    ),
 }
 
 

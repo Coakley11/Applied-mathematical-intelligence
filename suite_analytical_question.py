@@ -609,6 +609,9 @@ def hydrate_applied_intelligence_session(st: Any, *, metrics: dict[str, Any] | N
         ss["ps_library_problem"] = question
     if qid:
         ss["_suite_ai_question_id"] = qid
+        if url_question_id:
+            ss["_suite_ai_url_question_id"] = url_question_id
+            ss["_suite_ai_url_authoritative"] = True
     if source_app:
         ss["_suite_ai_source_app"] = source_app
     if source_page:

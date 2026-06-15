@@ -9,6 +9,7 @@ from components.draft_market_question import (
     is_draft_head_to_head_question,
     is_draft_market_prediction_question,
     is_player_explanation_question,
+    is_position_best_available_question,
     position_matches_row,
 )
 
@@ -52,6 +53,19 @@ class TestDraftMarketQuestionDetection(unittest.TestCase):
         q = "Why is William Contreras the best catcher to draft next?"
         self.assertTrue(is_player_explanation_question(q))
         self.assertFalse(is_draft_market_prediction_question(q))
+
+    def test_next_best_catcher_is_position_best_not_market(self) -> None:
+        q = "Who is the next best catcher?"
+        self.assertTrue(is_position_best_available_question(q))
+        self.assertFalse(is_draft_market_prediction_question(q))
+
+    def test_best_available_catcher_restatement(self) -> None:
+        from components.draft_market_question import draft_question_restatement
+
+        rest = draft_question_restatement("Who is the best available catcher?")
+        self.assertIn("available", rest.lower())
+        self.assertIn("catcher", rest.lower())
+        self.assertNotIn("player b", rest.lower())
 
 
 if __name__ == "__main__":

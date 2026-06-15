@@ -42,6 +42,88 @@ _POSITION_ALIASES: dict[str, tuple[str, ...]] = {
 }
 
 
+_DRAFT_MARKET_FLOW_PHRASES: tuple[str, ...] = (
+    "likely to be",
+    "will be drafted",
+    "picked in this draft",
+    "run coming",
+    "make it back",
+    "before my next pick",
+    "drafted before",
+)
+
+
+def is_draft_market_flow_question(question: str) -> bool:
+    """True when the question is about draft-board timing/flow, not best-available ranking."""
+    low = str(question or "").strip().lower()
+    return any(phrase in low for phrase in _DRAFT_MARKET_FLOW_PHRASES)
+
+
+def is_position_best_available_question(question: str) -> bool:
+    """True when the user asks who is the best remaining player at a position."""
+    low = str(question or "").strip().lower()
+    if not low or is_player_explanation_question(question):
+        return False
+    if is_draft_market_flow_question(question):
+        return False
+    pos = extract_draft_position_query(question)
+    if not pos:
+        return False
+    if any(
+        phrase in low
+        for phrase in (
+            "best available",
+            "next best",
+            "top available",
+            "top remaining",
+            "best catcher",
+            "best shortstop",
+            "best outfielder",
+            "best player available",
+            "who is the best",
+            "who's the best",
+            "which catcher",
+            "which shortstop",
+        )
+    ):
+        return True
+    if "best" in low and any(w in low for w in ("available", "left", "remaining", "draft")):
+        return True
+    return False
+
+
+def draft_question_restatement(question: str) -> str:
+    """Human-readable restatement for draft questions (avoids Player A vs Player B)."""
+    low = str(question or "").strip().lower()
+    pos = extract_draft_position_query(question)
+    pos_label = pos.title() if pos else ""
+    if is_player_explanation_question(question):
+        q = str(question or "").strip()
+        m = re.search(r"why is (.+?) (?:the best|worth|a good)", q, flags=re.I)
+        player = m.group(1).strip().strip("?").strip() if m else "this player"
+        if pos_label:
+            return (
+                f"You're asking **why {player}** is the best remaining **{pos_label}** "
+                "to draft right now."
+            )
+        return f"You're asking **why {player}** is the best draft choice for you right now."
+    if is_position_best_available_question(question):
+        return (
+            f"You're asking which available **{pos_label}** is the best draft choice right now."
+            if pos_label
+            else "You're asking which available player is the best draft choice right now."
+        )
+    if is_draft_head_to_head_question(question):
+        a, b = extract_draft_compare_players(question)
+        if a and b:
+            return f"You're asking whether to draft **{a}** or **{b}** at this pick."
+    if is_draft_market_prediction_question(question) and pos_label:
+        return f"You're asking about **{pos_label}** draft-board flow at your current pick."
+    if "who should i draft" in low or "draft next" in low:
+        return "You're asking who to draft with your next pick on your saved board."
+    return ""
+
+
 def is_player_explanation_question(question: str) -> bool:
     """True when the user asks why a named player is the right draft pick."""
     low = str(question or "").strip().lower()
@@ -72,6 +154,8 @@ def is_draft_market_prediction_question(question: str) -> bool:
     if not low:
         return False
     if is_player_explanation_question(question):
+        return False
+    if is_position_best_available_question(question):
         return False
     if any(re.search(pat, low) for pat in _DRAFT_MARKET_PATTERNS):
         return True

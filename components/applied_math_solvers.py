@@ -46,11 +46,13 @@ from components.applied_math_problem_interpreter import (
     PURPOSE_TEST_SIGNIFICANCE,
 )
 from components.draft_market_question import (
+    draft_question_restatement,
     extract_draft_compare_players,
     extract_draft_position_query,
     is_draft_head_to_head_question,
     is_draft_market_prediction_question,
     is_player_explanation_question,
+    is_position_best_available_question,
     position_matches_row,
 )
 
@@ -2850,10 +2852,13 @@ def _draft_context_bundle(ctx: dict[str, Any]) -> dict[str, Any]:
     question_player_row = ctx.get("question_player_row") if isinstance(ctx.get("question_player_row"), dict) else None
     draft_status = ctx.get("draft_status") if isinstance(ctx.get("draft_status"), dict) else {}
     canonical_board = _draft_player_rows(
-        snap.get("draft_room_board") or snap.get("canonical_draft_board") or ctx.get("canonical_draft_board")
+        snap.get("draft_room_board") or snap.get("canonical_draft_board") or ctx.get("draft_room_board")
+    )
+    board_rows = _draft_player_rows(
+        snap.get("draft_room_board") or ctx.get("draft_room_board") or canonical_board
     )
 
-    return {
+    bundle: dict[str, Any] = {
         "snap": snap,
         "sleepers_snap": sleepers_snap,
         "proj": proj,
@@ -2864,6 +2869,7 @@ def _draft_context_bundle(ctx: dict[str, Any]) -> dict[str, Any]:
         "available": available,
         "best_available": best_available,
         "canonical_board": canonical_board,
+        "board_rows": board_rows,
         "scoring": scoring,
         "round": int(rnd) if rnd is not None else None,
         "pick": int(pick) if pick is not None else None,
@@ -2884,6 +2890,45 @@ def _draft_context_bundle(ctx: dict[str, Any]) -> dict[str, Any]:
         "position_scarcity": position_scarcity,
         "ami_answer_template": ctx.get("ami_answer_template") if isinstance(ctx.get("ami_answer_template"), list) else [],
     }
+    _attach_player_position_index(bundle, ctx)
+    return bundle
+
+
+def _position_suffix_from_name(name: str) -> str:
+    m = re.search(r"\(([^)]+)\)\s*$", str(name or "").strip())
+    if not m:
+        return ""
+    token = m.group(1).strip().upper()
+    if token in ("C", "1B", "2B", "3B", "SS", "OF", "SP", "RP", "DH", "P"):
+        return token
+    return ""
+
+
+def _attach_player_position_index(bundle: dict[str, Any], ctx: dict[str, Any]) -> None:
+    index: dict[str, str] = {}
+    snap = bundle.get("snap") if isinstance(bundle.get("snap"), dict) else {}
+    for src in (
+        ctx.get("player_position_index"),
+        ctx.get("player_position_lookup"),
+        snap.get("player_position_index"),
+        snap.get("player_position_lookup"),
+    ):
+        if not isinstance(src, dict):
+            continue
+        for name, pos in src.items():
+            token = _player_name_token(str(name))
+            pos_val = str(pos or "").strip()
+            if token and pos_val:
+                index[token] = pos_val
+    for pool_key in ("board_rows", "canonical_board", "available", "best_available", "recommendations"):
+        for row in bundle.get(pool_key) or []:
+            if not isinstance(row, dict):
+                continue
+            name = _draft_player_name(row)
+            pos = _player_metric(row, "Primary Position", "position", "pos")
+            if name and pos:
+                index[_player_name_token(name)] = str(pos)
+    bundle["_position_index"] = index
 
 
 def _draft_num_teams(bundle: dict[str, Any], ctx: dict[str, Any], default: int = 12) -> int:
@@ -2960,7 +3005,7 @@ def _all_pool_rows(bundle: dict[str, Any]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     seen: set[str] = set()
     canon = bundle.get("canonical_board") or []
-    for pool_key in ("available", "best_available", "recommendations", "canonical_board"):
+    for pool_key in ("available", "best_available", "recommendations", "canonical_board", "board_rows"):
         for row in bundle.get(pool_key) or []:
             if not isinstance(row, dict):
                 continue
@@ -3028,6 +3073,8 @@ def _draft_question_mode(question: str) -> str:
     low = question.lower()
     if is_player_explanation_question(question):
         return "player_why"
+    if is_position_best_available_question(question):
+        return "position_best_available"
     if is_draft_market_prediction_question(question):
         return "draft_market_prediction"
     if is_draft_head_to_head_question(question):
@@ -3163,7 +3210,15 @@ def _pool_rows_by_position(bundle: dict[str, Any], position_query: str) -> list[
 
 
 def _player_position_from_pools(bundle: dict[str, Any], player_name: str) -> str:
+    suffix = _position_suffix_from_name(player_name)
+    if suffix:
+        return suffix
     token = _player_name_token(player_name)
+    index = bundle.get("_position_index")
+    if isinstance(index, dict):
+        pos = index.get(token)
+        if pos:
+            return str(pos)
     for row in _all_pool_rows(bundle):
         if _player_name_token(_draft_player_name(row)) == token:
             return str(_player_metric(row, "Primary Position", "position", "pos") or "")
@@ -3716,6 +3771,52 @@ def _build_baseball_draft_coach_sections(
         ]
         scarcity_line = _draft_scarcity_line(bundle, available_count=len(pos_pool) if pos_pool else None)
         risk_line = _draft_risk_line(bundle, focus, mode=mode)
+    elif mode == "position_best_available":
+        pos_query = extract_draft_position_query(question) or _infer_scarce_position_from_bundle(bundle)
+        pos_label = pos_query.title() if pos_query else "position"
+        pos_pool = _pool_rows_by_position(bundle, pos_query)
+        drafted_pos = _drafted_names_at_position(bundle, pos_query)
+        ranked = _rank_value_players(pos_pool, limit=5)
+        top_at_pos = _draft_player_name(pos_pool[0]) if pos_pool else ""
+        second_at_pos = _draft_player_name(pos_pool[1]) if len(pos_pool) > 1 else ""
+        third_at_pos = _draft_player_name(pos_pool[2]) if len(pos_pool) > 2 else ""
+
+        if top_at_pos:
+            direct = f"**{top_at_pos}** is the best available **{pos_label}** at {pick_note}."
+            if ranked:
+                direct += " Ranking: " + "; ".join(ranked[:4]) + "."
+        else:
+            direct = (
+                f"No remaining **{pos_label}** options are tracked in your available pool at {pick_note}."
+            )
+
+        drafted_note = ""
+        if drafted_pos:
+            drafted_note = (
+                f"**{len(drafted_pos)}** **{pos_label}** already drafted: "
+                f"{', '.join(drafted_pos[:4])}{'…' if len(drafted_pos) > 4 else ''}."
+            )
+        framing = (
+            (drafted_note + " " if drafted_note else "")
+            + f"**{len(pos_pool)}** remaining **{pos_label}** in your tracked pool. "
+            f"Roster needs: **{needs_label}** in **{scoring_label}**.{context_suffix}"
+        )
+        if second_at_pos:
+            tradeoffs = (
+                f"**{top_at_pos}** leads on market rank; **{second_at_pos}**"
+                + (f" and **{third_at_pos}**" if third_at_pos else "")
+                + f" are the next **{pos_label}** tiers if you want more upside or category fit."
+            )
+        else:
+            tradeoffs = f"**{top_at_pos}** is the clear remaining **{pos_label}** if still available."
+        what_if = [
+            f"If you wait one round → **{second_at_pos or top_at_pos or 'next tier'}** may be the top **{pos_label}** left.",
+            f"If you prioritize power → compare HR/OBP among {', '.join([n for n in (top_at_pos, second_at_pos, third_at_pos) if n]) or 'remaining options'}.",
+            f"If you prioritize safety → favor **{top_at_pos}** (best market rank among remaining **{pos_label}**).",
+            f"If a run starts → scarcity index **{bundle['position_scarcity']:g}**" if bundle.get("position_scarcity") is not None else f"If a run starts → take **{top_at_pos}** before the **{pos_label}** pool thins.",
+        ]
+        scarcity_line = _draft_scarcity_line(bundle, available_count=len(pos_pool))
+        risk_line = _draft_risk_line(bundle, top_at_pos or player, mode=mode)
     elif mode == "hitter_pitcher":
         direct = (
             f"At {pick_note}, weigh **hitter** vs **pitcher** by **{needs_label}** and "
@@ -4161,7 +4262,7 @@ def solve_baseball_draft(
 
     pick_round_line = _format_pick_note(pick, rnd, pick_known=pick_known, round_known=round_known)
 
-    short_answer = coach.get("formatted_answer") or coach["direct_answer"]
+    short_answer = coach.get("direct_answer") or coach.get("formatted_answer") or ""
     why = coach.get("why_roster_fit") or coach["analyst_framing"]
     if mode == "value_edge":
         why = label

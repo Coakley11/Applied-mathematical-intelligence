@@ -72,6 +72,11 @@ def _load_suite_context() -> tuple[str, str, str, dict]:
             from suite_analytical_question import load_analytical_question_payload
 
             payload = load_analytical_question_payload(qid)
+            blob_question = str(payload.get("question") or "").strip()
+            if blob_question:
+                preloaded = blob_question
+                st.session_state["_suite_ai_question"] = blob_question
+                st.session_state["ps_library_problem"] = blob_question
             blob_ctx = payload.get("context") if isinstance(payload.get("context"), dict) else {}
             if blob_ctx:
                 ctx_dict = blob_ctx
