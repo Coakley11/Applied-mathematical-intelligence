@@ -117,6 +117,10 @@ def draft_question_restatement(question: str) -> str:
         a, b = extract_draft_compare_players(question)
         if a and b:
             return f"You're asking whether to draft **{a}** or **{b}** at this pick."
+    if is_draft_review_question(question):
+        return "You're asking for a draft review — how your picks and roster look so far."
+    if is_roster_needs_question(question):
+        return "You're asking which positions and roster gaps to target with your next picks."
     if is_draft_market_prediction_question(question) and pos_label:
         return f"You're asking about **{pos_label}** draft-board flow at your current pick."
     if "who should i draft" in low or "draft next" in low:
@@ -279,3 +283,86 @@ def is_draft_head_to_head_question(question: str) -> bool:
     """True when question compares two named players in a draft decision."""
     a, b = extract_draft_compare_players(question)
     return bool(a and b and _looks_like_player_name(a) and _looks_like_player_name(b))
+
+
+_DRAFT_REVIEW_PHRASES: tuple[str, ...] = (
+    "rate my picks",
+    "grade my draft",
+    "how would you rate my picks",
+    "how is my team looking",
+    "how is my draft",
+    "what do you think of my roster",
+    "what do you think of my draft",
+    "review my draft",
+    "review my picks",
+    "picks so far",
+    "draft so far",
+    "how am i doing",
+    "strengths and weaknesses",
+    "strengths and weakness",
+    "team strengths",
+    "team weaknesses",
+    "how's my roster",
+    "hows my roster",
+)
+
+
+def is_draft_review_question(question: str) -> bool:
+    """True when the user wants a holistic draft/roster review, not a single-player value read."""
+    low = str(question or "").strip().lower()
+    if not low:
+        return False
+    if is_draft_head_to_head_question(question) or is_player_explanation_question(question):
+        return False
+    if any(phrase in low for phrase in _DRAFT_REVIEW_PHRASES):
+        return True
+    if re.search(r"how (?:would you|do you) rate", low) and any(w in low for w in ("pick", "draft", "roster", "team")):
+        return True
+    if re.search(r"grade (?:my|the) draft", low):
+        return True
+    return False
+
+
+_ROSTER_NEEDS_PHRASES: tuple[str, ...] = (
+    "roster need",
+    "what does my roster",
+    "which positions left",
+    "positions left",
+    "positions still needed",
+    "positions should i target",
+    "what positions should i",
+    "what roster holes",
+    "roster holes",
+    "what does my team still need",
+    "what should i draft next based on my team",
+    "remaining priorities",
+    "positional priorities",
+    "positional gaps",
+    "roster gaps",
+    "what do i still need",
+    "what am i missing",
+    "holes do i have",
+    "positions needed",
+    "still need to pick",
+    "needed for me to pick",
+)
+
+
+def is_roster_needs_question(question: str) -> bool:
+    """True when the user asks what positions or roster gaps to fill next."""
+    low = str(question or "").strip().lower()
+    if not low:
+        return False
+    if is_draft_review_question(question) or is_draft_head_to_head_question(question):
+        return False
+    if any(phrase in low for phrase in _ROSTER_NEEDS_PHRASES):
+        return True
+    if re.search(r"which positions?", low) and any(
+        w in low for w in ("need", "needed", "left", "target", "pick", "fill", "missing", "hole")
+    ):
+        return True
+    if re.search(r"what (?:position|roster)", low) and any(
+        w in low for w in ("need", "still", "left", "target", "hole", "gap", "missing")
+    ):
+        return True
+    return False

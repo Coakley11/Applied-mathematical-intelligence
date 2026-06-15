@@ -51,8 +51,10 @@ from components.draft_market_question import (
     extract_draft_position_query,
     is_draft_head_to_head_question,
     is_draft_market_prediction_question,
+    is_draft_review_question,
     is_player_explanation_question,
     is_position_best_available_question,
+    is_roster_needs_question,
     position_matches_row,
 )
 
@@ -3075,6 +3077,10 @@ def _draft_question_mode(question: str) -> str:
         return "player_why"
     if is_position_best_available_question(question):
         return "position_best_available"
+    if is_draft_review_question(question):
+        return "draft_review"
+    if is_roster_needs_question(question):
+        return "roster_needs"
     if is_draft_market_prediction_question(question):
         return "draft_market_prediction"
     if is_draft_head_to_head_question(question):
@@ -3097,8 +3103,6 @@ def _draft_question_mode(question: str) -> str:
         return "player_why"
     if "why is" in low and any(w in low for w in ("good pick", "worth drafting", "right pick", "strong pick", "worth it")):
         return "player_why"
-    if "roster need" in low or "what does my roster" in low:
-        return "roster_needs"
     if any(p in low for p in ("best values", "values left", "best value", "value left", "values available")):
         return "best_values"
     if "sleeper" in low and any(w in low for w in ("risk", "worth the risk", "how risky", "worth it")):
@@ -3470,6 +3474,13 @@ def _drafted_names_at_position(bundle: dict[str, Any], position_query: str) -> l
         pos = str(_player_metric(row, "Primary Position", "position", "pos") or "")
         _maybe_add(clean, pos)
 
+    for name in bundle.get("roster") or []:
+        clean = str(name).split(" (")[0].strip()
+        if not clean:
+            continue
+        pos = _player_position_from_pools(bundle, clean)
+        _maybe_add(clean, pos)
+
     return names
 
 
@@ -3482,6 +3493,224 @@ def _drafted_position_line(bundle: dict[str, Any], position_query: str) -> str:
             f"{', '.join(names[:4])}{'…' if len(names) > 4 else ''}."
         )
     return ""
+
+
+def _position_label_from_code(pos: str) -> str:
+    code = str(pos or "").strip().upper()
+    labels = {
+        "C": "Catcher",
+        "1B": "First Base",
+        "2B": "Second Base",
+        "3B": "Third Base",
+        "SS": "Shortstop",
+        "OF": "Outfield",
+        "DH": "Designated Hitter",
+        "SP": "Starting Pitcher",
+        "RP": "Relief Pitcher",
+    }
+    return labels.get(code, code or "Position")
+
+
+def _roster_by_position(bundle: dict[str, Any]) -> dict[str, list[str]]:
+    groups: dict[str, list[str]] = {}
+    seen: set[str] = set()
+    for name in bundle.get("roster") or []:
+        clean = str(name).split(" (")[0].strip()
+        token = _player_name_token(clean)
+        if not clean or token in seen:
+            continue
+        seen.add(token)
+        pos = str(_player_position_from_pools(bundle, clean) or "?").upper()
+        groups.setdefault(pos, []).append(clean)
+    return groups
+
+
+def _fantasy_peer_names(pos_pool: list[dict[str, Any]], focus_name: str, *, limit: int = 3) -> list[str]:
+    focus_token = _player_name_token(focus_name)
+    names: list[str] = []
+    for row in pos_pool:
+        name = _draft_player_name(row)
+        if not name or _player_name_token(name) == focus_token:
+            continue
+        names.append(name)
+        if len(names) >= limit:
+            break
+    return names
+
+
+def _replacement_rank_gap(bundle: dict[str, Any], position_query: str) -> int | None:
+    pool = _pool_rows_by_position(bundle, position_query)
+    if len(pool) < 2:
+        return None
+    gap = int(_row_market_rank(pool[1]) - _row_market_rank(pool[0]))
+    return gap if gap > 0 else None
+
+
+def _fantasy_analyst_player_why_direct(
+    bundle: dict[str, Any],
+    *,
+    focus: str,
+    pos_query: str,
+    pos_label: str,
+    pos_pool: list[dict[str, Any]],
+    pick_note: str,
+    drafted_line: str,
+    profile: str,
+) -> str:
+    peers = _fantasy_peer_names(pos_pool, focus, limit=3)
+    parts: list[str] = []
+    if drafted_line:
+        parts.append(drafted_line)
+    parts.append(
+        f"**{focus}** is the highest-ranked **{pos_label}** still available at {pick_note}."
+    )
+    if peers:
+        peer_txt = ", ".join(f"**{p}**" for p in peers[:2])
+        parts.append(f"He sits above {peer_txt} on your board.")
+    pool_count = len(pos_pool)
+    if pool_count <= 4:
+        parts.append(
+            f"**{pos_label}** depth begins to thin after this tier — only **{pool_count}** "
+            "viable options remain in your board context."
+        )
+    elif pos_query == "catcher":
+        parts.append(
+            "Drafting him now secures one of the last catchers from the strongest remaining group."
+        )
+    else:
+        parts.append(
+            f"Taking **{focus}** here locks in a top **{pos_label}** before the tier drops."
+        )
+    need_phrase = _position_need_phrase(bundle, pos_query)
+    if need_phrase:
+        parts.append(f"Practically, he {need_phrase}.")
+    if profile:
+        parts.append(f"Production profile: {profile}.")
+    return " ".join(parts)
+
+
+def _position_query_from_code(pos_code: str) -> str:
+    code = str(pos_code or "").strip().upper()
+    mapping = {
+        "C": "catcher",
+        "1B": "first base",
+        "2B": "second base",
+        "3B": "third base",
+        "SS": "shortstop",
+        "OF": "outfield",
+        "SP": "starting pitcher",
+        "RP": "relief pitcher",
+    }
+    return mapping.get(code, code.lower())
+
+
+def _head_to_head_analyst_direct(
+    bundle: dict[str, Any],
+    *,
+    pa: str,
+    pb: str,
+    pos_a: str,
+    pos_b: str,
+    mkt_a: Any,
+    mkt_b: Any,
+    pick_note: str,
+) -> str:
+    try:
+        rank_a = float(mkt_a) if mkt_a is not None else 9999.0
+        rank_b = float(mkt_b) if mkt_b is not None else 9999.0
+    except (TypeError, ValueError):
+        rank_a = rank_b = 9999.0
+
+    if rank_a < rank_b:
+        winner, loser, win_pos, lose_pos, win_rank, lose_rank = pa, pb, pos_a, pos_b, rank_a, rank_b
+    elif rank_b < rank_a:
+        winner, loser, win_pos, lose_pos, win_rank, lose_rank = pb, pa, pos_b, pos_a, rank_b, rank_a
+    else:
+        return (
+            f"**{pa}** ({pos_a}) and **{pb}** ({pos_b}) are close overall at {pick_note} — "
+            f"choose based on which position gap matters more for your roster."
+        )
+
+    win_label = _position_label_from_code(win_pos)
+    lose_label = _position_label_from_code(lose_pos)
+    lose_query = _position_query_from_code(lose_pos)
+    win_query = _position_query_from_code(win_pos)
+    lose_pool = _pool_rows_by_position(bundle, lose_query) if lose_query else []
+    lose_top = _draft_player_name(lose_pool[0]) if lose_pool else loser
+    lose_is_top_at_pos = bool(
+        lose_top and _player_name_token(lose_top) == _player_name_token(loser)
+    )
+
+    parts = [
+        f"**{winner}** is the stronger overall value at {pick_note}.",
+    ]
+    if lose_is_top_at_pos and win_pos != lose_pos:
+        parts.append(
+            f"While **{loser}** is the best remaining **{lose_label}**, **{winner}** ranks "
+            f"substantially higher overall and fills a premium **{win_pos}** slot."
+        )
+    elif win_pos != lose_pos:
+        parts.append(
+            f"**{winner}** gives you more overall draft capital at **{win_pos}** than **{loser}** does at **{lose_pos}**."
+        )
+
+    gap_win = _replacement_rank_gap(bundle, win_query) if win_query else None
+    gap_lose = _replacement_rank_gap(bundle, lose_query) if lose_query else None
+    if gap_win is not None and gap_lose is not None:
+        if gap_win > gap_lose:
+            parts.append(
+                f"The drop-off after **{winner}** at **{win_label}** is steeper than the drop-off "
+                f"after **{loser}** at **{lose_label}**, so waiting on **{win_label}** costs more."
+            )
+        elif gap_lose > gap_win:
+            parts.append(
+                f"**{lose_label}** depth thins faster than **{win_label}** on your board — "
+                f"that is the main case for **{loser}**."
+            )
+    elif int(lose_rank - win_rank) >= 15:
+        parts.append(
+            f"**{winner}** is roughly **{int(lose_rank - win_rank)}** market-rank spots ahead — "
+            "a meaningful overall tier gap at this stage of the draft."
+        )
+
+    needs = [str(n).strip().upper() for n in (bundle.get("needed_positions") or [])]
+    if win_pos in needs and lose_pos not in needs:
+        parts.append(f"Your roster still needs **{win_pos}**, which tilts the decision toward **{winner}**.")
+    elif lose_pos in needs and win_pos not in needs:
+        parts.append(
+            f"You still need **{lose_pos}**, but **{winner}**'s overall value likely outweighs that gap."
+        )
+
+    return " ".join(parts)
+
+
+def _draft_review_grade(bundle: dict[str, Any]) -> str:
+    roster = bundle.get("roster") or []
+    needed = bundle.get("needed_positions") or []
+    cats = bundle.get("category_needs") or []
+    n = len(roster)
+    gaps = len(needed)
+    if n >= 5 and gaps <= 1 and len(cats) <= 1:
+        return "A-"
+    if n >= 4 and gaps <= 2 and len(cats) <= 2:
+        return "B+"
+    if n >= 3 and gaps <= 3:
+        return "B"
+    if n >= 2:
+        return "B-"
+    return "C+"
+
+
+def _roster_pick_extremes(bundle: dict[str, Any], roster: list[str]) -> tuple[str, str]:
+    ranked: list[tuple[str, float]] = []
+    for name in roster:
+        clean = str(name).split(" (")[0].strip()
+        row = _find_player_row_in_bundle(clean, bundle) or {}
+        ranked.append((clean, _row_market_rank(row)))
+    if not ranked:
+        return "", ""
+    ranked.sort(key=lambda item: item[1])
+    return ranked[0][0], ranked[-1][0]
 
 
 def _finalize_draft_coach_sections(coach: dict[str, Any], bundle: dict[str, Any]) -> dict[str, Any]:
@@ -3725,79 +3954,68 @@ def _build_baseball_draft_coach_sections(
         elif a_drafted and b_drafted:
             direct = f"Both **{pa}** and **{pb}** are already drafted on your saved board."
         else:
-            score_a = 0.0
-            score_b = 0.0
-            drivers: list[str] = []
-            try:
-                if mkt_a is not None and mkt_b is not None:
-                    if float(mkt_a) < float(mkt_b):
-                        score_a += 2
-                        drivers.append(f"Market Rank {mkt_a} vs {mkt_b}")
-                    elif float(mkt_b) < float(mkt_a):
-                        score_b += 2
-                        drivers.append(f"Market Rank {mkt_b} vs {mkt_a}")
-            except (TypeError, ValueError):
-                pass
-            try:
-                if edge_a is not None and edge_b is not None:
-                    if float(edge_a) > float(edge_b):
-                        score_a += 1.5
-                        drivers.append(f"Fantasy Edge {edge_a} vs {edge_b}")
-                    elif float(edge_b) > float(edge_a):
-                        score_b += 1.5
-            except (TypeError, ValueError):
-                pass
-            needs = bundle.get("needed_positions") or []
-            if pos_a in needs or str(pos_a).upper() in [str(n).upper() for n in needs]:
-                score_a += 1
-                drivers.append(f"{pa} fills {pos_a} need")
-            if pos_b in needs or str(pos_b).upper() in [str(n).upper() for n in needs]:
-                score_b += 1
-                drivers.append(f"{pb} fills {pos_b} need")
-            if score_a > score_b:
-                winner, loser = pa, pb
-            elif score_b > score_a:
-                winner, loser = pb, pa
-            else:
-                winner = ""
-            if winner:
-                direct = (
-                    f"**{winner}** is the better draft pick over **{loser}** at {pick_note} "
-                    f"based on board value and roster fit ({', '.join(drivers[:3]) or 'attached board rows'})."
-                )
-            else:
-                direct = (
-                    f"**{pa}** ({pos_a}) vs **{pb}** ({pos_b}) is close on your board — "
-                    f"choose **{pa}** for {pos_a} stability or **{pb}** for {pos_b} profile."
-                )
+            direct = _head_to_head_analyst_direct(
+                bundle,
+                pa=pa,
+                pb=pb,
+                pos_a=str(pos_a),
+                pos_b=str(pos_b),
+                mkt_a=mkt_a,
+                mkt_b=mkt_b,
+                pick_note=pick_note,
+            )
 
-        evidence_parts = [
-            f"**{pa}**: {pos_a}, {_avail_label(pa, a_drafted)}",
-            f"Market Rank **{mkt_a}**, Fantasy Edge **{edge_a}**" if mkt_a is not None or edge_a is not None else "",
-            f"**{pb}**: {pos_b}, {_avail_label(pb, b_drafted)}",
-            f"Market Rank **{mkt_b}**, Fantasy Edge **{edge_b}**" if mkt_b is not None or edge_b is not None else "",
+        compare_winner = ""
+        if pa and pb and not (a_drafted or b_drafted):
+            try:
+                rank_a = float(mkt_a) if mkt_a is not None else 9999.0
+                rank_b = float(mkt_b) if mkt_b is not None else 9999.0
+                compare_winner = pa if rank_a < rank_b else pb if rank_b < rank_a else ""
+            except (TypeError, ValueError):
+                compare_winner = ""
+
+        filled = _roster_by_position(bundle)
+        filled_bits = [
+            f"**{pos}**: {', '.join(names[:3])}"
+            for pos, names in sorted(filled.items())
+            if names
         ]
         framing = (
-            f"Draft compare at {pick_note} for "
+            f"Head-to-head at {pick_note} for "
             + (f"your **{len(roster)}**-player roster" if roster else "your roster")
             + ". "
-            + " · ".join(p for p in evidence_parts if p)
-            + (f" Needs: **{needs_label}**." if needs_label != "balanced coverage" else "")
+            + (f"Roster so far: {' · '.join(filled_bits[:4])}. " if filled_bits else "")
+            + f"**{pa}** ({pos_a}) is {_avail_label(pa, a_drafted)}; **{pb}** ({pos_b}) is {_avail_label(pb, b_drafted)}."
+            + (f" Open needs: **{needs_label}**." if needs_label != "balanced coverage" else "")
             + context_suffix
         )
         if reason_a or reason_b:
             framing += f" Model notes: {reason_a or '—'} | {reason_b or '—'}."
+        lose_pos = pos_b if compare_winner == pa else pos_a if compare_winner == pb else ""
+        lose_name = pb if compare_winner == pa else pa if compare_winner == pb else ""
+        lose_query = _position_query_from_code(lose_pos) if lose_pos else ""
+        lose_pool = _pool_rows_by_position(bundle, lose_query) if lose_query else []
+        next_at_lose = _draft_player_name(lose_pool[1]) if len(lose_pool) > 1 else ""
         tradeoffs = (
-            f"**{pa}** ({pos_a}) vs **{pb}** ({pos_b}): "
-            f"value edge {edge_a} vs {edge_b}; market rank {mkt_a} vs {mkt_b}."
+            f"If you pass on **{compare_winner}**, you keep premium overall value. "
+            f"If you take **{lose_name}** instead, you secure **{lose_pos}** but likely settle "
+            + (f"for **{next_at_lose}** as the next option at that position." if next_at_lose else "for a thinner next tier.")
+            if compare_winner and lose_name
+            else f"**{pa}** ({pos_a}) vs **{pb}** ({pos_b}) — weigh overall tier against positional scarcity."
         )
-        scarcity_line = _draft_scarcity_line(bundle) if bundle.get("position_scarcity") is not None else ""
-        risk_line = _draft_risk_line(bundle, pa or top, mode=mode)
+        scarcity_line = ""
+        if lose_query:
+            scarcity_line = _draft_scarcity_line(
+                bundle, available_count=len(lose_pool), position_query=lose_query
+            )
+        elif bundle.get("position_scarcity") is not None:
+            scarcity_line = _draft_scarcity_line(bundle)
+        risk_line = _draft_risk_line(bundle, compare_winner or pa or top, mode=mode)
         what_if = [
-            f"If you need **{pos_a}** → lean **{pa}**.",
-            f"If you need **{pos_b}** → lean **{pb}**.",
-            f"If both are available → compare Market Rank and Fantasy Edge at {pick_note}.",
-            f"If either is drafted → take the remaining available player.",
+            f"If you need **{pos_a}** → **{pa}** becomes the positional anchor.",
+            f"If you need **{pos_b}** → **{pb}** becomes the positional anchor.",
+            f"If you prioritize overall value → **{compare_winner or pa}** is the default lean.",
+            "If a position run starts → take the scarce position before the tier clears.",
         ]
     elif mode == "player_why":
         focus = player or top
@@ -3817,6 +4035,7 @@ def _build_baseball_draft_coach_sections(
         pos_pool = _pool_rows_by_position(bundle, pos_query) if pos_query else []
         pos_label = pos_query.title() if pos_query else (str(pos or "").strip() or "position")
         pos_alts = _position_alt_names(bundle, position_query=pos_query, exclude_name=focus) if pos_query else []
+        scarcity_note = ""
         focus_in_pos_pool = bool(
             pos_query
             and pos_pool
@@ -3838,32 +4057,27 @@ def _build_baseball_draft_coach_sections(
             scarcity_note = _explain_position_scarcity(
                 bundle, position_query=pos_query, pool_count=len(pos_pool)
             )
-            market_txt = _explain_market_rank(market)
-            edge_txt = _explain_fantasy_edge(edge)
             if focus_leads_pos:
-                direct = (
-                    f"**{focus}** is the top remaining **{pos_label}** at {pick_note}"
-                    + (f" ({market_txt})" if market_txt else "")
-                    + "."
+                direct = _fantasy_analyst_player_why_direct(
+                    bundle,
+                    focus=focus,
+                    pos_query=pos_query,
+                    pos_label=pos_label,
+                    pos_pool=pos_pool,
+                    pick_note=pick_note,
+                    drafted_line=drafted_line,
+                    profile=profile,
                 )
-                if edge_txt:
-                    direct += f" {edge_txt.capitalize()}."
-                if profile:
-                    direct += f" Production profile: {profile}."
-                direct += _peer_comparison_line(focus, row, pos_pool)
-                if scarcity_note:
-                    direct += f" {scarcity_note}"
-                need_phrase = _position_need_phrase(bundle, pos_query)
-                if need_phrase:
-                    direct += f" Practically, he {need_phrase}."
             else:
+                top_peer = _fantasy_peer_names(pos_pool, focus, limit=1)
                 direct = (
-                    f"**{focus}** is a viable **{pos_label}** at {pick_note}"
-                    f"{(' (' + market_txt + ')') if market_txt else ''}, "
-                    f"but **{top_at_pos}** leads remaining **{pos_label}** on market rank."
+                    f"**{focus}** is a viable **{pos_label}** at {pick_note}, "
+                    f"but **{top_at_pos}** leads the remaining tier on your board."
                 )
+                if top_peer:
+                    direct += f" **{focus}** still profiles ahead of **{top_peer[0]}** on category fit."
                 if profile:
-                    direct += f" **{focus}** profile: {profile}."
+                    direct += f" Profile: {profile}."
         elif is_top_rec or (rec_names and _player_name_token(focus) == _player_name_token(rec_names[0])):
             direct = (
                 f"**{focus}** is a strong pick for you right now because he matches your board recommendation "
@@ -3904,19 +4118,13 @@ def _build_baseball_draft_coach_sections(
         framing = " ".join(framing_parts) + context_suffix
         if reason:
             framing += f" Model note: {reason}."
-        if edge is not None or market is not None:
-            bits = []
-            if market is not None:
-                bits.append(_explain_market_rank(market))
-            if edge is not None:
-                bits.append(_explain_fantasy_edge(edge))
-            if bits:
-                framing += " Value read: " + "; ".join(bits) + "."
+        if pos_query and pos_pool and scarcity_note and scarcity_note not in direct:
+            framing += f" {scarcity_note}"
 
         if pos_query and pos_alts:
-            tradeoffs = _peer_comparison_line(focus, row, pos_pool, limit=3).strip() or (
-                f"At **{pos_label}**, compare **{focus}** with **{', '.join(pos_alts[:2])}** "
-                "on market rank, playing-time floor, and category profile."
+            tradeoffs = (
+                f"If you pass on **{focus}**, the next **{pos_label}** options are "
+                f"**{', '.join(pos_alts[:3])}** — a clear step down in tier."
             )
         elif alt or (top and not is_top_rec and not pos_query):
             tradeoffs = (
@@ -4132,31 +4340,123 @@ def _build_baseball_draft_coach_sections(
         ]
         scarcity_line = _draft_scarcity_line(bundle)
         risk_line = _draft_risk_line(bundle, player or top, mode=mode)
-    elif mode == "roster_needs":
-        pos = bundle.get("needed_positions") or []
+    elif mode == "draft_review":
+        roster_list = bundle.get("roster") or []
+        filled = _roster_by_position(bundle)
+        needed = bundle.get("needed_positions") or []
         cats = bundle.get("category_needs") or []
-        pos_text = ", ".join(pos[:6]) if pos else "no major positional gaps"
-        cat_text = ", ".join(cats[:6]) if cats else "category balance"
-        next_target = top if top else (bundle.get("draft_queue") or [""])[0]
-        direct = (
-            f"**Roster diagnosis:** {roster_note} needs **{pos_text}** "
-            f"and category help in **{cat_text}**."
-        )
+        grade = _draft_review_grade(bundle)
+        best_pick, weakest_pick = _roster_pick_extremes(bundle, roster_list)
+        next_targets = rec_names[:3] or avail_names[:3]
+
+        filled_lines = [
+            f"**{pos}**: {', '.join(names[:4])}{'…' if len(names) > 4 else ''}"
+            for pos, names in sorted(filled.items())
+            if names
+        ]
+        direct = f"**Draft grade: {grade}** through {pick_note}."
+        if best_pick:
+            direct += f" Best pick so far: **{best_pick}**."
+        if weakest_pick and weakest_pick != best_pick:
+            direct += f" Weakest pick so far: **{weakest_pick}**."
+        if filled_lines:
+            direct += " Positions covered: " + "; ".join(filled_lines[:5]) + "."
+        if needed:
+            direct += f" Biggest remaining gap: **{needed[0]}**."
+
+        strengths: list[str] = []
+        if len(roster_list) >= 3:
+            strengths.append(f"**{len(roster_list)}** early roster pieces in place")
+        if best_pick:
+            strengths.append(f"**{best_pick}** as an anchor pick")
+        if not needed:
+            strengths.append("no glaring positional holes yet")
+        weaknesses: list[str] = []
+        if needed:
+            weaknesses.append(f"still need **{', '.join(needed[:4])}**")
+        if cats:
+            weaknesses.append(f"category pressure in **{', '.join(cats[:4])}**")
+        if weakest_pick:
+            weaknesses.append(f"**{weakest_pick}** profiles as the softest pick so far")
+
         framing = (
-            f"Your saved board shows gaps at **{pos_text}** with category pressure on **{cat_text}**. "
-            f"Next priority: target **{next_target or 'best fit'}** from recommendations/queue.{context_suffix}"
+            f"Roster review at {pick_note} on {roster_note} in **{scoring_label}** scoring."
+            + (f" Strengths: {'; '.join(strengths)}." if strengths else "")
+            + (f" Weaknesses: {'; '.join(weaknesses)}." if weaknesses else "")
+            + (f" Recommended next targets: **{', '.join(next_targets)}**." if next_targets else "")
+            + context_suffix
         )
         tradeoffs = (
-            f"Recommendations point to **{top}**; alternatives **{alt or 'next tier'}** "
-            f"trade category fit vs raw value."
-            if alt
-            else f"Lead with **{top}** from your recommendation board to close **{pos_text}**."
+            f"Balance path → target **{needed[0] if needed else top}** to close the biggest hole. "
+            f"Value path → **{top}** if still the best overall player on your board."
+            if needed and top
+            else f"Stay flexible — **{top or 'next best available'}** is the lead recommendation on your board."
         )
         what_if = [
+            f"If you chase value → **{top}** over a need-filling pick.",
+            f"If you chase balance → **{needed[0] if needed else top}** before the tier drops.",
+            f"If you prioritize safety → favor higher-floor picks from recommendations.",
+            f"If you prioritize upside → mix in **{sleeper_names[0] if sleeper_names else alt or 'a sleeper'}**.",
+        ]
+        scarcity_line = _draft_scarcity_line(bundle)
+        risk_line = (
+            "Risk profile: early roster is still forming — prioritize stable starters at scarce positions "
+            "before dart throws."
+            if len(roster_list) <= 4
+            else "Risk profile: mix of floor and upside based on your current roster construction."
+        )
+    elif mode == "roster_needs":
+        filled = _roster_by_position(bundle)
+        needed = bundle.get("needed_positions") or []
+        cats = bundle.get("category_needs") or []
+        next_target = top if top else (bundle.get("draft_queue") or [""])[0]
+
+        filled_lines = [
+            f"**{pos}**: {', '.join(names[:4])}"
+            for pos, names in sorted(filled.items())
+            if names
+        ]
+        direct_parts = ["You already have:"]
+        if filled_lines:
+            direct_parts.extend(f"- {line}" for line in filled_lines[:6])
+        else:
+            direct_parts.append(f"- {roster_note}")
+        if needed:
+            direct_parts.append("")
+            direct_parts.append("Remaining priorities:")
+            for i, pos_code in enumerate(needed[:5], 1):
+                direct_parts.append(f"{i}. **{pos_code}**")
+            direct_parts.append("")
+            direct_parts.append(f"Your biggest current roster gap is **{needed[0]}**.")
+        elif cats:
+            direct_parts.append("")
+            direct_parts.append(f"Category priorities: **{', '.join(cats[:5])}**.")
+        else:
+            direct_parts.append("")
+            direct_parts.append("No major positional holes flagged — lean best player available.")
+        direct = "\n".join(direct_parts)
+
+        framing = (
+            f"Roster construction at {pick_note}: "
+            + (f"filled **{len(filled)}** position groups" if filled else "roster still building")
+            + (f"; category needs **{', '.join(cats[:4])}**" if cats else "")
+            + f". Next target from board: **{next_target or top or 'best fit'}**."
+            + context_suffix
+        )
+        tradeoffs = (
+            f"Need-first path → **{needed[0]}** before the tier thins. "
+            f"Value-first path → **{top}** if still on the board."
+            if needed and top
+            else f"Lead with **{top or next_target or 'best available'}** from recommendations."
+        )
+        what_if = [
+            f"If a **{needed[0]} run** starts → take the top name at that position." if needed else "If a position run starts → secure scarce positions early.",
             f"If you prioritize power → weight HR/OBP among available: {', '.join(avail_names[:3]) or 'see board'}.",
             f"If you prioritize speed → favor SB profiles (queue/watchlist: {', '.join(bundle.get('draft_queue')[:2] + bundle.get('watchlist')[:2]) or '—'}).",
             f"If you prioritize safety → take **{top}** over upside dart throws.",
         ]
+        scarcity_line = _draft_scarcity_line(bundle)
+        risk_line = _draft_risk_line(bundle, next_target or top or player, mode=mode)
     elif mode == "best_values":
         value_rows = bundle.get("best_available") or bundle.get("available") or bundle.get("recommendations") or []
         ranked = _rank_value_players(value_rows, limit=5)
@@ -4484,6 +4784,8 @@ def solve_baseball_draft(
         missing.append("recommended_players")
     if mode == "roster_needs" and not bundle.get("needed_positions") and not bundle.get("category_needs"):
         missing.append("needed_positions or category_needs")
+    if mode == "draft_review" and not bundle.get("roster"):
+        missing.append("user_roster or roster")
     if mode == "best_values" and not bundle.get("best_available") and not bundle.get("available"):
         missing.append("best_available or available_players")
     if mode == "player_why" and not player:
@@ -4565,6 +4867,7 @@ def solve_baseball_draft(
         "value_edge",
         "best_values",
         "roster_needs",
+        "draft_review",
         "sleeper",
         "draft_market_prediction",
         "draft_player_compare",

@@ -298,7 +298,79 @@ class TestDraftPickSolver(unittest.TestCase):
         self.assertIn("catcher", text)
         self.assertNotIn("jose ramirez is the better fit", text)
         self.assertTrue(
-            "langeliers" in text or "perez" in text or "top remaining" in text or "market rank" in text
+            "langeliers" in text or "perez" in text or "highest-ranked" in text or "sits above" in text
+        )
+
+    def test_player_why_catcher_surfaces_drafted_count_in_direct(self) -> None:
+        ctx = self._draft_market_ctx()
+        ctx["draft_snapshot"]["user_roster"] = ["Juan Soto", "Elly De La Cruz", "Cal Raleigh"]
+        ctx["draft_snapshot"]["recommended_players"] = [
+            {"player": "Jose Ramirez", "Primary Position": "3B", "Market Rank": 8},
+        ]
+        ctx["question_player"] = "William Contreras"
+        result = solve_baseball_draft(
+            ctx,
+            "Why is William Contreras the best catcher to draft right now?",
+        )
+        self.assertEqual(result.computed.get("draft_mode"), "player_why")
+        low = result.short_answer.lower()
+        self.assertIn("cal raleigh", low)
+        self.assertTrue("already drafted" in low or "1" in result.short_answer)
+        self.assertIn("highest-ranked", low)
+
+    def test_draft_review_not_fair_price(self) -> None:
+        ctx = self._draft_market_ctx()
+        ctx["draft_snapshot"]["user_roster"] = [
+            "Aaron Judge",
+            "Francisco Lindor",
+            "Cal Raleigh",
+            "Juan Soto",
+        ]
+        ctx["draft_snapshot"]["current_pick"] = 8
+        ctx["current_pick"] = 8
+        result = solve_baseball_draft(ctx, "How would you rate my picks so far?")
+        self.assertEqual(result.computed.get("draft_mode"), "draft_review")
+        low = result.short_answer.lower()
+        self.assertIn("grade", low)
+        self.assertNotIn("fair price", low)
+        self.assertNotIn("jose ramirez at pick", low)
+
+    def test_positions_left_routes_roster_needs(self) -> None:
+        ctx = self._draft_market_ctx()
+        ctx["draft_snapshot"]["user_roster"] = [
+            "Aaron Judge",
+            "Juan Soto",
+            "Francisco Lindor",
+            "Cal Raleigh",
+        ]
+        ctx["draft_snapshot"]["needed_positions"] = ["3B", "1B", "OF"]
+        ctx["needed_positions"] = ["3B", "1B", "OF"]
+        result = solve_baseball_draft(ctx, "Which positions left are needed for me to pick?")
+        self.assertEqual(result.computed.get("draft_mode"), "roster_needs")
+        self.assertIn("3B", result.short_answer)
+        self.assertNotIn("fair price", result.short_answer.lower())
+
+    def test_ramirez_vs_contreras_analyst_compare(self) -> None:
+        ctx = self._draft_market_ctx()
+        ctx["draft_snapshot"]["recommended_players"] = [
+            {"player": "Jose Ramirez", "Primary Position": "3B", "Market Rank": 8, "Fantasy Edge": 12},
+        ]
+        ctx["draft_snapshot"]["available_players"].extend(
+            [
+                {"player": "Jose Ramirez", "Primary Position": "3B", "Market Rank": 8},
+                {"player": "Shea Langeliers", "Primary Position": "C", "Market Rank": 45},
+                {"player": "Matt Chapman", "Primary Position": "3B", "Market Rank": 55},
+            ]
+        )
+        result = solve_baseball_draft(
+            ctx,
+            "Should I draft William Contreras or Jose Ramirez?",
+        )
+        self.assertEqual(result.computed.get("draft_mode"), "draft_player_compare")
+        low = result.short_answer.lower()
+        self.assertIn("ramirez", low)
+        self.assertTrue(
+            "stronger overall" in low or "best remaining" in low or "premium" in low
         )
 
     def test_best_available_catcher_ranks_pool(self) -> None:
@@ -345,7 +417,7 @@ class TestDraftPickSolver(unittest.TestCase):
         self.assertEqual(result.computed.get("draft_mode"), "player_why")
         self.assertNotIn("that closes 1b/2b", text)
         self.assertNotIn("hr + rbi on your roster", text)
-        self.assertTrue("langeliers" in text or "perez" in text or "vs adp" in text or "market rank" in text)
+        self.assertTrue("langeliers" in text or "perez" in text or "highest-ranked" in text or "sits above" in text)
         coach = result.computed.get("coach_sections") or {}
         drafted_framing = str(coach.get("analyst_framing") or "").lower()
         self.assertIn("cal raleigh", drafted_framing)

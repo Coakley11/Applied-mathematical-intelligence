@@ -8,8 +8,10 @@ from components.draft_market_question import (
     extract_draft_position_query,
     is_draft_head_to_head_question,
     is_draft_market_prediction_question,
+    is_draft_review_question,
     is_player_explanation_question,
     is_position_best_available_question,
+    is_roster_needs_question,
     position_matches_row,
 )
 
@@ -66,6 +68,16 @@ class TestDraftMarketQuestionDetection(unittest.TestCase):
         self.assertIn("available", rest.lower())
         self.assertIn("catcher", rest.lower())
         self.assertNotIn("player b", rest.lower())
+
+    def test_draft_review_detection(self) -> None:
+        self.assertTrue(is_draft_review_question("How would you rate my picks so far?"))
+        self.assertTrue(is_draft_review_question("Grade my draft"))
+        self.assertFalse(is_draft_review_question("Should I draft William Contreras or Jose Ramirez?"))
+
+    def test_roster_needs_detection(self) -> None:
+        self.assertTrue(is_roster_needs_question("Which positions left are needed for me to pick?"))
+        self.assertTrue(is_roster_needs_question("What positions should I target next?"))
+        self.assertFalse(is_roster_needs_question("Is Corbin Carroll worth a Round 2 pick?"))
 
 
 if __name__ == "__main__":
