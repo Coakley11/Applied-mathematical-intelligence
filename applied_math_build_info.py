@@ -8,7 +8,7 @@ from pathlib import Path
 # Bump on each solver release; shown when git is unavailable.
 GIT_COMMIT_PINNED = "ac897d9"
 GIT_BRANCH_PINNED = "dev"
-SOLVER_BUILD_MARKER = "2026-05-27-ami-reasoning-v2"
+SOLVER_BUILD_MARKER = "2026-05-27-ami-reasoning-v3"
 SOLVER_UI_VERSION = "2.8.0"
 ROUTER_VERSION = "1.5.0"
 SOLVER_CORE_VERSION = "2.7.0"

@@ -322,6 +322,34 @@ class TestDraftPickSolver(unittest.TestCase):
         self.assertIn("cal raleigh", text)
         self.assertNotIn("jose ramirez", text)
 
+    def test_player_why_catcher_no_generic_roster_fit_leak(self) -> None:
+        ctx = self._draft_market_ctx()
+        ctx["draft_snapshot"]["recommended_players"] = [
+            {"player": "Jose Ramirez", "Primary Position": "3B", "Market Rank": 8},
+        ]
+        ctx["draft_snapshot"]["available_players"].extend(
+            [
+                {"player": "Shea Langeliers", "Primary Position": "C", "Market Rank": 45, "Fantasy Edge": -8},
+                {"player": "Salvador Perez", "Primary Position": "C", "Market Rank": 52, "Fantasy Edge": -12},
+            ]
+        )
+        ctx["draft_snapshot"]["draft_room_board"] = [
+            {"player": "Cal Raleigh", "Primary Position": "C"},
+        ]
+        ctx["question_player"] = "William Contreras"
+        result = solve_baseball_draft(
+            ctx,
+            "Why is William Contreras the best catcher to draft right now?",
+        )
+        text = (result.short_answer + " " + result.why + " " + str(result.computed.get("coach_sections"))).lower()
+        self.assertEqual(result.computed.get("draft_mode"), "player_why")
+        self.assertNotIn("that closes 1b/2b", text)
+        self.assertNotIn("hr + rbi on your roster", text)
+        self.assertTrue("langeliers" in text or "perez" in text or "vs adp" in text or "market rank" in text)
+        coach = result.computed.get("coach_sections") or {}
+        drafted_framing = str(coach.get("analyst_framing") or "").lower()
+        self.assertIn("cal raleigh", drafted_framing)
+
     def test_next_best_catcher_mode(self) -> None:
         ctx = self._draft_market_ctx()
         result = solve_baseball_draft(ctx, "Who is the next best catcher?")

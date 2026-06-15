@@ -3225,22 +3225,6 @@ def _player_position_from_pools(bundle: dict[str, Any], player_name: str) -> str
     return ""
 
 
-def _drafted_names_at_position(bundle: dict[str, Any], position_query: str) -> list[str]:
-    names: list[str] = []
-    for name in bundle.get("drafted_players") or []:
-        clean = str(name).split(" (")[0].strip()
-        if not clean:
-            continue
-        pos = _player_position_from_pools(bundle, clean)
-        if not position_query:
-            names.append(clean)
-        elif pos and position_matches_row(position_query, pos):
-            names.append(clean)
-        elif not pos and position_query in clean.lower():
-            names.append(clean)
-    return names
-
-
 def _draft_scoring_label(scoring: dict[str, Any]) -> str:
     for key in ("draft_format", "draft_lab_scoring_type", "scoring_type", "room_format"):
         val = scoring.get(key)
@@ -3275,9 +3259,16 @@ def _draft_context_notes(bundle: dict[str, Any]) -> list[str]:
     return notes
 
 
-def _draft_scarcity_line(bundle: dict[str, Any], *, available_count: int | None = None) -> str:
-    scarcity = bundle.get("position_scarcity")
+def _draft_scarcity_line(
+    bundle: dict[str, Any],
+    *,
+    available_count: int | None = None,
+    position_query: str = "",
+) -> str:
     pool = available_count if available_count is not None else len(bundle.get("available") or [])
+    if position_query:
+        return _explain_position_scarcity(bundle, position_query=position_query, pool_count=int(pool))
+    scarcity = bundle.get("position_scarcity")
     needs = _format_need_list(bundle.get("needed_positions") or [], bundle.get("category_needs") or [])
     if scarcity is not None:
         return (
@@ -3325,6 +3316,172 @@ def _rank_value_players(rows: list[dict[str, Any]], *, limit: int = 5) -> list[s
             bits.append(f"Market Rank {market}")
         ranked.append(" — ".join(bits))
     return ranked
+
+
+def _explain_market_rank(rank: Any) -> str:
+    try:
+        val = float(rank)
+    except (TypeError, ValueError):
+        return ""
+    if val <= 40:
+        return f"market rank **{val:g}** (early-round tier)"
+    if val <= 80:
+        return f"market rank **{val:g}** (middle-round tier)"
+    return f"market rank **{val:g}** (later-round tier)"
+
+
+def _explain_fantasy_edge(edge: Any) -> str:
+    try:
+        val = float(edge)
+    except (TypeError, ValueError):
+        return ""
+    if val >= 5:
+        return f"model value **+{val:g}** vs ADP (clear surplus — strong buy at this slot)"
+    if val >= 0:
+        return f"model value **+{val:g}** vs ADP (fair to slight value)"
+    if val >= -8:
+        return (
+            f"model value **{val:g}** vs ADP (small reach — you pay a modest premium for stability/upside)"
+        )
+    return f"model value **{val:g}** vs ADP (meaningful reach — only take if you must have the profile)"
+
+
+def _position_need_phrase(bundle: dict[str, Any], position_query: str) -> str:
+    """Roster-fit phrase scoped to the position in the question (not full need list)."""
+    if not position_query:
+        return ""
+    needs = [str(n).strip().upper() for n in (bundle.get("needed_positions") or []) if str(n).strip()]
+    pos_map = {
+        "catcher": "C",
+        "shortstop": "SS",
+        "outfield": "OF",
+        "first base": "1B",
+        "second base": "2B",
+        "third base": "3B",
+    }
+    code = pos_map.get(position_query.lower(), position_query.upper())
+    if code in needs:
+        return f"fills your open **{code}** roster slot"
+    if position_query.lower() == "catcher":
+        return "adds stable catcher production while the tier is still strong"
+    return f"adds **{position_query.title()}** depth at this pick"
+
+
+def _explain_position_scarcity(
+    bundle: dict[str, Any],
+    *,
+    position_query: str,
+    pool_count: int,
+) -> str:
+    pos_label = position_query.title() if position_query else "Position"
+    scarcity = bundle.get("position_scarcity")
+    if scarcity is not None:
+        try:
+            sval = float(scarcity)
+        except (TypeError, ValueError):
+            sval = None
+        if sval is not None and sval >= 2.0:
+            return (
+                f"**{pos_label}** scarcity is elevated (index **{sval:g}**) — only **{pool_count}** "
+                f"viable options remain, so waiting usually means a steep drop in production."
+            )
+    if pool_count <= 4:
+        return (
+            f"The **{pos_label}** pool is thin (**{pool_count}** left) — replacement production "
+            "falls off quickly after the top names."
+        )
+    return (
+        f"**{pool_count}** **{pos_label}** options remain in your board context; "
+        "the practical risk is losing a tier before your next pick."
+    )
+
+
+def _peer_comparison_line(
+    focus_name: str,
+    focus_row: dict[str, Any],
+    pos_pool: list[dict[str, Any]],
+    *,
+    limit: int = 2,
+) -> str:
+    focus_token = _player_name_token(focus_name)
+    focus_market = _row_market_rank(focus_row) if focus_row else 9999.0
+    peers: list[str] = []
+    for row in pos_pool:
+        name = _draft_player_name(row)
+        if not name or _player_name_token(name) == focus_token:
+            continue
+        peer_market = _row_market_rank(row)
+        edge_txt = _explain_fantasy_edge(_player_metric(row, "Fantasy Edge", "fantasy_edge"))
+        profile = _player_profile_bits(row)
+        rank_gap = int(peer_market - focus_market) if peer_market < 9990 and focus_market < 9990 else 0
+        bit = f"**{name}** ({_explain_market_rank(peer_market)}"
+        if edge_txt:
+            bit += f"; {edge_txt}"
+        if profile:
+            bit += f"; {profile}"
+        bit += ")"
+        if rank_gap > 0:
+            bit += f" trails **{focus_name}** by **{rank_gap}** market-rank spots"
+        peers.append(bit)
+        if len(peers) >= limit:
+            break
+    if not peers:
+        return ""
+    return " Compared with " + " and ".join(peers) + "."
+
+
+def _drafted_names_at_position(bundle: dict[str, Any], position_query: str) -> list[str]:
+    names: list[str] = []
+    seen: set[str] = set()
+    drafted_tokens = _drafted_name_tokens(bundle.get("drafted_players"))
+
+    def _maybe_add(clean: str, pos: str) -> None:
+        token = _player_name_token(clean)
+        if not clean or token in seen:
+            return
+        if not position_query:
+            seen.add(token)
+            names.append(clean)
+            return
+        if pos and position_matches_row(position_query, pos):
+            seen.add(token)
+            names.append(clean)
+        elif not pos and position_query in clean.lower():
+            seen.add(token)
+            names.append(clean)
+
+    for name in bundle.get("drafted_players") or []:
+        clean = str(name).split(" (")[0].strip()
+        if not clean:
+            continue
+        pos = _player_position_from_pools(bundle, clean)
+        if drafted_tokens and _player_name_token(clean) not in drafted_tokens:
+            continue
+        _maybe_add(clean, pos)
+
+    for row in bundle.get("board_rows") or bundle.get("canonical_board") or []:
+        if not isinstance(row, dict):
+            continue
+        clean = _draft_player_name(row)
+        if not clean:
+            continue
+        if drafted_tokens and _player_name_token(clean) not in drafted_tokens:
+            continue
+        pos = str(_player_metric(row, "Primary Position", "position", "pos") or "")
+        _maybe_add(clean, pos)
+
+    return names
+
+
+def _drafted_position_line(bundle: dict[str, Any], position_query: str) -> str:
+    names = _drafted_names_at_position(bundle, position_query)
+    pos_label = position_query.title() if position_query else "Position"
+    if names:
+        return (
+            f"**{len(names)}** **{pos_label}** already drafted: "
+            f"{', '.join(names[:4])}{'…' if len(names) > 4 else ''}."
+        )
+    return ""
 
 
 def _finalize_draft_coach_sections(coach: dict[str, Any], bundle: dict[str, Any]) -> dict[str, Any]:
@@ -3480,15 +3637,19 @@ def _build_baseball_draft_coach_sections(
                 if nm and mr is not None:
                     rank_bits.append(f"**{nm}** (Market Rank **{mr}**)")
             if rank_bits:
+                drafted_line = _drafted_position_line(bundle, pos_query)
                 framing = (
                     f"At {pick_note}, remaining **{pos_label}** by Market Rank: "
                     + ", ".join(rank_bits)
-                    + f". **{len(drafted_pos)}** **{pos_label}** already drafted.{context_suffix}"
+                    + (f" {drafted_line}" if drafted_line else "")
+                    + context_suffix
                 )
             else:
+                drafted_line = _drafted_position_line(bundle, pos_query)
                 framing = (
-                    f"Ranked by Market Rank / ADP among available **{pos_label}** in context at {pick_note}. "
-                    f"**{len(drafted_pos)}** **{pos_label}** already drafted.{context_suffix}"
+                    f"Ranked by Market Rank / ADP among available **{pos_label}** in context at {pick_note}."
+                    + (f" {drafted_line}" if drafted_line else "")
+                    + context_suffix
                 )
 
         if remaining_names:
@@ -3673,40 +3834,32 @@ def _build_baseball_draft_coach_sections(
         elif on_roster:
             direct = f"**{focus}** is already on **your roster**; you do not need to draft him again."
         elif pos_query and focus_in_pos_pool:
-            scarcity_note = (
-                f"Catcher scarcity index **{bundle['position_scarcity']:g}** — "
-                if pos_query == "catcher" and bundle.get("position_scarcity") is not None
-                else (
-                    f"**{pos_label}** replacement pool is thinning — "
-                    if len(pos_pool) <= 4
-                    else f"Among **{len(pos_pool)}** remaining **{pos_label}** options — "
-                )
+            drafted_line = _drafted_position_line(bundle, pos_query)
+            scarcity_note = _explain_position_scarcity(
+                bundle, position_query=pos_query, pool_count=len(pos_pool)
             )
-            value_bits = []
-            if market is not None:
-                value_bits.append(f"Market Rank **{market}**")
-            if edge is not None:
-                value_bits.append(f"Fantasy Edge **{edge}**")
-            value_line = ", ".join(value_bits)
+            market_txt = _explain_market_rank(market)
+            edge_txt = _explain_fantasy_edge(edge)
             if focus_leads_pos:
                 direct = (
-                    f"**{focus}** is the top remaining **{pos_label}** at {pick_note}. "
-                    f"{scarcity_note}"
-                    f"{value_line + '.' if value_line else ''}"
+                    f"**{focus}** is the top remaining **{pos_label}** at {pick_note}"
+                    + (f" ({market_txt})" if market_txt else "")
+                    + "."
                 )
+                if edge_txt:
+                    direct += f" {edge_txt.capitalize()}."
                 if profile:
-                    direct += f" Category profile: {profile}."
-                if pos_alts:
-                    direct += (
-                        f" He ranks above **{', '.join(pos_alts[:2])}** on your board "
-                        f"by market rank and replacement value at this pick."
-                    )
-                if needs_label and needs_label != "balanced coverage":
-                    direct += f" That closes **{needs_label}** on your roster."
+                    direct += f" Production profile: {profile}."
+                direct += _peer_comparison_line(focus, row, pos_pool)
+                if scarcity_note:
+                    direct += f" {scarcity_note}"
+                need_phrase = _position_need_phrase(bundle, pos_query)
+                if need_phrase:
+                    direct += f" Practically, he {need_phrase}."
             else:
                 direct = (
                     f"**{focus}** is a viable **{pos_label}** at {pick_note}"
-                    f"{(' (' + value_line + ')') if value_line else ''}, "
+                    f"{(' (' + market_txt + ')') if market_txt else ''}, "
                     f"but **{top_at_pos}** leads remaining **{pos_label}** on market rank."
                 )
                 if profile:
@@ -3734,23 +3887,36 @@ def _build_baseball_draft_coach_sections(
                 direct += f" Profile: {profile}."
 
         avail_note = "available in your tracked pool" if in_available else "not in your top cached available slice — check full board"
-        framing = (
+        drafted_line = _drafted_position_line(bundle, pos_query) if pos_query else ""
+        framing_parts = [
             f"**{focus}** ({pos or pos_label}) on your board: {avail_note}; "
-            f"draft status: {'drafted' if is_drafted else 'not drafted'}. "
-            f"Roster fit vs **{needs_label}** in **{scoring_label}**.{context_suffix}"
-        )
+            f"draft status: {'drafted' if is_drafted else 'not drafted'}.",
+        ]
+        if drafted_line:
+            framing_parts.append(drafted_line)
+        if pos_query and pos_pool:
+            remaining_pos = [_draft_player_name(r) for r in pos_pool[:5] if _draft_player_name(r)]
+            framing_parts.append(
+                f"Remaining **{pos_label}** pool: {', '.join(remaining_pos) or '—'}."
+            )
+        elif needs_label != "balanced coverage":
+            framing_parts.append(f"Broader roster context: **{needs_label}** in **{scoring_label}**.")
+        framing = " ".join(framing_parts) + context_suffix
         if reason:
             framing += f" Model note: {reason}."
         if edge is not None or market is not None:
-            framing += f" Value snapshot: Fantasy Edge **{edge}**, Market Rank **{market}**."
-        if pos_query and pos_pool:
-            remaining_pos = [_draft_player_name(r) for r in pos_pool[:5] if _draft_player_name(r)]
-            framing += f" Remaining **{pos_label}** pool: {', '.join(remaining_pos) or '—'}."
+            bits = []
+            if market is not None:
+                bits.append(_explain_market_rank(market))
+            if edge is not None:
+                bits.append(_explain_fantasy_edge(edge))
+            if bits:
+                framing += " Value read: " + "; ".join(bits) + "."
 
         if pos_query and pos_alts:
-            tradeoffs = (
-                f"At **{pos_label}**, **{focus}** vs **{', '.join(pos_alts[:2])}**: "
-                f"compare Market Rank, Fantasy Edge, and category contribution for **{needs_label}**."
+            tradeoffs = _peer_comparison_line(focus, row, pos_pool, limit=3).strip() or (
+                f"At **{pos_label}**, compare **{focus}** with **{', '.join(pos_alts[:2])}** "
+                "on market rank, playing-time floor, and category profile."
             )
         elif alt or (top and not is_top_rec and not pos_query):
             tradeoffs = (
@@ -3769,7 +3935,9 @@ def _build_baseball_draft_coach_sections(
             ),
             f"If you prioritize upside → **{focus}** vs higher-ceiling alt **{sleeper_names[0] if sleeper_names else alt or '—'}**.",
         ]
-        scarcity_line = _draft_scarcity_line(bundle, available_count=len(pos_pool) if pos_pool else None)
+        scarcity_line = _draft_scarcity_line(
+            bundle, available_count=len(pos_pool) if pos_pool else None, position_query=pos_query or ""
+        )
         risk_line = _draft_risk_line(bundle, focus, mode=mode)
     elif mode == "position_best_available":
         pos_query = extract_draft_position_query(question) or _infer_scarce_position_from_bundle(bundle)
@@ -3790,16 +3958,11 @@ def _build_baseball_draft_coach_sections(
                 f"No remaining **{pos_label}** options are tracked in your available pool at {pick_note}."
             )
 
-        drafted_note = ""
-        if drafted_pos:
-            drafted_note = (
-                f"**{len(drafted_pos)}** **{pos_label}** already drafted: "
-                f"{', '.join(drafted_pos[:4])}{'…' if len(drafted_pos) > 4 else ''}."
-            )
+        drafted_line = _drafted_position_line(bundle, pos_query)
         framing = (
-            (drafted_note + " " if drafted_note else "")
+            (drafted_line + " " if drafted_line else "")
             + f"**{len(pos_pool)}** remaining **{pos_label}** in your tracked pool. "
-            f"Roster needs: **{needs_label}** in **{scoring_label}**.{context_suffix}"
+            f"Scoring: **{scoring_label}**.{context_suffix}"
         )
         if second_at_pos:
             tradeoffs = (
@@ -3815,7 +3978,9 @@ def _build_baseball_draft_coach_sections(
             f"If you prioritize safety → favor **{top_at_pos}** (best market rank among remaining **{pos_label}**).",
             f"If a run starts → scarcity index **{bundle['position_scarcity']:g}**" if bundle.get("position_scarcity") is not None else f"If a run starts → take **{top_at_pos}** before the **{pos_label}** pool thins.",
         ]
-        scarcity_line = _draft_scarcity_line(bundle, available_count=len(pos_pool))
+        scarcity_line = _draft_scarcity_line(
+            bundle, available_count=len(pos_pool), position_query=pos_query
+        )
         risk_line = _draft_risk_line(bundle, top_at_pos or player, mode=mode)
     elif mode == "hitter_pitcher":
         direct = (
