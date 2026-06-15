@@ -93,6 +93,16 @@ class TestDraftMarketQuestionDetection(unittest.TestCase):
         self.assertTrue(is_draft_timing_question("Will William Contreras make it back to me?"))
         self.assertFalse(is_draft_timing_question("Why is William Contreras the best catcher to draft?"))
 
+    def test_contreras_now_or_later_timing_not_compare(self) -> None:
+        from components.draft_market_question import (
+            is_draft_head_to_head_question,
+            is_draft_timing_question,
+        )
+
+        q = "Should I draft William Contreras now or later?"
+        self.assertTrue(is_draft_timing_question(q))
+        self.assertFalse(is_draft_head_to_head_question(q))
+
 
 if __name__ == "__main__":
     unittest.main()

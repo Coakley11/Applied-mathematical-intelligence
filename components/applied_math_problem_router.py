@@ -25,8 +25,11 @@ from components.applied_math_problem_interpreter import (
 from components.draft_market_question import (
     is_draft_head_to_head_question,
     is_draft_market_prediction_question,
+    is_draft_review_question,
+    is_draft_timing_question,
     is_player_explanation_question,
     is_position_best_available_question,
+    is_roster_needs_question,
 )
 
 # Stable IDs consumed by solvers and tests.
@@ -372,6 +375,45 @@ def _route_baseball(
         return ProblemRoute(
             problem_type_id=BASEBALL_DRAFT,
             problem_type="Draft position best available",
+            confidence=conf,
+            source_app="baseball",
+            required_fields=list(req),
+            available_fields=avail,
+            missing_fields=miss,
+        )
+    if is_draft_timing_question(question):
+        req = ("draft_snapshot", "available_players")
+        avail, miss = _audit_fields(ctx, req)
+        conf = 0.9 if "draft_snapshot" in avail else 0.72 if avail else 0.55
+        return ProblemRoute(
+            problem_type_id=BASEBALL_DRAFT,
+            problem_type="Draft timing decision",
+            confidence=conf,
+            source_app="baseball",
+            required_fields=list(req),
+            available_fields=avail,
+            missing_fields=miss,
+        )
+    if is_draft_review_question(question):
+        req = ("draft_snapshot", "user_roster")
+        avail, miss = _audit_fields(ctx, req)
+        conf = 0.88 if "draft_snapshot" in avail else 0.7 if avail else 0.52
+        return ProblemRoute(
+            problem_type_id=BASEBALL_DRAFT,
+            problem_type="Draft review",
+            confidence=conf,
+            source_app="baseball",
+            required_fields=list(req),
+            available_fields=avail,
+            missing_fields=miss,
+        )
+    if is_roster_needs_question(question):
+        req = ("draft_snapshot", "needed_positions")
+        avail, miss = _audit_fields(ctx, req)
+        conf = 0.88 if avail else 0.55
+        return ProblemRoute(
+            problem_type_id=BASEBALL_DRAFT,
+            problem_type="Roster needs",
             confidence=conf,
             source_app="baseball",
             required_fields=list(req),

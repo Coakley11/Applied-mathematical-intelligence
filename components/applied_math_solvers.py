@@ -2926,6 +2926,12 @@ def _attach_player_position_index(bundle: dict[str, Any], ctx: dict[str, Any]) -
             pos_val = str(pos or "").strip()
             if token and pos_val:
                 index[token] = pos_val
+    for row in snap.get("user_roster_detail") or []:
+        if isinstance(row, dict):
+            name = str(row.get("player") or row.get("Player") or "").strip()
+            pos = _player_metric(row, "Primary Position", "position", "pos")
+            if name and pos:
+                index[_player_name_token(name)] = str(pos)
     for pool_key in ("board_rows", "canonical_board", "available", "best_available", "recommendations"):
         for row in bundle.get(pool_key) or []:
             if not isinstance(row, dict):
@@ -3123,12 +3129,12 @@ def _draft_question_mode(question: str) -> str:
         return "player_why"
     if is_position_best_available_question(question):
         return "position_best_available"
+    if is_draft_timing_question(question):
+        return "draft_timing_decision"
     if is_draft_review_question(question):
         return "draft_review"
     if is_roster_needs_question(question):
         return "roster_needs"
-    if is_draft_timing_question(question):
-        return "draft_timing_decision"
     if is_draft_market_prediction_question(question):
         return "draft_market_prediction"
     if is_draft_head_to_head_question(question):
@@ -3589,7 +3595,7 @@ def _filled_roster_display_lines(bundle: dict[str, Any]) -> tuple[list[str], int
         else:
             tagged_groups += 1
             lines.append(f"**{pos}**: {', '.join(names[:4])}{'…' if len(names) > 4 else ''}")
-    return lines, tagged_groups if tagged_groups else len(lines)
+    return lines, tagged_groups
 
 
 def _timing_survival_readout(
@@ -4881,6 +4887,16 @@ def _build_baseball_draft_coach_sections(
         "A draft pick is an optimization problem: maximize expected value while controlling "
         "category imbalance and downside risk at this pick slot."
     )
+    _draft_mode_math_idea: dict[str, str] = {
+        "draft_timing_decision": "Draft timing — survival odds, tier drop risk, and cost of waiting one round.",
+        "draft_review": "Draft review — strengths, weaknesses, positional balance, then overall grade.",
+        "roster_needs": "Roster construction — filled slots, open positions, and priority order.",
+        "player_why": "Player fit — why this name beats peers at this position on your board.",
+        "draft_player_compare": "Head-to-head draft compare — value, position need, and roster fit.",
+        "position_best_available": "Best available at position — board rank and scarcity at this pick.",
+    }
+    if mode in _draft_mode_math_idea:
+        applied_math = _draft_mode_math_idea[mode]
 
     coach = {
         "direct_answer": direct,

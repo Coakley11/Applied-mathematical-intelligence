@@ -175,6 +175,10 @@ _DRAFT_TIMING_PHRASES: tuple[str, ...] = (
     "wait a round",
     "can i wait",
     "should i wait",
+    "grab him now",
+    "grab her now",
+    "take him now",
+    "take her now",
     "before my next pick",
     "make it back to me",
     "make it back",
@@ -194,8 +198,10 @@ def is_draft_timing_question(question: str) -> bool:
     if any(phrase in low for phrase in _DRAFT_TIMING_PHRASES):
         return True
     if re.search(r"should i (?:draft|select|take|grab)", low) and any(
-        w in low for w in ("now", "wait", "later round", "next round")
+        w in low for w in ("now", "wait", "later", "later round", "next round")
     ):
+        return True
+    if re.search(r"(?:draft|select|take|grab) .+ now or (?:wait|later)", low):
         return True
     if re.search(r"will .+ make it back", low):
         return True
@@ -297,7 +303,7 @@ def extract_draft_compare_players(question: str) -> tuple[str, str]:
             continue
         a = q[m.start(1) : m.end(1)].strip().strip("?,").strip()
         b = q[m.start(2) : m.end(2)].strip().strip("?,").strip()
-        skip = {"this player", "this pick", "he", "him", "a hitter", "a pitcher"}
+        skip = {"this player", "this pick", "he", "him", "a hitter", "a pitcher", "later", "now", "wait"}
         if len(a) >= 3 and len(b) >= 3 and a.lower() not in skip and b.lower() not in skip:
             return a, b
     return "", ""
@@ -333,6 +339,11 @@ def _looks_like_player_name(name: str) -> bool:
 
 def is_draft_head_to_head_question(question: str) -> bool:
     """True when question compares two named players in a draft decision."""
+    low = str(question or "").strip().lower()
+    if any(p in low for p in _DRAFT_TIMING_PHRASES):
+        return False
+    if re.search(r"now or (?:wait|later)", low):
+        return False
     a, b = extract_draft_compare_players(question)
     return bool(a and b and _looks_like_player_name(a) and _looks_like_player_name(b))
 
