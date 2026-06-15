@@ -6,7 +6,7 @@ import subprocess
 from pathlib import Path
 
 # Bump on each solver release; shown when git is unavailable.
-GIT_COMMIT_PINNED = "4cd9cd8"
+GIT_COMMIT_PINNED = "903e7f6"
 GIT_BRANCH_PINNED = "dev"
 SOLVER_BUILD_MARKER = "2026-05-27-ami-continue-url-v1"
 SOLVER_UI_VERSION = "2.8.0"
