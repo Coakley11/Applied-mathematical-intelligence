@@ -337,6 +337,15 @@ def _build_restatement(question: str, intent: QuestionIntent, purpose: str, enti
         return f"You're asking whether **{pa}** is likely to accumulate more **{stat}** than **{pb}**{h}."
     if purpose == PURPOSE_ATTRIBUTE and ticker:
         return f"You're asking **why {ticker}** contributes to portfolio drawdown risk — cause first, not stress-test first."
+    low = question.lower()
+    if "sleeper" in low or "undervalued" in low or "fantasy edge" in low or "market sleeper" in low:
+        pl = str(entities.get("player_a") or entities.get("player") or "").strip()
+        if pl and pl not in ("Player A", "Player B"):
+            return (
+                f"You're asking whether **{pl}** is a worthwhile **sleeper** pick "
+                f"given your draft board and Fantasy Edge context."
+            )
+        return "You're asking about a **sleeper / undervalued** target on your Fantasy Sleepers board."
     if purpose == PURPOSE_COMPARE and pa and pb:
         return f"You're asking who is **better today** on attached stats: **{pa}** vs **{pb}**."
     if purpose == PURPOSE_TEST_SIGNIFICANCE:

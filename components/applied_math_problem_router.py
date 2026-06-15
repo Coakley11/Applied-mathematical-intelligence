@@ -441,6 +441,40 @@ def _route_baseball(
             available_fields=avail,
             missing_fields=miss,
         )
+    low_page = page.lower()
+    is_trend_page = "trend" in low_page
+    trend_sum = ctx.get("trend_summary")
+    has_trend_ctx = isinstance(trend_sum, dict) and bool(trend_sum)
+    has_trend_player = bool(str(ctx.get("player") or (trend_sum or {}).get("player") or "").strip())
+    trend_q = any(
+        w in low
+        for w in (
+            "trend",
+            "slope",
+            "sustainable",
+            "regression",
+            "breakout",
+            "expected stat",
+            "projection",
+            "2026",
+            "based on these trend",
+            "meaningful",
+            "noise",
+        )
+    )
+    if is_trend_page and (has_trend_ctx or has_trend_player) and trend_q:
+        req = FIELD_SPECS[BASEBALL_TREND]
+        avail, miss = _audit_fields(ctx, req)
+        conf = 0.92 if has_trend_ctx and not miss else 0.75 if has_trend_player else 0.55
+        return ProblemRoute(
+            problem_type_id=BASEBALL_TREND,
+            problem_type="Trend significance",
+            confidence=conf,
+            source_app="baseball",
+            required_fields=list(req),
+            available_fields=avail,
+            missing_fields=miss,
+        )
     trend_sum = ctx.get("trend_summary")
     has_trend_ctx = isinstance(trend_sum, dict) and bool(trend_sum)
     if has_trend_ctx and (

@@ -44,6 +44,20 @@ class TestProblemRouter(unittest.TestCase):
         self.assertEqual(route.problem_type_id, BASEBALL_TREND)
         self.assertIn("trend_summary.slope", route.missing_fields)
 
+    def test_trend_value_page_routes_projection_question(self) -> None:
+        route = route_suite_question(
+            "What are Ben Rice's expected statistics for 2026 based on these trends?",
+            source_app="baseball",
+            context={
+                "page": "Trend Value",
+                "player": "Ben Rice",
+                "metrics": ["HR", "OPS"],
+                "trend_summary": {"player": "Ben Rice", "stat": "HR", "slope": 1.2, "r2": 0.48},
+            },
+        )
+        self.assertEqual(route.problem_type_id, BASEBALL_TREND)
+        self.assertNotEqual(route.problem_type_id, "baseball_player_compare")
+
     def test_investment_rebalance_route(self) -> None:
         route = route_suite_question(
             "Should I rebalance?",

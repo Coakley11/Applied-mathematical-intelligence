@@ -538,6 +538,7 @@ def solve_baseball_trend(
     metrics = _ctx_list(ctx.get("metrics"))
     stat = str(trend.get("stat") or (metrics[0] if metrics else "stat")).strip()
     low_q = question.lower()
+    projection_q = any(w in low_q for w in ("expected stat", "projected", "projection", "2026", "forecast"))
     improve_q = any(w in low_q for w in ("improve", "next season", "future season"))
     if any(w in low_q for w in ("double", "doubles", "2b")):
         answer_stat = "2B"
@@ -650,7 +651,36 @@ def solve_baseball_trend(
     model_note = math_idea
 
     if slope is not None and r2 is not None:
-        if improve_q:
+        if projection_q:
+            proj_parts: list[str] = []
+            for key, label in (
+                ("proj_HR", "HR"),
+                ("proj_OPS", "OPS"),
+                ("proj_SB", "SB"),
+                ("proj_RBI", "RBI"),
+                ("proj_WAR", "WAR"),
+            ):
+                val = trend.get(key) if isinstance(trend, dict) else None
+                if val is None:
+                    val = ctx.get(key)
+                if val is not None and str(val).strip():
+                    proj_parts.append(f"**{label}** ~{val}")
+            trend_read = f"**{direction}** {stat} trend (slope **{slope:g}**/yr, R² **{r2:g}**)"
+            if meaningful:
+                short_answer = (
+                    f"**{player}** — {trend_read} supports a **{direction}** {answer_stat} outlook for 2026."
+                )
+            else:
+                short_answer = (
+                    f"**{player}** — {trend_read}; treat 2026 {answer_stat} as **{strength}**, not a lock."
+                )
+            if proj_parts:
+                short_answer += " Projected line: " + ", ".join(proj_parts[:4]) + "."
+            why = (
+                f"Trend fit on **{stat}** (slope **{slope:g}**, R² **{r2:g}**) "
+                f"{'supports' if meaningful else 'only weakly supports'} extrapolating {answer_stat} forward."
+            )
+        elif improve_q:
             if meaningful and str(direction).lower() in ("up", "positive", "rising"):
                 short_answer = (
                     f"**{player}** is likely to **improve next season** — {answer_stat} trend is **{direction}** "
@@ -3304,10 +3334,26 @@ def _pool_rows_by_position(bundle: dict[str, Any], position_query: str) -> list[
         if _player_name_token(name) in drafted_tokens:
             continue
         pos = str(_player_metric(row, "Primary Position", "position", "pos") or "")
+        if not pos:
+            pos = str((bundle.get("_position_index") or {}).get(_player_name_token(name)) or "")
         if position_query and not position_matches_row(position_query, pos):
             continue
         seen.add(name.lower())
         pools.append(row)
+    if not pools and position_query:
+        index = bundle.get("_position_index") if isinstance(bundle.get("_position_index"), dict) else {}
+        for pool_key in ("available", "best_available", "recommendations", "sleepers", "canonical_board"):
+            for row in bundle.get(pool_key) or []:
+                if not isinstance(row, dict):
+                    continue
+                name = _draft_player_name(row)
+                token = _player_name_token(name)
+                if not name or token in seen or token in drafted_tokens:
+                    continue
+                pos = str(_player_metric(row, "Primary Position", "position", "pos") or index.get(token) or "")
+                if pos and position_matches_row(position_query, pos):
+                    seen.add(name.lower())
+                    pools.append(row)
     return sorted(pools, key=_row_market_rank)
 
 
@@ -3888,9 +3934,10 @@ def _weakest_pick_explanation(bundle: dict[str, Any], name: str) -> str:
             pass
     if profile:
         parts.append(f"profile ({profile}) adds less category ceiling than your other picks")
-    parts.append("replacement value at **C** was stronger earlier — this pick is more about filling the slot than winning the tier")
-    if pos != "C":
-        parts[-1] = f"replacement value at **{pos}** was stronger earlier — this pick is more about filling the slot than winning the tier"
+    pos_label = _position_label_from_code(pos) if pos and pos != "?" else "this position"
+    parts.append(
+        f"you could have waited one more round for a similar **{pos_label}** if you prioritized raw rank over roster timing"
+    )
     return ". ".join(parts) + "."
 
 
@@ -4585,7 +4632,15 @@ def _build_baseball_draft_coach_sections(
             pos_code = str(_player_metric(row, "Primary Position", "position", "pos") or "")
             pos_query = _position_query_from_code(pos_code)
         pos_query = _normalize_position_query_for_pool(pos_query)
-        pos_label = pos_query.title() if pos_query else "position"
+        pos_code = str(_player_metric(row, "Primary Position", "position", "pos") or "")
+        if pos_query in ("catcher", "catchers", "c"):
+            pos_label = "Catcher"
+        elif pos_code:
+            pos_label = _position_label_from_code(pos_code)
+        elif pos_query:
+            pos_label = _position_label_from_code(pos_query.upper()) if len(pos_query) <= 3 else pos_query.title()
+        else:
+            pos_label = "position"
         pos_pool = _pool_rows_by_position(bundle, pos_query) if pos_query else []
         top_at_pos = _draft_player_name(pos_pool[0]) if pos_pool else ""
         focus_leads = bool(
@@ -4635,8 +4690,12 @@ def _build_baseball_draft_coach_sections(
         )
         framing = (
             f"Timing read for **{focus}** ({pos_label}) at {pick_note}. "
-            f"**{pool_count}** **{pos_label}** options remain; "
-            f"**{picks_until_next}** picks until your next turn. "
+            + (
+                f"**{pool_count}** **{pos_label}** options remain in the tracked pool; "
+                if pool_count
+                else f"Limited **{pos_label}** rows in the current pool — check board sync; "
+            )
+            + f"**{picks_until_next}** picks until your next turn. "
             + scarcity_note
             + context_suffix
         )
@@ -4855,12 +4914,31 @@ def _build_baseball_draft_coach_sections(
             f"**Take {target}** as a probability-weighted upside pick when draft cost is low enough "
             f"that hitting the ceiling pays for several misses{excl_note}."
         )
+        edge = _player_metric(
+            next((r for r in bundle.get("sleepers") or [] if _draft_player_name(r) == target), {}),
+            "Fantasy Edge",
+            "fantasy_edge",
+        )
+        reason = str(
+            next(
+                (
+                    _player_metric(r, "Reason", "reason")
+                    for r in bundle.get("sleepers") or []
+                    if _draft_player_name(r) == target
+                ),
+                "",
+            )
+        ).strip()
         framing = (
-            f"Sleeper **{target}** fits roster needs **{needs_label}**; "
-            f"Fantasy Edge from your sleeper board drives the case.{context_suffix}"
+            f"Sleeper **{target}** fits roster needs **{needs_label}**"
+            + (f"; Fantasy Edge **{edge}**" if edge is not None else "")
+            + (f" — {reason}" if reason else " — model rank beats market on your sleeper board")
+            + f".{context_suffix}"
         )
         tradeoffs = (
-            f"**{target}** offers more ceiling than safe picks at this cost; safer recommendation is **{top or 'next tier'}**."
+            f"**{target}** balances upside vs roster need; compare to **{top}** if you want a safer floor pick."
+            if top and _player_name_token(top) != _player_name_token(target)
+            else f"**{target}** is the top Fantasy Edge name on your sleeper board for this spot."
         )
         what_if = [
             "If you need floor → pass and take the safer recommendation.",
