@@ -32,6 +32,18 @@ def _match_pattern(text: str, area_pattern_id: str) -> dict:
     return result
 
 
+def _url_query_param(name: str) -> str:
+    try:
+        raw = st.query_params.get(name)
+    except Exception:
+        return ""
+    if raw is None:
+        return ""
+    if isinstance(raw, list):
+        return str(raw[0] or "").strip()
+    return str(raw).strip()
+
+
 def _load_suite_context() -> tuple[str, str, str, dict]:
     preloaded = str(st.session_state.get("ps_library_problem") or "").strip()
     source = str(st.session_state.get("_suite_ai_source_app") or "").strip()
@@ -39,7 +51,16 @@ def _load_suite_context() -> tuple[str, str, str, dict]:
     ctx_dict: dict = {}
     hydrate_source = str(st.session_state.get("_suite_ai_hydrate_source") or "").strip()
 
-    qid = str(st.session_state.get("_suite_ai_question_id") or "").strip()
+    url_qid = _url_query_param("suite_ai_question_id")
+    url_question = _url_query_param("suite_ai_question")
+    if url_qid:
+        st.session_state["_suite_ai_question_id"] = url_qid
+    if url_question:
+        st.session_state["_suite_ai_question"] = url_question
+        st.session_state["ps_library_problem"] = url_question
+        preloaded = url_question
+
+    qid = url_qid or str(st.session_state.get("_suite_ai_question_id") or "").strip()
     if qid:
         try:
             from suite_analytical_question import load_analytical_question_payload
@@ -69,10 +90,31 @@ def _load_suite_context() -> tuple[str, str, str, dict]:
                     }
                 except Exception:
                     pass
-        except Exception:
+            elif qid:
+                st.session_state.setdefault("_suite_ai_blob_meta", {})["blob_load_error"] = str(
+                    payload.get("blob_load_error") or "no_blob_context_for_question_id"
+                )
+        except Exception as exc:
+            if qid:
+                st.session_state["_suite_ai_blob_meta"] = {
+                    "url_question_id": qid,
+                    "loaded_question_id": qid,
+                    "blob_load_error": str(exc),
+                }
             pass
 
-    if not ctx_dict:
+    if not ctx_dict and qid and hydrate_source not in ("question_id_blob", "resume_subtitle"):
+        ctx_raw = str(st.session_state.get("_suite_ai_context") or "").strip()
+        if ctx_raw and not url_qid:
+            try:
+                parsed = json.loads(ctx_raw)
+                if isinstance(parsed, dict) and parsed:
+                    ctx_dict = parsed
+                    if not hydrate_source:
+                        hydrate_source = "session_json"
+            except Exception:
+                pass
+    elif not ctx_dict:
         ctx_raw = str(st.session_state.get("_suite_ai_context") or "").strip()
         if ctx_raw:
             try:

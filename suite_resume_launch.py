@@ -97,14 +97,25 @@ def hydrate_applied_intelligence_from_url(st: Any) -> bool:
     """Hydrate analytical-question deep links even when suite_page is absent."""
     qid = _qp_get(st, "suite_ai_question_id")
     question = _qp_get(st, "suite_ai_question")
+    try:
+        from suite_cloud_state import list_active_resume_query_params
+
+        st.session_state["_suite_ai_query_params_present"] = list_active_resume_query_params(
+            st, "applied_intelligence"
+        )
+    except Exception:
+        st.session_state["_suite_ai_query_params_present"] = []
     if not qid and not question:
         return False
     try:
         from suite_analytical_question import hydrate_applied_intelligence_session
 
         hydrate_applied_intelligence_session(st)
+        st.session_state["_suite_ai_hydrate_attempted"] = True
         return True
-    except Exception:
+    except Exception as exc:
+        st.session_state["_suite_ai_hydrate_attempted"] = True
+        st.session_state["_suite_ai_hydrate_error"] = str(exc)
         return False
 
 

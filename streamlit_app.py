@@ -30,14 +30,36 @@ st.set_page_config(
 )
 
 try:
+    from suite_cloud_state import has_resume_query_params
+    from suite_resume_launch import apply_suite_resume_launch, hydrate_applied_intelligence_from_url
+
+    _ami_deep_link = has_resume_query_params(st, "applied_intelligence")
+    st.session_state["_suite_ai_query_params_present"] = list_active = []
+    try:
+        from suite_cloud_state import list_active_resume_query_params
+
+        list_active = list_active_resume_query_params(st, "applied_intelligence")
+        st.session_state["_suite_ai_query_params_present"] = list_active
+    except Exception:
+        pass
+    hydrate_applied_intelligence_from_url(st)
+    if not _ami_deep_link:
+        from applied_intelligence_persistent_state import restore_applied_intelligence_disk_state_once
+
+        restore_applied_intelligence_disk_state_once(st)
+    else:
+        st.session_state["_suite_persist_restore_skip_reason"] = "deep_link: skip restore before blob hydrate"
+    apply_suite_resume_launch(st, "applied_intelligence")
+except Exception:
+    pass
+
+try:
     from applied_intelligence_persistent_state import (
         autosave_applied_intelligence_state,
         default_reset_applied_intelligence_session,
-        restore_applied_intelligence_disk_state_once,
     )
     from suite_user_persistence import render_reset_controls, show_persistence_messages
 
-    restore_applied_intelligence_disk_state_once(st)
     show_persistence_messages(st)
     render_reset_controls(
         st,
@@ -46,14 +68,6 @@ try:
         help_text="Clears saved page, problem area, and suite preload state for this app.",
         extra_reset_clear_prefixes=("_suite_ai_", "_ami_", "_cc_ai_"),
     )
-except Exception:
-    pass
-
-try:
-    from suite_resume_launch import apply_suite_resume_launch, hydrate_applied_intelligence_from_url
-
-    hydrate_applied_intelligence_from_url(st)
-    apply_suite_resume_launch(st, "applied_intelligence")
 except Exception:
     pass
 

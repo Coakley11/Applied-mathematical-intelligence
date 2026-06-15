@@ -92,6 +92,9 @@ def build_load_identity_diagnostics(
         "payload_hash_matches_loaded_context": hash_match,
         "query_params_present": query_params_present,
         "context_json_length": len(ctx_raw),
+        "hydrate_attempted": st.session_state.get("_suite_ai_hydrate_attempted"),
+        "hydrate_error": st.session_state.get("_suite_ai_hydrate_error"),
+        "session_hydrate_source": st.session_state.get("_suite_ai_hydrate_source"),
         "available_players_count_hydrated": len(avail) if isinstance(avail, list) else 0,
         "draft_snapshot_available_players_count": len(snap.get("available_players") or [])
         if isinstance(snap.get("available_players"), list)
