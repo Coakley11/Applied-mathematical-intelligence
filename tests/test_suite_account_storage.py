@@ -16,18 +16,25 @@ class TestSuiteAccountStorage(unittest.TestCase):
             self.assertIs(sa._import_storage(), fake)
 
     def test_import_storage_falls_back_to_supabase(self) -> None:
+        import builtins
+
         import suite_account as sa
 
         fake = MagicMock(name="suite_storage_supabase")
+        real_import = builtins.__import__
 
-        def _import(name, *args, **kwargs):
+        def custom_import(name, globals=None, locals=None, fromlist=(), level=0):
+            if name == "suite_storage_config":
+                mod = real_import(name, globals, locals, fromlist, level)
+                mod.cloud_storage_enabled = lambda: False
+                return mod
             if name == "suite_storage":
                 raise ImportError("missing")
             if name == "suite_storage_supabase":
                 return fake
-            return __import__(name, *args, **kwargs)
+            return real_import(name, globals, locals, fromlist, level)
 
-        with patch("builtins.__import__", side_effect=_import):
+        with patch("builtins.__import__", side_effect=custom_import):
             self.assertIs(sa._import_storage(), fake)
 
     def test_remember_saved_item_uses_resolved_storage(self) -> None:
@@ -49,6 +56,16 @@ class TestSuiteAccountStorage(unittest.TestCase):
             title="Test insight",
             payload={"insight_id": "abc123"},
         )
+
+    def test_load_saved_items_uses_resolved_storage(self) -> None:
+        import suite_account as sa
+
+        storage = MagicMock()
+        storage.load_saved_items.return_value = [{"item_key": "q1", "payload": {}}]
+        with patch.object(sa, "_import_storage", return_value=storage):
+            rows = sa.load_saved_items(app="baseball", item_type="analytical_question_context", limit=5)
+        self.assertEqual(len(rows), 1)
+        storage.load_saved_items.assert_called_once()
 
     def test_remember_saved_item_returns_write_result(self) -> None:
         import suite_account as sa

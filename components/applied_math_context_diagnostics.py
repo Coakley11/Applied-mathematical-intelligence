@@ -156,7 +156,7 @@ def classify_ami_hydration_status(identity: dict[str, Any]) -> tuple[str, str]:
         )
     if blob_err and blob_err not in {"", "no_blob_context_for_question_id"}:
         return ("error", f"Blob load failed: {blob_err}")
-    if attempted and (not hydrate_src or hydrate_src == "none"):
+    if attempted and (not hydrate_src or hydrate_src in ("none", "unknown")):
         detail = blob_err or "no_blob_context_for_question_id"
         return ("error", f"Blob load failed: {detail}")
     if attempted and avail == 0 and hydrate_src in {"", "none", "resume_subtitle"}:

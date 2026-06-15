@@ -81,6 +81,38 @@ class TestDraftGrounding(unittest.TestCase):
         self.assertIn("schwarber", text)
         self.assertNotIn("juan soto", text)
 
+    def test_jose_ramirez_missing_pick_seed_controls_no_crash(self) -> None:
+        """Regression: UI seed controls crashed on current_pick=None (deployed fallback)."""
+        from components.applied_math_solver_ui import _seed_control_defaults
+
+        q = "Why is Jose Ramirez the best player to draft for me right now?"
+        ctx = {
+            "page": "Draft Assistant",
+            "player": "Jose Ramirez",
+            "recommendations": [
+                {"Player": "Jose Ramirez", "Market Rank": 12, "Fantasy Edge": 2.1, "Primary Position": "3B"},
+            ],
+            "available_players": [
+                {"Player": "Jose Ramirez", "Primary Position": "3B", "Market Rank": 12},
+            ],
+            "roster": ["Player A", "Player B"],
+        }
+        route, result = solve_suite_question(q, source_app="baseball", context=ctx)
+        self.assertEqual(route.problem_type_id, BASEBALL_DRAFT)
+        self.assertNotIn("current_pick", result.default_controls)
+        self.assertFalse(result.computed.get("fallback"))
+
+        class _St:
+            pass
+
+        st = _St()
+        st.session_state = {}
+        params = _seed_control_defaults(st, route, result.default_controls)
+        self.assertIn("current_pick", params)
+        self.assertEqual(params["current_pick"], 18)
+        self.assertIn("ramirez", (result.short_answer or "").lower())
+        self.assertNotIn("pick 19", (result.short_answer or "").lower())
+
 
 if __name__ == "__main__":
     unittest.main()

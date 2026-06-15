@@ -925,6 +925,10 @@ def render_solver_dev_diagnostics(
             st.markdown(f"- **hydrate_source:** `{hydrate}`")
 
         try:
+            from components.applied_math_context_diagnostics import (
+                build_load_identity_diagnostics,
+                render_hydration_status_banner,
+            )
             from components.draft_context_diagnostics import (
                 build_draft_context_diagnostics,
                 build_solver_bundle_diagnostics,
@@ -932,9 +936,18 @@ def render_solver_dev_diagnostics(
             )
 
             ctx_debug = dict(ctx)
-            ctx_debug["_debug_question"] = str(st.session_state.get("_suite_ai_question") or st.session_state.get("ps_library_problem") or "")
-            hydrated = build_draft_context_diagnostics(ctx_debug, hydrate_source=hydrate)
+            ctx_debug["_debug_question"] = str(
+                st.session_state.get("_suite_ai_question") or st.session_state.get("ps_library_problem") or ""
+            )
+            hydrate = str(st.session_state.get("_suite_ai_hydrate_source") or "").strip()
+            intake_identity = build_load_identity_diagnostics(
+                st, context=ctx_debug, question_id=str(st.session_state.get("_suite_ai_question_id") or "")
+            )
+            hydrated = build_draft_context_diagnostics(ctx_debug, hydrate_source=hydrate or intake_identity.get("blob_load_source") or "none")
+            hydrated["hydrate_source"] = hydrate or hydrated.get("hydrate_source")
+            hydrated["draft_context_source"] = hydrated["hydrate_source"]
             bundle = build_solver_bundle_diagnostics(ctx_debug)
+            render_hydration_status_banner(st, {**intake_identity, **hydrated}, context="Hydrated context")
             render_draft_context_diagnostics_block(st, hydrated, title="Hydrated available pool")
             render_draft_context_diagnostics_block(st, bundle, title="Solver bundle (consumed)")
             if hydrated.get("available_players_count_hydrated", 0) > 0 and bundle.get("bundle_available_count", 0) == 0:

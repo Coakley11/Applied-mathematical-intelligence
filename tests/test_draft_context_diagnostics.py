@@ -19,6 +19,7 @@ class TestAmiHydrationClassification(unittest.TestCase):
             {
                 "url_question_id": "abc123",
                 "hydrate_attempted": True,
+                "session_hydrate_source": "none",
                 "blob_load_error": "no_blob_context_for_question_id",
             }
         )

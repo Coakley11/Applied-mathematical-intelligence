@@ -453,6 +453,7 @@ def load_analytical_question_payload(question_id: str) -> dict[str, Any]:
         return {}
     resume_key = f"ai:question:{qid}"
     search_apps = ["applied_intelligence", "baseball", "investment", "nba", "music"]
+    load_error = ""
     try:
         from suite_account import load_saved_items
 
@@ -470,7 +471,7 @@ def load_analytical_question_payload(question_id: str) -> dict[str, Any]:
             return picked
     except Exception as exc:
         log.warning("load_saved_items failed for question context: %s", exc)
-        return {"blob_load_error": str(exc), "question_id": qid}
+        load_error = str(exc)
     try:
         from suite_storage_supabase import load_active_resume_items
 
@@ -489,8 +490,10 @@ def load_analytical_question_payload(question_id: str) -> dict[str, Any]:
                 }
     except Exception as exc:
         log.warning("load_active_resume_items failed for question context: %s", exc)
-        return {"blob_load_error": str(exc), "question_id": qid}
-    return {"blob_load_error": "no_saved_item_for_question_id", "question_id": qid}
+        if not load_error:
+            load_error = str(exc)
+    err = load_error or "no_saved_item_for_question_id"
+    return {"blob_load_error": err, "question_id": qid}
 
 
 def load_analytical_question_source_state(question_id: str) -> dict[str, Any]:
