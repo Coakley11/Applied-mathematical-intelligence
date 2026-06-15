@@ -22,6 +22,25 @@ def _qp_get(st: Any, name: str) -> str:
     return str(raw).strip()
 
 
+def question_id_from_resume_key(resume_key: str) -> str:
+    """Extract analytical-question id from ``ai:question:{qid}`` resume keys."""
+    key = str(resume_key or "").strip()
+    if key.startswith("ai:question:"):
+        return key.split(":", 2)[-1].strip()
+    return ""
+
+
+def resolve_url_suite_ai_question_id(st: Any) -> str:
+    """Best-effort question id from URL query params (explicit id or suite_resume)."""
+    qid = _qp_get(st, "suite_ai_question_id")
+    if qid:
+        return qid
+    resume = _qp_get(st, "suite_resume")
+    if resume:
+        return question_id_from_resume_key(resume)
+    return ""
+
+
 def finalize_suite_resume_launch(
     st: Any,
     app_key: str,
@@ -95,8 +114,10 @@ def apply_suite_resume_launch(st: Any, app_key: str) -> bool:
 
 def hydrate_applied_intelligence_from_url(st: Any) -> bool:
     """Hydrate analytical-question deep links even when suite_page is absent."""
-    qid = _qp_get(st, "suite_ai_question_id")
+    qid = resolve_url_suite_ai_question_id(st)
     question = _qp_get(st, "suite_ai_question")
+    resume = _qp_get(st, "suite_resume")
+    page = _qp_get(st, "suite_page")
     try:
         from suite_cloud_state import list_active_resume_query_params
 
@@ -105,13 +126,17 @@ def hydrate_applied_intelligence_from_url(st: Any) -> bool:
         )
     except Exception:
         st.session_state["_suite_ai_query_params_present"] = []
-    if not qid and not question:
+    st.session_state["_suite_ai_url_question_id"] = qid or None
+    if qid:
+        st.session_state["_suite_ai_question_id"] = qid
+    if not qid and not question and not resume and not page:
         return False
     try:
         from suite_analytical_question import hydrate_applied_intelligence_session
 
         hydrate_applied_intelligence_session(st)
         st.session_state["_suite_ai_hydrate_attempted"] = True
+        st.session_state.pop("_suite_ai_hydrate_error", None)
         return True
     except Exception as exc:
         st.session_state["_suite_ai_hydrate_attempted"] = True

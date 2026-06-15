@@ -51,10 +51,16 @@ def _load_suite_context() -> tuple[str, str, str, dict]:
     ctx_dict: dict = {}
     hydrate_source = str(st.session_state.get("_suite_ai_hydrate_source") or "").strip()
 
-    url_qid = _url_query_param("suite_ai_question_id")
+    try:
+        from suite_resume_launch import resolve_url_suite_ai_question_id
+
+        url_qid = resolve_url_suite_ai_question_id(st)
+    except Exception:
+        url_qid = _url_query_param("suite_ai_question_id")
     url_question = _url_query_param("suite_ai_question")
     if url_qid:
         st.session_state["_suite_ai_question_id"] = url_qid
+        st.session_state["_suite_ai_url_question_id"] = url_qid
     if url_question:
         st.session_state["_suite_ai_question"] = url_question
         st.session_state["ps_library_problem"] = url_question
@@ -155,7 +161,11 @@ def _render_suite_question_view() -> None:
     """Suite-only path: normal page shell + solver answer."""
     preloaded, source, source_page, ctx_dict = _load_suite_context()
     if not preloaded:
-        st.warning("Suite question loaded but text is empty.")
+        qid = str(st.session_state.get("_suite_ai_question_id") or "").strip()
+        if qid:
+            st.warning(f"Suite question id `{qid}` loaded but question text is empty — check blob_load_error in Dev Mode.")
+        else:
+            st.warning("Suite question loaded but text is empty.")
         return
 
     from components.applied_math_suite_page import render_suite_question_page_header
@@ -193,7 +203,7 @@ def _render_suite_question_view() -> None:
 
 
 def render_problem_solving_lab() -> None:
-    if st.session_state.get("_suite_ai_question"):
+    if st.session_state.get("_suite_ai_question") or st.session_state.get("_suite_ai_question_id"):
         _render_suite_question_view()
         return
 

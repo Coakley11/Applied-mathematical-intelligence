@@ -34,14 +34,14 @@ try:
     from suite_resume_launch import apply_suite_resume_launch, hydrate_applied_intelligence_from_url
 
     _ami_deep_link = has_resume_query_params(st, "applied_intelligence")
-    st.session_state["_suite_ai_query_params_present"] = list_active = []
     try:
         from suite_cloud_state import list_active_resume_query_params
 
-        list_active = list_active_resume_query_params(st, "applied_intelligence")
-        st.session_state["_suite_ai_query_params_present"] = list_active
+        st.session_state["_suite_ai_query_params_present"] = list_active_resume_query_params(
+            st, "applied_intelligence"
+        )
     except Exception:
-        pass
+        st.session_state["_suite_ai_query_params_present"] = []
     hydrate_applied_intelligence_from_url(st)
     if not _ami_deep_link:
         from applied_intelligence_persistent_state import restore_applied_intelligence_disk_state_once
@@ -50,8 +50,8 @@ try:
     else:
         st.session_state["_suite_persist_restore_skip_reason"] = "deep_link: skip restore before blob hydrate"
     apply_suite_resume_launch(st, "applied_intelligence")
-except Exception:
-    pass
+except Exception as _ami_startup_exc:
+    st.session_state["_suite_ai_startup_error"] = str(_ami_startup_exc)
 
 try:
     from applied_intelligence_persistent_state import (
@@ -79,7 +79,7 @@ PRIMARY_NAV = ["Home"] + PRIMARY_ACTIONS + ["Advanced reference"]
 if "view_mode" not in st.session_state:
     st.session_state.view_mode = "Home"
 
-if st.session_state.get("_suite_ai_question"):
+if st.session_state.get("_suite_ai_question") or st.session_state.get("_suite_ai_question_id"):
     st.session_state.view_mode = "Solve a Problem"
 
 # =====================================================
@@ -96,11 +96,15 @@ except Exception:
 pp.render_sidebar_toggle(st)
 
 try:
-    from components.applied_math_context_diagnostics import render_developer_mode_sidebar_toggle
+    from components.applied_math_context_diagnostics import (
+        render_developer_mode_sidebar_toggle,
+        render_url_intake_sidebar_panel,
+    )
     from components.applied_math_solver_ui import render_applied_math_build_sidebar
 
     render_developer_mode_sidebar_toggle(st)
     render_applied_math_build_sidebar(st)
+    render_url_intake_sidebar_panel(st)
 except Exception:
     pass
 

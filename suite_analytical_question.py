@@ -517,7 +517,16 @@ def hydrate_applied_intelligence_session(st: Any, *, metrics: dict[str, Any] | N
 
     m = dict(metrics or {})
     question = str(m.get("question") or _qp("suite_ai_question") or "").strip()
-    url_question_id = str(m.get("question_id") or m.get("dedupe_fingerprint") or _qp("suite_ai_question_id") or "").strip()
+    url_question_id = str(
+        m.get("question_id") or m.get("dedupe_fingerprint") or _qp("suite_ai_question_id") or ""
+    ).strip()
+    if not url_question_id:
+        try:
+            from suite_resume_launch import question_id_from_resume_key
+
+            url_question_id = question_id_from_resume_key(_qp("suite_resume"))
+        except Exception:
+            pass
     qid = url_question_id
     source_app = str(m.get("source_app") or _qp("suite_ai_source_app") or "").strip()
     source_page = str(m.get("source_page") or _qp("suite_ai_source_page") or "").strip()
@@ -539,6 +548,8 @@ def hydrate_applied_intelligence_session(st: Any, *, metrics: dict[str, Any] | N
                 hydrate_source = "resume_subtitle"
             else:
                 hydrate_source = "question_id_blob"
+        if not question:
+            question = str(blob_payload.get("question") or "").strip()
         blob_ss = blob_payload.get("source_state") if isinstance(blob_payload.get("source_state"), dict) else {}
         if blob_ss:
             source_state = copy.deepcopy(blob_ss)

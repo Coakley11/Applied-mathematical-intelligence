@@ -35,6 +35,13 @@ class TestAppliedIntelligenceQuestionIdDeepLink(unittest.TestCase):
             self.assertTrue(hydrate_applied_intelligence_from_url(st))
             hydrate_fn.assert_called_once_with(st)
 
+    def test_hydrate_from_suite_resume_key_when_id_param_missing(self) -> None:
+        st = _FakeSt({"suite_resume": "ai:question:0fb8a8a81eab", "suite_page": "Solve a Problem"})
+        with patch("suite_analytical_question.hydrate_applied_intelligence_session") as hydrate_fn:
+            self.assertTrue(hydrate_applied_intelligence_from_url(st))
+            hydrate_fn.assert_called_once_with(st)
+            self.assertEqual(st.session_state.get("_suite_ai_question_id"), "0fb8a8a81eab")
+
 
 if __name__ == "__main__":
     unittest.main()

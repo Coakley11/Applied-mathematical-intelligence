@@ -49,9 +49,17 @@ def build_load_identity_diagnostics(
     except ImportError:
         SOLVER_BUILD_MARKER, GIT_COMMIT = "unknown", "unknown"
 
+    try:
+        from suite_resume_launch import resolve_url_suite_ai_question_id
+
+        url_qid = resolve_url_suite_ai_question_id(st)
+    except Exception:
+        url_qid = _query_param(st, "suite_ai_question_id")
+
     blob_meta = st.session_state.get("_suite_ai_blob_meta")
     meta = dict(blob_meta) if isinstance(blob_meta, dict) else {}
-    url_qid = _query_param(st, "suite_ai_question_id") or meta.get("url_question_id") or ""
+    if not url_qid:
+        url_qid = str(meta.get("url_question_id") or st.session_state.get("_suite_ai_url_question_id") or "").strip()
     loaded_qid = str(question_id or st.session_state.get("_suite_ai_question_id") or meta.get("loaded_question_id") or "").strip()
     payload_qid = str(meta.get("payload_question_id") or "").strip()
 
@@ -82,7 +90,9 @@ def build_load_identity_diagnostics(
         "url_question_id": url_qid or None,
         "loaded_question_id": loaded_qid or None,
         "payload_question_id": payload_qid or None,
-        "question_id_match": bool(url_qid and loaded_qid and url_qid == loaded_qid == (payload_qid or loaded_qid)),
+        "question_id_match": bool(
+            url_qid and loaded_qid and url_qid == loaded_qid and (not payload_qid or payload_qid == loaded_qid)
+        ),
         "blob_load_source": meta.get("blob_load_source") or st.session_state.get("_suite_ai_hydrate_source"),
         "blob_store_app": meta.get("blob_store_app"),
         "blob_load_error": meta.get("blob_load_error"),
@@ -105,6 +115,41 @@ def build_load_identity_diagnostics(
     }
 
 
+_BLOB_IDENTITY_ALWAYS_SHOW = (
+    "deploy_build",
+    "deploy_commit",
+    "query_params_present",
+    "url_question_id",
+    "loaded_question_id",
+    "payload_question_id",
+    "question_id_match",
+    "blob_load_source",
+    "blob_store_app",
+    "blob_load_error",
+    "context_json_length",
+    "hydrate_attempted",
+    "hydrate_error",
+)
+
+
+def render_url_intake_sidebar_panel(st: Any) -> None:
+    """Sidebar Dev Mode panel — URL/question_id intake before solver runs."""
+    if not applied_math_developer_mode_enabled(st):
+        return
+    identity = build_load_identity_diagnostics(st, context={}, question_id="")
+    identity["startup_error"] = st.session_state.get("_suite_ai_startup_error")
+    with st.sidebar.expander("URL intake (AMI load)", expanded=True):
+        for key in _BLOB_IDENTITY_ALWAYS_SHOW:
+            val = identity.get(key)
+            st.text(f"{key}: {val if val is not None and val != '' else '—'}")
+        if identity.get("startup_error"):
+            st.text(f"startup_error: {identity['startup_error']}")
+        if not identity.get("url_question_id"):
+            st.warning("url_question_id missing — Continue URL may be wrong or Command Center used a stale activity link.")
+        elif not identity.get("blob_load_source") and identity.get("hydrate_attempted"):
+            st.warning("URL has question_id but blob did not load — check blob_load_error and saved-item account scope.")
+
+
 def render_applied_math_context_diagnostics(
     st: Any,
     *,
@@ -119,7 +164,12 @@ def render_applied_math_context_diagnostics(
 
     identity = build_load_identity_diagnostics(st, context=context, question_id=question_id)
     with st.expander("Blob identity (AMI load)", expanded=True):
+        for key in _BLOB_IDENTITY_ALWAYS_SHOW:
+            val = identity.get(key)
+            st.text(f"{key}: {val if val is not None and val != '' else '—'}")
         for key, val in identity.items():
+            if key in _BLOB_IDENTITY_ALWAYS_SHOW:
+                continue
             if val is None or val == "" or val == {} or val == []:
                 continue
             st.text(f"{key}: {val}")
