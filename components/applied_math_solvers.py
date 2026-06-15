@@ -2914,8 +2914,10 @@ def _attach_player_position_index(bundle: dict[str, Any], ctx: dict[str, Any]) -
     for src in (
         ctx.get("player_position_index"),
         ctx.get("player_position_lookup"),
+        ctx.get("roster_position_index"),
         snap.get("player_position_index"),
         snap.get("player_position_lookup"),
+        snap.get("roster_position_index"),
     ):
         if not isinstance(src, dict):
             continue
@@ -2986,19 +2988,14 @@ def _resolve_draft_pick_round(
     snap = bundle.get("snap") if isinstance(bundle.get("snap"), dict) else {}
     snap_round = _num(snap.get("draft_round"))
     ctx_round = _num(ctx.get("draft_round"))
-    if ctx_round is not None and int(ctx_round) > 0:
-        rnd = int(ctx_round)
+    bundle_round = _num(bundle.get("round"))
+    explicit_round = ctx_round or snap_round or bundle_round
+    if explicit_round is not None and int(explicit_round) > 0:
+        rnd = int(explicit_round)
         round_known = True
-    elif snap_round is not None and int(snap_round) > 0:
-        rnd = int(snap_round)
-        round_known = True
-    elif pick_known and not round_known and pick is not None:
+    elif pick_known and pick is not None:
         rnd = (int(pick) - 1) // teams + 1
         round_known = True
-    elif pick_known and round_known and pick is not None and rnd is not None:
-        inferred = (int(pick) - 1) // teams + 1
-        if int(rnd) != inferred and snap_round is not None:
-            rnd = int(snap_round)
     return (
         int(pick) if pick_known and pick is not None else None,
         int(rnd) if round_known and rnd is not None else None,
@@ -3050,19 +3047,42 @@ def _extract_player_from_question_text(question: str) -> str:
     q = str(question or "").strip()
     low = q.lower()
     patterns = (
+        r"(?:should i )?(?:select|draft|take|grab)\s+(.+?)\s+as a\s+",
+        r"(?:should i )?(?:select|draft|take|grab)\s+(.+?)\s+now or wait",
+        r"will (.+?) make it back",
         r"why is (.+?) the best",
         r"why is (.+?) a good",
         r"why is (.+?) worth",
-        r"will (.+?) make it back",
-        r"should i draft (.+?)(?:\?|\s|$)",
+        r"should i draft (.+?)(?:\?|\s+or|\s+as|\s*$)",
         r"is (.+?) (?:worth|available|the best)",
+    )
+    invalid_tokens = frozenset(
+        {
+            "should",
+            "select",
+            "draft",
+            "take",
+            "grab",
+            "wait",
+            "catcher",
+            "now",
+            "later",
+            "round",
+        }
     )
     for pat in patterns:
         m = re.search(pat, low, flags=re.I)
-        if m:
-            name = q[m.start(1) : m.end(1)].strip().strip("?").strip()
-            if len(name) >= 3:
-                return name
+        if not m:
+            continue
+        name = q[m.start(1) : m.end(1)].strip().strip("?,").strip()
+        parts = name.split()
+        if len(parts) < 2 or len(name) > 48:
+            continue
+        if any(p.lower() in invalid_tokens for p in parts[:2]):
+            continue
+        if parts[0].lower() in ("should", "which", "what", "will", "can"):
+            continue
+        return name
     return ""
 
 
@@ -3548,9 +3568,62 @@ def _roster_by_position(bundle: dict[str, Any]) -> dict[str, list[str]]:
         if not clean or token in seen:
             continue
         seen.add(token)
-        pos = str(_player_position_from_pools(bundle, clean) or "?").upper()
+        pos = str(_player_position_from_pools(bundle, clean) or "").strip().upper()
+        if not pos:
+            pos = "?"
         groups.setdefault(pos, []).append(clean)
     return groups
+
+
+def _filled_roster_display_lines(bundle: dict[str, Any]) -> tuple[list[str], int]:
+    groups = _roster_by_position(bundle)
+    lines: list[str] = []
+    tagged_groups = 0
+    for pos in sorted(groups.keys(), key=lambda p: (p == "?", p)):
+        names = groups[pos]
+        if not names:
+            continue
+        if pos == "?":
+            for name in names:
+                lines.append(f"**?**: {name}")
+        else:
+            tagged_groups += 1
+            lines.append(f"**{pos}**: {', '.join(names[:4])}{'…' if len(names) > 4 else ''}")
+    return lines, tagged_groups if tagged_groups else len(lines)
+
+
+def _timing_survival_readout(
+    focus_market: float,
+    pick_num: int,
+    picks_until_next: int,
+    *,
+    fallback_market: float | None = None,
+) -> tuple[str, str, str]:
+    """Heuristic survival readouts for timing decisions (plain language)."""
+    gap = max(0.0, focus_market - float(pick_num))
+    if gap <= max(1, picks_until_next - 1):
+        focus_pct = "roughly **70–85%** he is gone before your next pick"
+        rec = "draft now"
+    elif gap <= picks_until_next * 2:
+        focus_pct = "roughly **40–60%** he survives until your next pick"
+        rec = "lean draft now if you need the position"
+    else:
+        focus_pct = "roughly **60–75%** he is still there if you wait one round"
+        rec = "waiting is viable"
+    if fallback_market is not None:
+        fb_gap = max(0.0, fallback_market - float(pick_num))
+        if fb_gap <= picks_until_next * 2:
+            fallback_pct = "fallback option likely gone too if you wait"
+        else:
+            fallback_pct = "fallback should still be there if the top name goes"
+    else:
+        fallback_pct = "fallback tier depends on how fast the position runs"
+    cost = (
+        "expected cost of waiting: you may drop one tier at this position"
+        if gap <= picks_until_next * 2
+        else "expected cost of waiting: modest — you can likely pivot and still land value"
+    )
+    return focus_pct, fallback_pct, f"**{rec}** — {cost}"
 
 
 def _fantasy_peer_names(pos_pool: list[dict[str, Any]], focus_name: str, *, limit: int = 3) -> list[str]:
@@ -3747,34 +3820,65 @@ def _weakest_pick_explanation(bundle: dict[str, Any], name: str) -> str:
     row = _find_player_row_in_bundle(name, bundle) or {}
     pos = _player_position_from_pools(bundle, name) or "?"
     market = _player_metric(row, "Market Rank", "market_rank")
+    edge = _player_metric(row, "Fantasy Edge", "fantasy_edge")
+    profile = _player_profile_bits(row)
+    parts = [
+        f"**{name}** ({pos}) is the softest pick so far",
+    ]
     if market is not None:
-        return (
-            f"**{name}** ({pos}) is the softest pick so far — market rank **{market}** "
-            "is the lowest on your roster relative to peers still available."
-        )
-    return f"**{name}** ({pos}) profiles as the softest pick based on board tier vs your other selections."
+        parts.append(f"market rank **{market}** is the lowest on your roster")
+    if edge is not None:
+        try:
+            edge_val = float(edge)
+            if edge_val < -5:
+                parts.append("you reached modestly ahead of ADP for his tier")
+            elif edge_val >= 0:
+                parts.append("value vs ADP is still acceptable")
+        except (TypeError, ValueError):
+            pass
+    if profile:
+        parts.append(f"profile ({profile}) adds less category ceiling than your other picks")
+    parts.append("replacement value at **C** was stronger earlier — this pick is more about filling the slot than winning the tier")
+    if pos != "C":
+        parts[-1] = f"replacement value at **{pos}** was stronger earlier — this pick is more about filling the slot than winning the tier"
+    return ". ".join(parts) + "."
 
 
 def _draft_grade_rationale(bundle: dict[str, Any], grade: str) -> str:
     roster = bundle.get("roster") or []
     needed = bundle.get("needed_positions") or []
     cats = bundle.get("category_needs") or []
-    parts: list[str] = []
-    if grade.startswith("A"):
-        parts.append("strong early foundation with few glaring holes")
-    elif grade.startswith("B+"):
-        parts.append("solid start with minor roster gaps still to address")
-    elif grade.startswith("B"):
-        parts.append("reasonable foundation but several positional or category gaps remain")
+    filled_lines, filled_count = _filled_roster_display_lines(bundle)
+    strengths: list[str] = []
+    weaknesses: list[str] = []
+    if filled_count >= 3:
+        strengths.append(f"**{filled_count}** position groups already covered")
+    elif roster:
+        strengths.append(f"**{len(roster)}** early picks on the board")
+    if not needed:
+        strengths.append("no major positional holes flagged yet")
     else:
-        parts.append("roster still needs meaningful work to reach balance")
-    if len(roster) <= 2:
-        parts.append("sample is still small — grade may shift quickly")
-    if len(needed) >= 3:
-        parts.append(f"**{len(needed)}** open position groups still flagged")
+        weaknesses.append(f"open slots at **{', '.join(needed[:4])}**")
     if cats:
-        parts.append(f"category pressure in **{', '.join(cats[:3])}**")
-    return "Grade reflects: " + "; ".join(parts) + "."
+        weaknesses.append(f"category pressure in **{', '.join(cats[:3])}**")
+    elif len(needed) <= 1:
+        strengths.append("category balance looks reasonable so far")
+    if len(needed) >= 3:
+        weaknesses.append("positional balance still needs work")
+    rationale = []
+    if strengths:
+        rationale.append("Strengths: " + "; ".join(strengths))
+    if weaknesses:
+        rationale.append("Weaknesses: " + "; ".join(weaknesses))
+    rationale.append(
+        f"That balance profile supports a **{grade}** — "
+        + (
+            "solid foundation with work left at scarce positions."
+            if grade.startswith("B")
+            else "early roster still taking shape."
+        )
+    )
+    return " ".join(rationale)
 
 
 def _need_priority_reason(pos_code: str) -> str:
@@ -4421,7 +4525,9 @@ def _build_baseball_draft_coach_sections(
         scarcity_line = _draft_scarcity_line(bundle)
         risk_line = _draft_risk_line(bundle, player or top, mode=mode)
     elif mode == "draft_timing_decision":
-        focus = player or top
+        focus = str(bundle.get("question_player") or "").strip()
+        if not focus:
+            focus = _extract_player_from_question_text(question) or player or top
         row = _find_player_row_in_bundle(focus, bundle) or {}
         pos_query = extract_draft_position_query(question)
         if not pos_query:
@@ -4441,24 +4547,34 @@ def _build_baseball_draft_coach_sections(
         )
         pool_count = len(pos_pool)
         fallbacks = [_draft_player_name(r) for r in pos_pool[1:3] if _draft_player_name(r)]
+        fallback_row = pos_pool[1] if len(pos_pool) > 1 else {}
+        focus_market = _row_market_rank(row) if row else 9999.0
+        fallback_market = _row_market_rank(fallback_row) if fallback_row else None
         scarce = pool_count <= 4 or (bundle.get("position_scarcity") or 0) >= 2.0
         drafted_line = _drafted_position_line(bundle, pos_query) if pos_query else ""
+        focus_survival, fallback_survival, cost_read = _timing_survival_readout(
+            focus_market,
+            int(pick) if pick_known and pick is not None else 0,
+            picks_until_next,
+            fallback_market=fallback_market,
+        )
 
-        draft_now = focus_leads and (scarce or picks_until_next <= 6)
+        draft_now = focus_leads and (scarce or picks_until_next <= 6 or "draft now" in cost_read.lower())
         if draft_now:
             direct = (
-                f"**Draft {focus} now** at {pick_note} — he leads the remaining **{pos_label}** tier "
-                f"and is unlikely to survive **{picks_until_next}** picks before your next selection."
+                f"**Draft {focus} now** at {pick_note} — he leads the remaining **{pos_label}** tier. "
+                f"Survival read: {focus_survival}."
             )
         else:
             direct = (
-                f"**You can wait one round** on **{focus}** at {pick_note} if you want to chase value elsewhere, "
-                f"but monitor the **{pos_label}** pool — it may thin before pick **{my_next or 'your next turn'}**."
+                f"**You can wait one round** on **{focus}** at {pick_note}. "
+                f"Survival read: {focus_survival}."
             )
+        direct += f" {cost_read.capitalize()}."
         if drafted_line:
             direct = drafted_line + " " + direct
         if fallbacks:
-            direct += f" If you wait, **{', '.join(fallbacks)}** are the likely fallback options."
+            direct += f" If **{focus}** is gone, **{', '.join(fallbacks)}** is the likely pivot ({fallback_survival})."
 
         scarcity_note = (
             _explain_position_scarcity(bundle, position_query=pos_query, pool_count=pool_count)
@@ -4468,13 +4584,13 @@ def _build_baseball_draft_coach_sections(
         framing = (
             f"Timing read for **{focus}** ({pos_label}) at {pick_note}. "
             f"**{pool_count}** **{pos_label}** options remain; "
-            f"roughly **{picks_until_next}** picks until your next turn. "
+            f"**{picks_until_next}** picks until your next turn. "
             + scarcity_note
             + context_suffix
         )
         tradeoffs = (
             f"**Draft now** → lock the top **{pos_label}** before the tier drops. "
-            f"**Wait** → pursue **{top}** or another value pick, then take **{fallbacks[0] if fallbacks else focus}**."
+            f"**Wait** → pursue value elsewhere; {fallback_survival}."
         )
         what_if = [
             f"If a **{pos_label} run** starts → take **{focus}** immediately.",
@@ -4484,9 +4600,9 @@ def _build_baseball_draft_coach_sections(
         ]
         scarcity_line = scarcity_note
         risk_line = (
-            f"Waiting risks losing **{focus}**; drafting now risks reaching slightly ahead of ADP."
+            f"Waiting risks losing **{focus}** ({focus_survival})."
             if draft_now
-            else f"Waiting is viable if **{focus}**'s market tier survives until your next pick."
+            else f"Waiting is viable if **{focus}** survives ({focus_survival})."
         )
     elif mode == "draft_review":
         roster_list = bundle.get("roster") or []
@@ -4495,13 +4611,8 @@ def _build_baseball_draft_coach_sections(
         cats = bundle.get("category_needs") or []
         grade = _draft_review_grade(bundle)
         best_pick, weakest_pick = _roster_pick_extremes(bundle, roster_list)
-        next_targets = rec_names[:3] or avail_names[:3]
+        filled_lines, filled_group_count = _filled_roster_display_lines(bundle)
 
-        filled_lines = [
-            f"**{pos}**: {', '.join(names[:4])}{'…' if len(names) > 4 else ''}"
-            for pos, names in sorted(filled.items())
-            if names and pos != "?"
-        ]
         direct = f"**Draft grade: {grade}** through {pick_note}."
         direct += f" {_draft_grade_rationale(bundle, grade)}"
         if best_pick:
@@ -4514,32 +4625,27 @@ def _build_baseball_draft_coach_sections(
             direct += f" Biggest remaining gap: **{needed[0]}**."
 
         strengths: list[str] = []
-        if len(roster_list) >= 3:
-            strengths.append(f"**{len(roster_list)}** early roster pieces in place")
+        if filled_group_count >= 3:
+            strengths.append(f"**{filled_group_count}** position groups covered")
         if best_pick:
-            strengths.append(f"**{best_pick}** as an anchor pick")
-        if not needed:
-            strengths.append("no glaring positional holes yet")
+            strengths.append(f"**{best_pick}** as an anchor")
         weaknesses: list[str] = []
         if needed:
             weaknesses.append(f"still need **{', '.join(needed[:4])}**")
         if cats:
             weaknesses.append(f"category pressure in **{', '.join(cats[:4])}**")
-        if weakest_pick:
-            weaknesses.append(f"**{weakest_pick}** profiles as the softest pick so far")
 
         framing = (
             f"Roster review at {pick_note} on {roster_note} in **{scoring_label}** scoring."
+            + (f" Positional balance: **{filled_group_count}** groups filled." if filled_group_count else "")
             + (f" Strengths: {'; '.join(strengths)}." if strengths else "")
             + (f" Weaknesses: {'; '.join(weaknesses)}." if weaknesses else "")
-            + (f" Recommended next targets: **{', '.join(next_targets)}**." if next_targets else "")
             + context_suffix
         )
         tradeoffs = (
-            f"Balance path → target **{needed[0] if needed else top}** to close the biggest hole. "
-            f"Value path → **{top}** if still the best overall player on your board."
-            if needed and top
-            else f"Stay flexible — **{top or 'next best available'}** is the lead recommendation on your board."
+            f"Close the **{needed[0]}** gap next, or chase overall value if a top player falls."
+            if needed
+            else "Stay flexible — balance category coverage with best player available."
         )
         what_if = [
             f"If you chase value → **{top}** over a need-filling pick.",
@@ -4558,13 +4664,8 @@ def _build_baseball_draft_coach_sections(
         filled = _roster_by_position(bundle)
         needed = bundle.get("needed_positions") or []
         cats = bundle.get("category_needs") or []
-        next_target = top if top else (bundle.get("draft_queue") or [""])[0]
+        filled_lines, filled_group_count = _filled_roster_display_lines(bundle)
 
-        filled_lines = [
-            f"**{pos}**: {', '.join(names[:4])}"
-            for pos, names in sorted(filled.items())
-            if names and pos != "?"
-        ]
         direct_parts = ["**Positions already filled:**"]
         if filled_lines:
             direct_parts.extend(f"- {line}" for line in filled_lines[:8])
@@ -4585,21 +4686,20 @@ def _build_baseball_draft_coach_sections(
             direct_parts.append(f"Category priorities: **{', '.join(cats[:5])}**.")
         else:
             direct_parts.append("")
-            direct_parts.append("No major positional holes flagged — lean best player available.")
+            direct_parts.append("No major positional holes flagged — build toward category balance.")
         direct = "\n".join(direct_parts)
 
         framing = (
             f"Roster construction at {pick_note}: "
-            + (f"filled **{len(filled)}** position groups" if filled else "roster still building")
+            + f"**{filled_group_count}** position groups filled"
             + (f"; category needs **{', '.join(cats[:4])}**" if cats else "")
-            + f". Next target from board: **{next_target or top or 'best fit'}**."
+            + ". Focus on closing open slots in priority order before chasing overall value."
             + context_suffix
         )
         tradeoffs = (
-            f"Need-first path → **{needed[0]}** before the tier thins. "
-            f"Value-first path → **{top}** if still on the board."
-            if needed and top
-            else f"Lead with **{top or next_target or 'best available'}** from recommendations."
+            f"Priority path → target **{needed[0]}** before the tier thins."
+            if needed
+            else "Build toward balanced positional coverage with each pick."
         )
         what_if = [
             f"If a **{needed[0]} run** starts → take the top name at that position." if needed else "If a position run starts → secure scarce positions early.",
@@ -4608,7 +4708,7 @@ def _build_baseball_draft_coach_sections(
             f"If you prioritize safety → take **{top}** over upside dart throws.",
         ]
         scarcity_line = _draft_scarcity_line(bundle)
-        risk_line = _draft_risk_line(bundle, next_target or top or player, mode=mode)
+        risk_line = _draft_risk_line(bundle, needed[0] if needed else (player or top), mode=mode)
     elif mode == "best_values":
         value_rows = bundle.get("best_available") or bundle.get("available") or bundle.get("recommendations") or []
         ranked = _rank_value_players(value_rows, limit=5)

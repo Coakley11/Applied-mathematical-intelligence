@@ -287,6 +287,46 @@ class TestDraftPickSolver(unittest.TestCase):
         self.assertNotIn("fair price", low)
         self.assertTrue("now" in low or "wait" in low)
         self.assertIn("contreras", low)
+        self.assertIn("round **4**", low)
+        self.assertNotIn("should i select", low)
+        self.assertTrue("survival" in low or "gone" in low)
+
+    def test_timing_extracts_player_name_not_question(self) -> None:
+        from components.applied_math_solvers import _extract_player_from_question_text
+
+        name = _extract_player_from_question_text(
+            "Should I select William Contreras as a catcher now or wait for a later round?"
+        )
+        self.assertEqual(name, "William Contreras")
+
+    def test_draft_review_uses_round_from_snapshot(self) -> None:
+        ctx = self._draft_market_ctx()
+        ctx["draft_snapshot"]["current_pick"] = 44
+        ctx["draft_snapshot"]["draft_round"] = 4
+        ctx["current_pick"] = 44
+        ctx["draft_round"] = 4
+        ctx["draft_snapshot"]["user_roster"] = [
+            "Aaron Judge",
+            "Anthony Volpe",
+            "Cal Raleigh",
+        ]
+        ctx["draft_snapshot"]["user_roster_detail"] = [
+            {"player": "Aaron Judge", "Primary Position": "OF"},
+            {"player": "Anthony Volpe", "Primary Position": "SS"},
+            {"player": "Cal Raleigh", "Primary Position": "C"},
+        ]
+        ctx["draft_snapshot"]["roster_position_index"] = {
+            "aaron judge": "OF",
+            "anthony volpe": "SS",
+            "cal raleigh": "C",
+        }
+        ctx["player_position_index"] = ctx["draft_snapshot"]["roster_position_index"]
+        result = solve_baseball_draft(ctx, "How would you rate my picks so far?")
+        self.assertEqual(result.computed.get("draft_mode"), "draft_review")
+        self.assertIn("round **4**", result.short_answer.lower())
+        self.assertIn("**of**: aaron judge", result.short_answer.lower())
+        self.assertIn("**ss**: anthony volpe", result.short_answer.lower())
+        self.assertIn("**c**: cal raleigh", result.short_answer.lower())
 
     def test_catcher_run_solver_mode(self) -> None:
         ctx = self._draft_market_ctx()
@@ -357,16 +397,34 @@ class TestDraftPickSolver(unittest.TestCase):
         ctx = self._draft_market_ctx()
         ctx["draft_snapshot"]["user_roster"] = [
             "Aaron Judge",
-            "Juan Soto",
-            "Francisco Lindor",
+            "Anthony Volpe",
             "Cal Raleigh",
         ]
+        ctx["draft_snapshot"]["user_roster_detail"] = [
+            {"player": "Aaron Judge", "Primary Position": "OF"},
+            {"player": "Anthony Volpe", "Primary Position": "SS"},
+            {"player": "Cal Raleigh", "Primary Position": "C"},
+        ]
+        ctx["draft_snapshot"]["roster_position_index"] = {
+            "aaron judge": "OF",
+            "anthony volpe": "SS",
+            "cal raleigh": "C",
+        }
+        ctx["player_position_index"] = ctx["draft_snapshot"]["roster_position_index"]
         ctx["draft_snapshot"]["needed_positions"] = ["3B", "1B", "OF"]
         ctx["needed_positions"] = ["3B", "1B", "OF"]
-        result = solve_baseball_draft(ctx, "Which positions left are needed for me to pick?")
+        result = solve_baseball_draft(ctx, "What positions do I have left to draft?")
         self.assertEqual(result.computed.get("draft_mode"), "roster_needs")
-        self.assertIn("3B", result.short_answer)
-        self.assertNotIn("fair price", result.short_answer.lower())
+        low = result.short_answer.lower()
+        self.assertIn("3b", low)
+        self.assertIn("**of**: aaron judge", low)
+        self.assertIn("**ss**: anthony volpe", low)
+        self.assertIn("**c**: cal raleigh", low)
+        coach = result.computed.get("coach_sections") or {}
+        framing = str(coach.get("analyst_framing") or "").lower()
+        self.assertIn("3", framing)
+        self.assertIn("position groups", framing)
+        self.assertNotIn("fair price", low)
 
     def test_ramirez_vs_contreras_analyst_compare(self) -> None:
         ctx = self._draft_market_ctx()
