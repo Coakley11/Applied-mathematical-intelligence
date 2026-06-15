@@ -27,9 +27,12 @@ class TestDraftMarketQuestionDetection(unittest.TestCase):
         self.assertTrue(is_draft_market_prediction_question(q))
         self.assertEqual(extract_draft_position_query(q), "")
 
-    def test_make_it_back_is_draft_market(self) -> None:
+    def test_make_it_back_is_timing_not_market(self) -> None:
+        from components.draft_market_question import is_draft_timing_question
+
         q = "Will William Contreras make it back to me?"
-        self.assertTrue(is_draft_market_prediction_question(q))
+        self.assertTrue(is_draft_timing_question(q))
+        self.assertFalse(is_draft_market_prediction_question(q))
 
     def test_catcher_run_is_draft_market(self) -> None:
         q = "Is a catcher run coming?"
@@ -78,6 +81,17 @@ class TestDraftMarketQuestionDetection(unittest.TestCase):
         self.assertTrue(is_roster_needs_question("Which positions left are needed for me to pick?"))
         self.assertTrue(is_roster_needs_question("What positions should I target next?"))
         self.assertFalse(is_roster_needs_question("Is Corbin Carroll worth a Round 2 pick?"))
+
+    def test_draft_timing_detection(self) -> None:
+        from components.draft_market_question import is_draft_timing_question
+
+        self.assertTrue(
+            is_draft_timing_question(
+                "Should I select William Contreras as a catcher now or wait for a later round?"
+            )
+        )
+        self.assertTrue(is_draft_timing_question("Will William Contreras make it back to me?"))
+        self.assertFalse(is_draft_timing_question("Why is William Contreras the best catcher to draft?"))
 
 
 if __name__ == "__main__":

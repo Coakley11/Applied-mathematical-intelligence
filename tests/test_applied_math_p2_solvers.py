@@ -267,8 +267,26 @@ class TestDraftPickSolver(unittest.TestCase):
         ctx = self._draft_market_ctx()
         ctx["question_player"] = "William Contreras"
         result = solve_baseball_draft(ctx, "Will William Contreras make it back to me?")
-        self.assertEqual(result.computed.get("draft_mode"), "draft_market_prediction")
+        self.assertEqual(result.computed.get("draft_mode"), "draft_timing_decision")
         self.assertIn("William Contreras", result.short_answer)
+
+    def test_contreras_now_or_wait_timing_mode(self) -> None:
+        ctx = self._draft_market_ctx()
+        ctx["draft_snapshot"]["current_pick"] = 8
+        ctx["draft_snapshot"]["draft_round"] = 4
+        ctx["draft_snapshot"]["my_next_pick"] = 18
+        ctx["current_pick"] = 8
+        ctx["draft_round"] = 4
+        ctx["question_player"] = "William Contreras"
+        result = solve_baseball_draft(
+            ctx,
+            "Should I select William Contreras as a catcher now or wait for a later round?",
+        )
+        self.assertEqual(result.computed.get("draft_mode"), "draft_timing_decision")
+        low = result.short_answer.lower()
+        self.assertNotIn("fair price", low)
+        self.assertTrue("now" in low or "wait" in low)
+        self.assertIn("contreras", low)
 
     def test_catcher_run_solver_mode(self) -> None:
         ctx = self._draft_market_ctx()

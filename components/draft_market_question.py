@@ -121,6 +121,17 @@ def draft_question_restatement(question: str) -> str:
         return "You're asking for a draft review — how your picks and roster look so far."
     if is_roster_needs_question(question):
         return "You're asking which positions and roster gaps to target with your next picks."
+    if is_draft_timing_question(question):
+        player = ""
+        m = re.search(r"(?:draft|select|take|grab)\s+(.+?)\s+(?:now|as a)", str(question or ""), flags=re.I)
+        if m:
+            player = m.group(1).strip()
+        elif re.search(r"will (.+?) make it back", str(question or ""), flags=re.I):
+            m2 = re.search(r"will (.+?) make it back", str(question or ""), flags=re.I)
+            player = m2.group(1).strip() if m2 else ""
+        if player:
+            return f"You're asking whether to draft **{player}** now or wait for a later round."
+        return "You're asking whether to draft this player now or wait for a later round."
     if is_draft_market_prediction_question(question) and pos_label:
         return f"You're asking about **{pos_label}** draft-board flow at your current pick."
     if "who should i draft" in low or "draft next" in low:
@@ -152,6 +163,45 @@ def is_player_explanation_question(question: str) -> bool:
     return False
 
 
+_DRAFT_TIMING_PHRASES: tuple[str, ...] = (
+    "now or wait",
+    "now vs wait",
+    "draft now or",
+    "draft now or later",
+    "now or later",
+    "wait for a later round",
+    "wait another round",
+    "wait one more round",
+    "wait a round",
+    "can i wait",
+    "should i wait",
+    "before my next pick",
+    "make it back to me",
+    "make it back",
+    "grab him before",
+    "grab her before",
+    " as a catcher now",
+)
+
+
+def is_draft_timing_question(question: str) -> bool:
+    """True when user asks whether to draft a player now vs waiting."""
+    low = str(question or "").strip().lower()
+    if not low:
+        return False
+    if is_draft_head_to_head_question(question) or is_player_explanation_question(question):
+        return False
+    if any(phrase in low for phrase in _DRAFT_TIMING_PHRASES):
+        return True
+    if re.search(r"should i (?:draft|select|take|grab)", low) and any(
+        w in low for w in ("now", "wait", "later round", "next round")
+    ):
+        return True
+    if re.search(r"will .+ make it back", low):
+        return True
+    return False
+
+
 def is_draft_market_prediction_question(question: str) -> bool:
     """True when question is about draft board flow, not player career projection."""
     low = str(question or "").strip().lower()
@@ -160,6 +210,8 @@ def is_draft_market_prediction_question(question: str) -> bool:
     if is_player_explanation_question(question):
         return False
     if is_position_best_available_question(question):
+        return False
+    if is_draft_timing_question(question):
         return False
     if any(re.search(pat, low) for pat in _DRAFT_MARKET_PATTERNS):
         return True
