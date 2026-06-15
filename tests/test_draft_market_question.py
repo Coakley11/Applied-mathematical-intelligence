@@ -107,6 +107,12 @@ class TestDraftMarketQuestionDetection(unittest.TestCase):
         self.assertTrue(is_draft_timing_question(q))
         self.assertFalse(is_draft_head_to_head_question(q))
 
+    def test_extract_position_from_at_c_for_pick(self) -> None:
+        from components.draft_market_question import extract_draft_position_query
+
+        q = "Should I draft William Contreras at C for pick 8 or wait for a later round?"
+        self.assertEqual(extract_draft_position_query(q), "catcher")
+
     def test_extract_draft_team_query_team_number(self) -> None:
         from components.draft_market_question import extract_draft_team_query
 

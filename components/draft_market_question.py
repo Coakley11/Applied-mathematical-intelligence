@@ -241,6 +241,15 @@ def extract_draft_position_query(question: str) -> str:
     """Return position token from question (e.g. catcher, C, SP) or empty."""
     low = str(question or "").strip().lower()
     m = re.search(
+        r"\bat\s+(c\b|catcher|catchers|1b|2b|3b|ss|of|sp|rp|closer|shortstop|outfield|first base|second base|third base|starting pitcher|relief pitcher)",
+        low,
+    )
+    if m:
+        token = m.group(1).strip()
+        if token == "c":
+            return "catcher"
+        return token
+    m = re.search(
         r"(?:next|which|a)\s+([a-z][a-z\s-]{1,20}?)(?:\s+(?:picked|drafted|selected|taken|run))",
         low,
     )

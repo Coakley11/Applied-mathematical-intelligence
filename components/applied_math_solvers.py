@@ -3058,10 +3058,26 @@ def _all_pool_rows(bundle: dict[str, Any]) -> list[dict[str, Any]]:
     return rows
 
 
+def _sanitize_extracted_player_name(name: str) -> str:
+    s = str(name or "").strip().strip("?,").strip()
+    if not s:
+        return ""
+    s = re.sub(
+        r"\s+at\s+(?:c\b|catcher|catchers|1b|2b|3b|ss|of|sp|rp|closer|shortstop|outfield|first base|second base|third base|starting pitcher|relief pitcher).*$",
+        "",
+        s,
+        flags=re.I,
+    )
+    s = re.sub(r"\s+for\s+pick\s+\d+.*$", "", s, flags=re.I)
+    s = re.sub(r"\s+now\s+or.*$", "", s, flags=re.I)
+    return s.strip()
+
+
 def _extract_player_from_question_text(question: str) -> str:
     q = str(question or "").strip()
     low = q.lower()
     patterns = (
+        r"(?:should i )?(?:select|draft|take|grab)\s+(.+?)\s+at\s+(?:c\b|catcher|catchers|1b|2b|3b|ss|of|sp|rp)",
         r"(?:should i )?(?:select|draft|take|grab)\s+(.+?)\s+as a\s+",
         r"(?:should i )?(?:select|draft|take|grab)\s+(.+?)\s+now or wait",
         r"will (.+?) make it back",
@@ -3097,8 +3113,26 @@ def _extract_player_from_question_text(question: str) -> str:
             continue
         if parts[0].lower() in ("should", "which", "what", "will", "can"):
             continue
-        return name
+        cleaned = _sanitize_extracted_player_name(name)
+        if len(cleaned.split()) < 2:
+            continue
+        return cleaned
     return ""
+
+
+def _normalize_position_query_for_pool(position_query: str) -> str:
+    q = str(position_query or "").strip().lower()
+    if q in ("c", "catcher", "catchers"):
+        return "catcher"
+    if q in ("ss", "shortstop", "shortstops"):
+        return "shortstop"
+    if q in ("of", "outfield", "outfielder", "outfielders"):
+        return "outfield"
+    if q in ("sp", "starter", "starters", "starting pitcher", "starting pitchers"):
+        return "starting pitcher"
+    if q in ("rp", "reliever", "relievers", "relief pitcher", "relief pitchers", "closer", "closers"):
+        return "relief pitcher"
+    return q
 
 
 def _player_name_token(name: str) -> str:
@@ -3125,7 +3159,7 @@ def _find_player_row_in_bundle(name: str, bundle: dict[str, Any]) -> dict[str, A
 def _resolve_focus_player(question: str, ctx: dict[str, Any], bundle: dict[str, Any]) -> str:
     named = str(bundle.get("question_player") or ctx.get("question_player") or "").strip()
     if named:
-        return named
+        return _sanitize_extracted_player_name(named) or named
     parsed = _extract_player_from_question_text(question)
     if parsed:
         return parsed
@@ -3256,6 +3290,7 @@ def _position_alt_names(
 
 
 def _pool_rows_by_position(bundle: dict[str, Any], position_query: str) -> list[dict[str, Any]]:
+    position_query = _normalize_position_query_for_pool(position_query)
     drafted_tokens = {
         _player_name_token(str(n).split(" (")[0].strip())
         for n in (bundle.get("drafted_players") or [])
@@ -4543,11 +4578,13 @@ def _build_baseball_draft_coach_sections(
         focus = str(bundle.get("question_player") or "").strip()
         if not focus:
             focus = _extract_player_from_question_text(question) or player or top
+        focus = _sanitize_extracted_player_name(focus) or focus
         row = _find_player_row_in_bundle(focus, bundle) or {}
         pos_query = extract_draft_position_query(question)
         if not pos_query:
             pos_code = str(_player_metric(row, "Primary Position", "position", "pos") or "")
             pos_query = _position_query_from_code(pos_code)
+        pos_query = _normalize_position_query_for_pool(pos_query)
         pos_label = pos_query.title() if pos_query else "position"
         pos_pool = _pool_rows_by_position(bundle, pos_query) if pos_query else []
         top_at_pos = _draft_player_name(pos_pool[0]) if pos_pool else ""

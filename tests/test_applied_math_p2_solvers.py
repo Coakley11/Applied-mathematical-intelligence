@@ -299,6 +299,41 @@ class TestDraftPickSolver(unittest.TestCase):
         )
         self.assertEqual(name, "William Contreras")
 
+    def test_timing_extracts_contreras_at_c_for_pick(self) -> None:
+        from components.applied_math_solvers import _extract_player_from_question_text
+
+        name = _extract_player_from_question_text(
+            "Should I draft William Contreras at C for pick 8 or wait for a later round?"
+        )
+        self.assertEqual(name, "William Contreras")
+
+    def test_contreras_at_c_timing_surfaces_catcher_pool(self) -> None:
+        ctx = self._draft_market_ctx()
+        ctx["draft_snapshot"]["current_pick"] = 8
+        ctx["draft_snapshot"]["draft_round"] = 4
+        ctx["draft_snapshot"]["my_next_pick"] = 18
+        ctx["current_pick"] = 8
+        ctx["draft_round"] = 4
+        ctx["draft_snapshot"]["available_players"].extend(
+            [
+                {"player": "Shea Langeliers", "Primary Position": "C", "Market Rank": 45},
+                {"player": "Salvador Perez", "Primary Position": "C", "Market Rank": 52},
+                {"player": "Yainer Diaz", "Primary Position": "C", "Market Rank": 58},
+            ]
+        )
+        result = solve_baseball_draft(
+            ctx,
+            "Should I draft William Contreras at C for pick 8 or wait for a later round?",
+        )
+        self.assertEqual(result.computed.get("draft_mode"), "draft_timing_decision")
+        low = (result.short_answer + " " + result.why).lower()
+        self.assertIn("william contreras", low)
+        self.assertNotIn("at c for pick", low)
+        self.assertTrue(
+            "langeliers" in low or "perez" in low or "diaz" in low or "catcher" in low
+        )
+        self.assertNotIn("0 position options", low)
+
     def test_draft_review_uses_round_from_snapshot(self) -> None:
         ctx = self._draft_market_ctx()
         ctx["draft_snapshot"]["current_pick"] = 44
