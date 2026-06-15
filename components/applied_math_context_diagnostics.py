@@ -68,6 +68,14 @@ def build_load_identity_diagnostics(
 
     hash_match = bool(meta.get("blob_payload_hash") and loaded_context_hash == meta.get("blob_payload_hash"))
 
+    ctx_raw = str(st.session_state.get("_suite_ai_context") or "")
+    try:
+        from suite_cloud_state import list_active_resume_query_params
+
+        query_params_present = list_active_resume_query_params(st, "applied_intelligence")
+    except Exception:
+        query_params_present = []
+
     return {
         "deploy_build": SOLVER_BUILD_MARKER,
         "deploy_commit": GIT_COMMIT,
@@ -77,10 +85,13 @@ def build_load_identity_diagnostics(
         "question_id_match": bool(url_qid and loaded_qid and url_qid == loaded_qid == (payload_qid or loaded_qid)),
         "blob_load_source": meta.get("blob_load_source") or st.session_state.get("_suite_ai_hydrate_source"),
         "blob_store_app": meta.get("blob_store_app"),
+        "blob_load_error": meta.get("blob_load_error"),
         "blob_updated_at": meta.get("blob_updated_at"),
         "blob_payload_hash": meta.get("blob_payload_hash"),
         "loaded_context_hash": loaded_context_hash,
         "payload_hash_matches_loaded_context": hash_match,
+        "query_params_present": query_params_present,
+        "context_json_length": len(ctx_raw),
         "available_players_count_hydrated": len(avail) if isinstance(avail, list) else 0,
         "draft_snapshot_available_players_count": len(snap.get("available_players") or [])
         if isinstance(snap.get("available_players"), list)

@@ -6,9 +6,9 @@ import subprocess
 from pathlib import Path
 
 # Bump on each solver release; shown when git is unavailable.
-GIT_COMMIT_PINNED = "fdbfd0a"
+GIT_COMMIT_PINNED = "1d0bb25"
 GIT_BRANCH_PINNED = "dev"
-SOLVER_BUILD_MARKER = "2026-05-27-ami-blob-identity-v1"
+SOLVER_BUILD_MARKER = "2026-05-27-ami-deeplink-hydrate-v1"
 SOLVER_UI_VERSION = "2.8.0"
 ROUTER_VERSION = "1.5.0"
 SOLVER_CORE_VERSION = "2.7.0"

@@ -470,6 +470,7 @@ def load_analytical_question_payload(question_id: str) -> dict[str, Any]:
             return picked
     except Exception as exc:
         log.warning("load_saved_items failed for question context: %s", exc)
+        return {"blob_load_error": str(exc), "question_id": qid}
     try:
         from suite_storage_supabase import load_active_resume_items
 
@@ -486,9 +487,10 @@ def load_analytical_question_payload(question_id: str) -> dict[str, Any]:
                     "blob_load_source": "resume_subtitle",
                     "payload_hash": _context_payload_hash(ctx),
                 }
-    except Exception:
-        pass
-    return {}
+    except Exception as exc:
+        log.warning("load_active_resume_items failed for question context: %s", exc)
+        return {"blob_load_error": str(exc), "question_id": qid}
+    return {"blob_load_error": "no_saved_item_for_question_id", "question_id": qid}
 
 
 def load_analytical_question_source_state(question_id: str) -> dict[str, Any]:
@@ -546,13 +548,16 @@ def hydrate_applied_intelligence_session(st: Any, *, metrics: dict[str, Any] | N
             "loaded_question_id": qid,
             "payload_question_id": blob_payload.get("question_id"),
             "question_id_match": url_question_id == str(blob_payload.get("question_id") or qid).strip(),
-            "blob_load_source": blob_load_source,
+            "blob_load_source": blob_load_source if blob_ctx else "",
             "blob_updated_at": blob_payload.get("blob_store_updated_at") or blob_payload.get("saved_at"),
             "blob_payload_hash": blob_payload.get("payload_hash"),
             "loaded_context_hash": loaded_hash,
             "blob_diagnostics": blob_payload.get("blob_diagnostics"),
             "blob_store_app": blob_payload.get("blob_store_app"),
             "blob_load_candidates": blob_payload.get("blob_load_candidates"),
+            "blob_load_error": None
+            if blob_ctx
+            else str(blob_payload.get("blob_load_error") or "no_blob_context_for_question_id"),
         }
 
     metrics_ctx: dict[str, Any] = {}
@@ -674,6 +679,7 @@ def metrics_for_applied_math_resume(payload: dict[str, Any]) -> dict[str, Any]:
     return {
         "question": payload.get("question"),
         "question_id": payload.get("question_id"),
+        "page": "Solve a Problem",
         "source_app": payload.get("source_app"),
         "source_page": payload.get("source_page"),
         "context_summary": payload.get("context_summary"),

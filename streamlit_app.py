@@ -50,8 +50,9 @@ except Exception:
     pass
 
 try:
-    from suite_resume_launch import apply_suite_resume_launch
+    from suite_resume_launch import apply_suite_resume_launch, hydrate_applied_intelligence_from_url
 
+    hydrate_applied_intelligence_from_url(st)
     apply_suite_resume_launch(st, "applied_intelligence")
 except Exception:
     pass

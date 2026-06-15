@@ -63,7 +63,9 @@ def apply_suite_resume_launch(st: Any, app_key: str) -> bool:
     resume = _qp_get(st, "suite_resume")
     page = _qp_get(st, "suite_page")
     ami_insight = _qp_get(st, "suite_ami_insight")
-    if not resume and not page and not ami_insight:
+    ai_qid = _qp_get(st, "suite_ai_question_id")
+    ai_question = _qp_get(st, "suite_ai_question")
+    if not resume and not page and not ami_insight and not ai_qid and not ai_question:
         return False
 
     key = str(app_key or "").strip()
@@ -85,10 +87,25 @@ def apply_suite_resume_launch(st: Any, app_key: str) -> bool:
     elif key == "future_lens":
         _apply_future_lens(st, resume, page)
     elif key == "applied_intelligence":
-        _apply_applied_intelligence(st, page)
+        _apply_applied_intelligence(st, page or "Solve a Problem")
 
     st.session_state[flag] = True
     return True
+
+
+def hydrate_applied_intelligence_from_url(st: Any) -> bool:
+    """Hydrate analytical-question deep links even when suite_page is absent."""
+    qid = _qp_get(st, "suite_ai_question_id")
+    question = _qp_get(st, "suite_ai_question")
+    if not qid and not question:
+        return False
+    try:
+        from suite_analytical_question import hydrate_applied_intelligence_session
+
+        hydrate_applied_intelligence_session(st)
+        return True
+    except Exception:
+        return False
 
 
 def _finalize_music_resume(
