@@ -4,7 +4,26 @@ from __future__ import annotations
 
 import unittest
 
+from components.applied_math_context_diagnostics import classify_ami_hydration_status
 from components.draft_context_diagnostics import build_draft_context_diagnostics, build_solver_bundle_diagnostics
+
+
+class TestAmiHydrationClassification(unittest.TestCase):
+    def test_missing_url_question_id(self) -> None:
+        level, msg = classify_ami_hydration_status({"url_question_id": None, "hydrate_attempted": True})
+        self.assertEqual(level, "error")
+        self.assertIn("URL question_id missing", msg)
+
+    def test_blob_load_failed_with_qid(self) -> None:
+        level, msg = classify_ami_hydration_status(
+            {
+                "url_question_id": "abc123",
+                "hydrate_attempted": True,
+                "blob_load_error": "no_blob_context_for_question_id",
+            }
+        )
+        self.assertEqual(level, "error")
+        self.assertIn("Blob load failed", msg)
 
 
 class TestDraftContextDiagnostics(unittest.TestCase):

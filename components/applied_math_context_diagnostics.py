@@ -132,6 +132,60 @@ _BLOB_IDENTITY_ALWAYS_SHOW = (
 )
 
 
+def classify_ami_hydration_status(identity: dict[str, Any]) -> tuple[str, str]:
+    """
+    Classify hydration for Dev Mode.
+    Returns (level, message) where level is error | warning | success | info.
+    """
+    url_qid = str(identity.get("url_question_id") or "").strip()
+    hydrate_err = str(identity.get("hydrate_error") or "").strip()
+    blob_err = str(identity.get("blob_load_error") or "").strip()
+    hydrate_src = str(
+        identity.get("blob_load_source") or identity.get("session_hydrate_source") or ""
+    ).strip()
+    attempted = bool(identity.get("hydrate_attempted"))
+    avail = int(identity.get("available_players_count_hydrated") or 0)
+
+    if hydrate_err:
+        return ("error", f"Hydration error: {hydrate_err}")
+    if not url_qid:
+        return (
+            "error",
+            "URL question_id missing — Continue URL is wrong or stale. "
+            "Send a new question from Baseball and open the new Command Center Continue card.",
+        )
+    if blob_err and blob_err not in {"", "no_blob_context_for_question_id"}:
+        return ("error", f"Blob load failed: {blob_err}")
+    if attempted and (not hydrate_src or hydrate_src == "none"):
+        detail = blob_err or "no_blob_context_for_question_id"
+        return ("error", f"Blob load failed: {detail}")
+    if attempted and avail == 0 and hydrate_src in {"", "none", "resume_subtitle"}:
+        if hydrate_src == "resume_subtitle":
+            return (
+                "warning",
+                "Blob load used resume_subtitle fallback only — full draft pool was not restored.",
+            )
+        return ("error", f"Blob load failed: {blob_err or 'empty_context_after_load'}")
+    if hydrate_src and hydrate_src != "none":
+        return ("success", f"Hydrated from {hydrate_src} · {avail} available player(s) in context.")
+    if not attempted:
+        return ("info", "Hydration not attempted — open AMI via a Continue URL with suite_ai_question_id.")
+    return ("warning", "Hydration status unclear — inspect fields below.")
+
+
+def render_hydration_status_banner(st: Any, identity: dict[str, Any], *, context: str = "AMI") -> None:
+    """Prominent Dev Mode banner: URL missing vs blob failure vs success."""
+    level, message = classify_ami_hydration_status(identity)
+    if level == "error":
+        st.error(f"**{context}:** {message}")
+    elif level == "warning":
+        st.warning(f"**{context}:** {message}")
+    elif level == "success":
+        st.success(f"**{context}:** {message}")
+    else:
+        st.info(f"**{context}:** {message}")
+
+
 def render_url_intake_sidebar_panel(st: Any) -> None:
     """Sidebar Dev Mode panel — URL/question_id intake before solver runs."""
     if not applied_math_developer_mode_enabled(st):
@@ -139,15 +193,12 @@ def render_url_intake_sidebar_panel(st: Any) -> None:
     identity = build_load_identity_diagnostics(st, context={}, question_id="")
     identity["startup_error"] = st.session_state.get("_suite_ai_startup_error")
     with st.sidebar.expander("URL intake (AMI load)", expanded=True):
+        render_hydration_status_banner(st, identity, context="Hydrated context")
         for key in _BLOB_IDENTITY_ALWAYS_SHOW:
             val = identity.get(key)
             st.text(f"{key}: {val if val is not None and val != '' else '—'}")
         if identity.get("startup_error"):
             st.text(f"startup_error: {identity['startup_error']}")
-        if not identity.get("url_question_id"):
-            st.warning("url_question_id missing — Continue URL may be wrong or Command Center used a stale activity link.")
-        elif not identity.get("blob_load_source") and identity.get("hydrate_attempted"):
-            st.warning("URL has question_id but blob did not load — check blob_load_error and saved-item account scope.")
 
 
 def render_applied_math_context_diagnostics(
@@ -164,6 +215,7 @@ def render_applied_math_context_diagnostics(
 
     identity = build_load_identity_diagnostics(st, context=context, question_id=question_id)
     with st.expander("Blob identity (AMI load)", expanded=True):
+        render_hydration_status_banner(st, identity, context="Hydrated context")
         for key in _BLOB_IDENTITY_ALWAYS_SHOW:
             val = identity.get(key)
             st.text(f"{key}: {val if val is not None and val != '' else '—'}")
@@ -263,7 +315,18 @@ def render_applied_math_context_diagnostics(
 
         hydrate_src = str(st.session_state.get("_suite_ai_hydrate_source") or hydrate or "").strip()
         pool_diag = build_draft_context_diagnostics(context, hydrate_source=hydrate_src)
+        try:
+            from components.applied_math_context_diagnostics import (
+                build_load_identity_diagnostics,
+                render_hydration_status_banner,
+            )
+
+            intake_identity = build_load_identity_diagnostics(st, context=context, question_id=question_id)
+            intake_identity.update(pool_diag)
+        except Exception:
+            intake_identity = dict(pool_diag)
         with st.expander("Draft pool diagnostics (Developer Mode)", expanded=True):
+            render_hydration_status_banner(st, intake_identity, context="Hydrated context")
             render_draft_context_diagnostics_block(st, pool_diag, title="Hydrated context (pre-solver)")
     except Exception:
         pass
