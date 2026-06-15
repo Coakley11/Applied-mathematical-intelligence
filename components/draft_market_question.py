@@ -169,6 +169,8 @@ _DRAFT_TIMING_PHRASES: tuple[str, ...] = (
     "draft now or",
     "draft now or later",
     "now or later",
+    "now or a later round",
+    "this round or later",
     "wait for a later round",
     "wait another round",
     "wait one more round",
@@ -193,12 +195,17 @@ def is_draft_timing_question(question: str) -> bool:
     low = str(question or "").strip().lower()
     if not low:
         return False
-    if is_draft_head_to_head_question(question) or is_player_explanation_question(question):
+    if is_player_explanation_question(question):
         return False
     if any(phrase in low for phrase in _DRAFT_TIMING_PHRASES):
         return True
+    if re.search(
+        r"(?:draft|select|take|grab)\s+.+?\s+(?:now or (?:a )?later(?: round)?|this round or later|now or wait)",
+        low,
+    ):
+        return True
     if re.search(r"should i (?:draft|select|take|grab)", low) and any(
-        w in low for w in ("now", "wait", "later", "later round", "next round")
+        w in low for w in ("now", "wait", "later", "later round", "next round", "a later round")
     ):
         return True
     if re.search(r"(?:draft|select|take|grab) .+ now or (?:wait|later)", low):
@@ -292,10 +299,29 @@ _DRAFT_COMPARE_PATTERNS: tuple[str, ...] = (
 )
 
 
+def _is_timing_compare_operand(text: str) -> bool:
+    low = str(text or "").strip().lower()
+    if low in {"later", "now", "wait", "a later round", "later round", "this round", "next round"}:
+        return True
+    return any(
+        phrase in low
+        for phrase in (
+            "later round",
+            "next round",
+            "this round",
+            "a later",
+            "or later",
+            "or wait",
+        )
+    )
+
+
 def extract_draft_compare_players(question: str) -> tuple[str, str]:
     """Pull two player names from a draft head-to-head question."""
     q = str(question or "").strip()
     if not q:
+        return "", ""
+    if is_draft_timing_question(q):
         return "", ""
     for pat in _DRAFT_COMPARE_PATTERNS:
         m = re.search(pat, q, flags=re.I)
@@ -304,6 +330,8 @@ def extract_draft_compare_players(question: str) -> tuple[str, str]:
         a = q[m.start(1) : m.end(1)].strip().strip("?,").strip()
         b = q[m.start(2) : m.end(2)].strip().strip("?,").strip()
         skip = {"this player", "this pick", "he", "him", "a hitter", "a pitcher", "later", "now", "wait"}
+        if _is_timing_compare_operand(a) or _is_timing_compare_operand(b):
+            continue
         if len(a) >= 3 and len(b) >= 3 and a.lower() not in skip and b.lower() not in skip:
             return a, b
     return "", ""
@@ -328,9 +356,15 @@ def _looks_like_player_name(name: str) -> bool:
             "which",
             "what",
             "should",
+            "later",
+            "round",
+            "catcher",
+            "now",
         }
     )
     if any(p.lower() in invalid for p in parts):
+        return False
+    if any(p.lower() in ("later", "round", "catcher", "now") for p in parts[-2:]):
         return False
     if parts[0].lower() in ("who", "which", "what", "should", "better"):
         return False
@@ -340,9 +374,13 @@ def _looks_like_player_name(name: str) -> bool:
 def is_draft_head_to_head_question(question: str) -> bool:
     """True when question compares two named players in a draft decision."""
     low = str(question or "").strip().lower()
+    if is_draft_timing_question(question):
+        return False
     if any(p in low for p in _DRAFT_TIMING_PHRASES):
         return False
-    if re.search(r"now or (?:wait|later)", low):
+    if re.search(r"now or (?:a )?later(?: round)?", low):
+        return False
+    if re.search(r"this round or later", low):
         return False
     a, b = extract_draft_compare_players(question)
     return bool(a and b and _looks_like_player_name(a) and _looks_like_player_name(b))
@@ -384,6 +422,52 @@ def is_draft_review_question(question: str) -> bool:
     if re.search(r"grade (?:my|the) draft", low):
         return True
     return False
+
+
+def extract_draft_team_query(
+    question: str,
+    *,
+    my_team: str = "",
+    team_names: list[str] | None = None,
+) -> str:
+    """Resolve which fantasy team the user wants reviewed (empty = default/my team)."""
+    q = str(question or "").strip()
+    low = q.lower()
+    names = [str(n).strip() for n in (team_names or []) if str(n).strip()]
+    if not low:
+        return my_team
+
+    if re.search(r"\bmy (?:team|roster|picks|draft)\b", low) and not re.search(r"\bteam\s+\d", low):
+        return my_team
+
+    m = re.search(r"\bteam\s+(\d+|[a-z])\b", low)
+    if m:
+        token = m.group(1)
+        label = f"team {token}".lower()
+        for name in names:
+            if name.lower() == label or name.lower().endswith(f" {token.lower()}"):
+                return name
+        if token.isdigit():
+            return f"Team {token}"
+        return f"Team {token.upper()}"
+
+    m = re.search(
+        r"(?:rate|review|grade|how (?:would|do) you rate)\s+(.+?)(?:'s|’s)\s+(?:picks|draft|roster|team)",
+        q,
+        flags=re.I,
+    )
+    if m:
+        owner = m.group(1).strip()
+        for name in names:
+            if owner.lower() in name.lower():
+                return name
+        return owner
+
+    for name in names:
+        if name.lower() in low and any(w in low for w in ("picks", "draft", "roster", "team")):
+            return name
+
+    return ""
 
 
 _ROSTER_NEEDS_PHRASES: tuple[str, ...] = (

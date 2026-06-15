@@ -94,14 +94,28 @@ class TestDraftMarketQuestionDetection(unittest.TestCase):
         self.assertFalse(is_draft_timing_question("Why is William Contreras the best catcher to draft?"))
 
     def test_contreras_now_or_later_timing_not_compare(self) -> None:
-        from components.draft_market_question import (
-            is_draft_head_to_head_question,
-            is_draft_timing_question,
-        )
+        from components.draft_market_question import is_draft_timing_question
 
         q = "Should I draft William Contreras now or later?"
         self.assertTrue(is_draft_timing_question(q))
         self.assertFalse(is_draft_head_to_head_question(q))
+
+    def test_contreras_at_catcher_now_or_later_round_timing(self) -> None:
+        from components.draft_market_question import is_draft_timing_question
+
+        q = "Should I draft William Contreras at Catcher now or a later round?"
+        self.assertTrue(is_draft_timing_question(q))
+        self.assertFalse(is_draft_head_to_head_question(q))
+
+    def test_extract_draft_team_query_team_number(self) -> None:
+        from components.draft_market_question import extract_draft_team_query
+
+        team = extract_draft_team_query(
+            "How would you rate Team 2's picks so far?",
+            my_team="Daniel",
+            team_names=["Daniel", "Team 2", "Team 3"],
+        )
+        self.assertEqual(team, "Team 2")
 
 
 if __name__ == "__main__":

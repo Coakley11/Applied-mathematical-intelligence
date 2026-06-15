@@ -2893,6 +2893,7 @@ def _draft_context_bundle(ctx: dict[str, Any]) -> dict[str, Any]:
         "position_scarcity": position_scarcity,
         "ami_answer_template": ctx.get("ami_answer_template") if isinstance(ctx.get("ami_answer_template"), list) else [],
         "my_next_pick": _num(snap.get("my_next_pick")) or _num(proj.get("my_next_pick")) or _num(ctx.get("my_next_pick")),
+        "draft_review_team": str(ctx.get("draft_review_team") or snap.get("draft_review_team") or "").strip(),
     }
     _attach_player_position_index(bundle, ctx)
     return bundle
@@ -2932,6 +2933,14 @@ def _attach_player_position_index(bundle: dict[str, Any], ctx: dict[str, Any]) -
             pos = _player_metric(row, "Primary Position", "position", "pos")
             if name and pos:
                 index[_player_name_token(name)] = str(pos)
+    ctx_snap = ctx.get("draft_snapshot")
+    if isinstance(ctx_snap, dict):
+        for row in ctx_snap.get("user_roster_detail") or []:
+            if isinstance(row, dict):
+                name = str(row.get("player") or row.get("Player") or "").strip()
+                pos = _player_metric(row, "Primary Position", "position", "pos")
+                if name and pos:
+                    index[_player_name_token(name)] = str(pos)
     for pool_key in ("board_rows", "canonical_board", "available", "best_available", "recommendations"):
         for row in bundle.get(pool_key) or []:
             if not isinstance(row, dict):
@@ -4619,7 +4628,10 @@ def _build_baseball_draft_coach_sections(
         best_pick, weakest_pick = _roster_pick_extremes(bundle, roster_list)
         filled_lines, filled_group_count = _filled_roster_display_lines(bundle)
 
-        direct = f"**Draft grade: {grade}** through {pick_note}."
+        review_team = str(bundle.get("draft_review_team") or "").strip()
+        team_note = f" for **{review_team}**" if review_team else ""
+
+        direct = f"**Draft grade: {grade}**{team_note} through {pick_note}."
         direct += f" {_draft_grade_rationale(bundle, grade)}"
         if best_pick:
             direct += f" Best pick so far: **{best_pick}**."
@@ -4642,7 +4654,7 @@ def _build_baseball_draft_coach_sections(
             weaknesses.append(f"category pressure in **{', '.join(cats[:4])}**")
 
         framing = (
-            f"Roster review at {pick_note} on {roster_note} in **{scoring_label}** scoring."
+            f"Roster review{team_note} at {pick_note} on {roster_note} in **{scoring_label}** scoring."
             + (f" Positional balance: **{filled_group_count}** groups filled." if filled_group_count else "")
             + (f" Strengths: {'; '.join(strengths)}." if strengths else "")
             + (f" Weaknesses: {'; '.join(weaknesses)}." if weaknesses else "")
