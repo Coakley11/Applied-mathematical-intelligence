@@ -6,7 +6,7 @@ import subprocess
 from pathlib import Path
 
 # Bump on each solver release; shown when git is unavailable.
-GIT_COMMIT_PINNED = "pending"
+GIT_COMMIT_PINNED = "a170d21"
 GIT_BRANCH_PINNED = "dev"
 SOLVER_BUILD_MARKER = "2026-05-27-ami-reasoning-v11"
 SOLVER_UI_VERSION = "2.8.0"
