@@ -362,6 +362,28 @@ def _route_baseball(
             "noise",
         )
     )
+    # Trend page with two named players + comparison phrasing → player comparison, not trend significance.
+    # The trend solver handles one-player stat analysis; multi-player questions need the compare solver.
+    _trend_pa = str(ctx.get("player_a") or "").strip()
+    _trend_pb = str(ctx.get("player_b") or "").strip()
+    if is_trend_page and _trend_pa and _trend_pb and (
+        "better" in low
+        or "compare" in low
+        or " vs " in low
+        or intent.intent_id == INTENT_WHO_IS_BETTER
+    ):
+        req = ("player_a", "player_b", "comparison_stats")
+        avail, miss = _audit_fields(ctx, req)
+        return ProblemRoute(
+            problem_type_id=BASEBALL_PLAYER_COMPARE,
+            problem_type="Player comparison",
+            confidence=0.87 if "player_a" in avail and "player_b" in avail else 0.62,
+            source_app="baseball",
+            required_fields=list(req),
+            available_fields=avail,
+            missing_fields=miss,
+        )
+
     if is_trend_page and trend_q:
         trend_sum = ctx.get("trend_summary")
         has_trend_ctx = isinstance(trend_sum, dict) and bool(trend_sum)
@@ -580,6 +602,20 @@ def _route_baseball(
                 problem_type_id=BASEBALL_DRAFT,
                 problem_type="Draft decision",
                 confidence=0.82 if avail else 0.55,
+                source_app="baseball",
+                required_fields=list(req),
+                available_fields=avail,
+                missing_fields=miss,
+            )
+        # Age/season range constraint on a two-player comparison → historical age-window solver.
+        # comparison_age_range or historical_comparison flag is set by the Comparison Tool send hook.
+        if ctx.get("comparison_age_range") or ctx.get("historical_comparison"):
+            req = ("player_a", "player_b", "comparison_age_range")
+            avail, miss = _audit_fields(ctx, req)
+            return ProblemRoute(
+                problem_type_id=BASEBALL_HISTORICAL,
+                problem_type="Historical stat comparison",
+                confidence=0.88 if "player_a" in avail and "player_b" in avail else 0.65,
                 source_app="baseball",
                 required_fields=list(req),
                 available_fields=avail,

@@ -501,6 +501,18 @@ _ROSTER_NEEDS_PHRASES: tuple[str, ...] = (
     "positions needed",
     "still need to pick",
     "needed for me to pick",
+    # Weakness/gap phrasing — e.g. "biggest statistical and position weakness in this draft"
+    "roster weakness",
+    "position weakness",
+    "positional weakness",
+    "statistical weakness",
+    "category weakness",
+    "stat weakness",
+    "weakest category",
+    "weakest position",
+    "weakest spot",
+    "category gap",
+    "stat gap",
 )
 
 
@@ -520,5 +532,10 @@ def is_roster_needs_question(question: str) -> bool:
     if re.search(r"what (?:position|roster)", low) and any(
         w in low for w in ("need", "still", "left", "target", "hole", "gap", "missing")
     ):
+        return True
+    # "biggest statistical and position weakness", "biggest category weakness", etc.
+    if re.search(r"biggest\b.{0,30}\bweakness", low):
+        return True
+    if re.search(r"\b(statistical|category|positional?|stat|roster)\b.{0,20}\bweakness", low):
         return True
     return False

@@ -996,6 +996,73 @@ def solve_baseball_historical(ctx: dict[str, Any], question: str) -> SolverResul
         if name and val is not None:
             row_bits.append(f"**{name}** ({sort_stat}={val})")
 
+    # Two-player age/season window comparison (from Comparison Tool with age or season constraint).
+    # No historical_snapshot available — work from player names and the extracted age range.
+    pa = str(ctx.get("player_a") or "").strip()
+    pb = str(ctx.get("player_b") or "").strip()
+    age_range = str(ctx.get("comparison_age_range") or "").strip()
+    season_range = str(ctx.get("comparison_season_range") or "").strip()
+    window_label = age_range or season_range
+    if pa and pb and window_label and not row_bits:
+        window_type = "ages" if age_range else "seasons"
+        metrics_hint = _ctx_list(ctx.get("metrics")) or ["OPS", "WAR", "HR", "SLG", "OBP"]
+        metrics_str = ", ".join(str(m) for m in metrics_hint[:5])
+        short = (
+            f"**{pa} vs {pb} — {window_type} {window_label}**: "
+            f"To compare them in this window, filter the **Historical Explorer** to "
+            f"{window_type} {window_label} and look at {metrics_str}. "
+            f"Peak-age windows (e.g. ages 19–27) reveal who developed faster and peaked higher, "
+            f"which differs significantly from career or current-day comparisons."
+        )
+        why = (
+            f"Age-window comparisons isolate a specific career phase. "
+            f"Between {window_type} {window_label}, look for: "
+            f"rate-stat peaks (OPS+, SLG), power development (ISO, HR/PA), "
+            f"contact quality, and walk/strikeout evolution. "
+            f"One player may have been elite early while the other peaked later."
+        )
+        what_if = [
+            f"If you widen the window beyond {window_label} → career totals may favor a different player.",
+            "If you add era adjustment → raw stats need park/era context (OPS+ normalizes this).",
+            "If you include postseason → peak-age playoff performance may shift the verdict.",
+        ]
+        return _coach_result(
+            question=question,
+            problem_type="Historical age-window comparison",
+            math_idea=(
+                f"Age-window comparison: isolate both players to {window_type} {window_label} "
+                f"and compare peak-phase performance metrics."
+            ),
+            variables=(
+                f"player_a = {pa}\nplayer_b = {pb}\nwindow = {window_type} {window_label}\n"
+                "metrics = OPS, HR, WAR, SLG, OBP (era-adjusted preferred)"
+            ),
+            data_used=_cap_data_used([
+                f"Player A: **{pa}**",
+                f"Player B: **{pb}**",
+                f"Window: {window_type} **{window_label}**",
+            ]),
+            calculation=f"Filter historical data to {window_type} {window_label}; compare {metrics_str}.",
+            result=short,
+            interpretation=why,
+            assumptions=[
+                f"Comparing {pa} and {pb} during {window_type} {window_label} only.",
+                "Era and park adjustments improve accuracy for cross-generation comparisons.",
+            ],
+            sensitivity_notes="\n".join(what_if),
+            missing_fields=["historical_snapshot.top_rows (filtered to age window)"],
+            partial=True,
+            problem_type_id=BASEBALL_HISTORICAL,
+            computed={"player_a": pa, "player_b": pb, "window": window_label, "coach_sections": {
+                "direct_answer": short,
+                "why": why,
+                "what_if": what_if,
+            }},
+            short_answer=short,
+            why=why,
+            sensitivity_plain=what_if[0] if what_if else "",
+        )
+
     low = question.lower()
     comparison_q = "comparison" in low or ("what does" in low and "show" in low)
     filter_cause_q = "filter" in low and ("caus" in low or "outcome" in low)
@@ -3235,6 +3302,10 @@ def _draft_question_mode(question: str) -> str:
         return "hitter_pitcher"
     if "weakest" in low and "category" in low:
         return "weakest_category"
+    if re.search(r"biggest\b.{0,30}\bweakness", low):
+        return "roster_weakness"
+    if re.search(r"\b(statistical|category|positional?|stat|roster)\b.{0,20}\bweakness", low):
+        return "roster_weakness"
     if any(p in low for p in ("biggest roster weakness", "roster weakness", "biggest weakness", "weakest spot")):
         return "roster_weakness"
     if re.search(r"which hitter.*(fit|fits).*(roster|team)|hitter.*fits.*better", low):
