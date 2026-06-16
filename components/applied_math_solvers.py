@@ -1634,6 +1634,15 @@ def _collect_comparison_rows(
 ) -> list[tuple[str, float, float]]:
     """Parse comparison stats into (name, value_a, value_b) rows."""
     rows: list[tuple[str, float, float]] = []
+    # Real metric names from the page, used to label rows that arrive without one
+    # (prevents placeholder "stat" labels in the explanation, e.g. "stat (Griffey)").
+    metric_names = _ctx_list(ctx.get("metrics")) or _ctx_list(ctx.get("comparison_stats"))
+
+    def _fallback_name(idx: int) -> str:
+        if idx < len(metric_names):
+            return metric_names[idx]
+        return f"category {idx + 1}"
+
     cmp_extra = ctx.get("_ami_comparison_context") or ctx.get("comparison_differences")
     if isinstance(cmp_extra, dict):
         for stat, val in cmp_extra.items():
@@ -1641,9 +1650,13 @@ def _collect_comparison_rows(
             if a is not None and b is not None:
                 rows.append((str(stat), a, b))
     elif isinstance(cmp_extra, list):
+        unnamed = 0
         for item in cmp_extra:
             if isinstance(item, dict):
-                stat = str(item.get("stat") or item.get("metric") or "stat")
+                stat = str(item.get("stat") or item.get("metric") or "").strip()
+                if not stat:
+                    stat = _fallback_name(unnamed)
+                    unnamed += 1
                 a = _num(item.get(pa) or item.get("player_a") or item.get("a"))
                 b = _num(item.get(pb) or item.get("player_b") or item.get("b"))
                 if a is None or b is None:
@@ -1655,7 +1668,8 @@ def _collect_comparison_rows(
             else:
                 a, b = _extract_pair_values(str(item))
                 if a is not None and b is not None:
-                    rows.append(("stat", a, b))
+                    rows.append((_fallback_name(unnamed), a, b))
+                    unnamed += 1
     stats_block = ctx.get("comparison_stats")
     if isinstance(stats_block, dict):
         for stat, val in stats_block.items():
@@ -2033,6 +2047,8 @@ def solve_baseball_player_compare(
     score_a = score_b = 0.0
     drivers: list[str] = []
     calc_lines: list[str] = []
+    leads_a: list[str] = []
+    leads_b: list[str] = []
 
     for stat, va, vb in rows:
         cat = _stat_category(stat)
@@ -2049,6 +2065,17 @@ def solve_baseball_player_compare(
         )
         if abs(va - vb) / max(va, vb, 0.001) > 0.05:
             drivers.append(f"{stat} ({leader})")
+            if leader == pa:
+                leads_a.append(str(stat))
+            elif leader == pb:
+                leads_b.append(str(stat))
+
+    def _category_clause(name: str, cats: list[str]) -> str:
+        if not cats:
+            return ""
+        if len(cats) == 1:
+            return f"{name} leads in {cats[0]}"
+        return f"{name} leads in {', '.join(cats[:-1])} and {cats[-1]}"
 
     missing: list[str] = []
     if not pa or not pb:
@@ -2057,9 +2084,46 @@ def solve_baseball_player_compare(
         missing.append("comparison_stats")
 
     partial = bool(missing)
-    short_answer = "Attach OPS/WAR/HR comparison from the Comparison Tool."
     why = ""
     live_metrics: dict[str, str] = {}
+
+    # Metric the question anchors on (e.g. "lower trend in OPS" → OPS).
+    trend_mode = bool(ctx.get("trend_comparison_mode"))
+    metric_hint = ""
+    _metrics = ctx.get("metrics")
+    if isinstance(_metrics, list) and _metrics:
+        metric_hint = str(_metrics[0])
+    elif isinstance(_metrics, str) and _metrics.strip():
+        metric_hint = _metrics.strip()
+
+    # Default answers when no scored rows are attached — give a reasoned response
+    # instead of a bare "attach data" dead-end (especially for trend-page comparisons).
+    if not pa or not pb:
+        short_answer = "Name both players to compare (e.g. 'Is A a better pick than B?')."
+    elif trend_mode:
+        focus = metric_hint or "the stat in question"
+        short_answer = (
+            f"**{pa} vs {pb} — trend comparison.** A lower {focus} *trend* for {pa} is not "
+            f"disqualifying on its own. Trend slope measures *recent direction*, not overall value, "
+            f"so weigh three things before deciding: (1) each player's current absolute level in "
+            f"{focus} and supporting categories, (2) the direction and stability of their recent "
+            f"trends, and (3) role, playing time, and age. {pa} can still be the better pick if his "
+            f"absolute level, multi-category profile, or opportunity outweighs a softer {focus} trend."
+        )
+        why = (
+            f"Trend slope ranks recent momentum, not value. {pa}'s lower {focus} trend only decides "
+            f"the pick if {pb} also leads on absolute level and other categories — otherwise a "
+            f"trend gap can be short-term noise. Open the Comparison Tool for a scored head-to-head."
+        )
+    elif not rows:
+        short_answer = (
+            f"**{pa} vs {pb}.** No head-to-head stats are attached yet. Open the Comparison Tool "
+            f"and add OPS, WAR, and HR (plus any category you weight heavily) for a scored verdict "
+            f"on who is the better pick."
+        )
+        why = "A scored comparison needs at least one shared stat line for both players."
+    else:
+        short_answer = "Attach OPS/WAR/HR comparison from the Comparison Tool."
 
     if rows:
         if score_a > score_b * 1.02:
@@ -2076,7 +2140,16 @@ def solve_baseball_player_compare(
                 f"**{winner}** leads **{loser}** under current weights "
                 f"(score **{max(score_a, score_b):.2f}** vs **{min(score_a, score_b):.2f}**)."
             )
-            why = f"Driven by: {', '.join(drivers[:3]) or 'attached stats'}."
+            win_cats = leads_a if winner == pa else leads_b
+            lose_cats = leads_b if winner == pa else leads_a
+            win_clause = _category_clause(winner, win_cats)
+            lose_clause = _category_clause(loser, lose_cats)
+            if win_clause and lose_clause:
+                why = f"{win_clause}, while {lose_clause.split(' leads in ')[0]} closes the gap in {', '.join(lose_cats)}."
+            elif win_clause:
+                why = f"{win_clause} across the attached categories, with no decisive edge for {loser}."
+            else:
+                why = f"Driven by: {', '.join(drivers[:3]) or 'attached stats'}."
         else:
             short_answer = (
                 f"**{pa}** vs **{pb}** is too close to call — weighted scores "
@@ -2946,6 +3019,28 @@ def _draft_context_bundle(ctx: dict[str, Any]) -> dict[str, Any]:
     if not needed_positions:
         needed_positions = _ctx_list(ctx.get("roster_needs") or sleepers_snap.get("roster_needs"))
     category_needs = _ctx_list(ctx.get("category_needs") or snap.get("category_needs") or proj.get("category_needs"))
+    # Derive category needs from category_diagnostics (roster-vs-pool gaps) when the
+    # page didn't pre-compute a needs list. category_diagnostics rows look like
+    # {"stat": "HR", "gap_vs_pool_pct": -15.2, "status": "weak"} — surface the weakest.
+    category_diagnostics = (
+        ctx.get("category_diagnostics")
+        or snap.get("category_diagnostics")
+        or proj.get("category_diagnostics")
+    )
+    if not category_needs and isinstance(category_diagnostics, list):
+        weak = []
+        for row in category_diagnostics:
+            if not isinstance(row, dict):
+                continue
+            stat = str(row.get("stat") or row.get("category") or "").strip()
+            if not stat:
+                continue
+            gap = row.get("gap_vs_pool_pct")
+            status = str(row.get("status") or "").strip().lower()
+            if status == "weak" or (isinstance(gap, (int, float)) and gap < -10):
+                weak.append((stat, gap if isinstance(gap, (int, float)) else 0.0))
+        weak.sort(key=lambda t: t[1])
+        category_needs = [stat for stat, _ in weak[:5]]
 
     drafted_players = _ctx_list(ctx.get("drafted_players") or snap.get("drafted_players") or proj.get("drafted_players"))
     if not drafted_players:
@@ -3001,6 +3096,7 @@ def _draft_context_bundle(ctx: dict[str, Any]) -> dict[str, Any]:
         "guidance": str(ctx.get("ami_guidance") or "").strip(),
         "needed_positions": needed_positions,
         "category_needs": category_needs,
+        "category_diagnostics": category_diagnostics if isinstance(category_diagnostics, list) else [],
         "drafted_players": drafted_players,
         "drafted_exclusions": drafted_exclusions,
         "draft_queue": draft_queue,
@@ -3770,8 +3866,10 @@ def _filled_roster_display_lines(bundle: dict[str, Any]) -> tuple[list[str], int
         if not names:
             continue
         if pos == "?":
-            for name in names:
-                lines.append(f"**?**: {name}")
+            # Position couldn't be resolved from the attached pools — render the
+            # players plainly rather than a broken-looking "?:" label.
+            joined = ", ".join(names[:4]) + ("…" if len(names) > 4 else "")
+            lines.append(f"**Rostered** (position not tagged): {joined}")
         else:
             tagged_groups += 1
             lines.append(f"**{pos}**: {', '.join(names[:4])}{'…' if len(names) > 4 else ''}")
@@ -4891,6 +4989,25 @@ def _build_baseball_draft_coach_sections(
         else:
             direct_parts.append("")
             direct_parts.append("No major positional holes flagged — build toward category balance.")
+
+        # Cite the single weakest scoring category with its roster-vs-pool gap.
+        cat_diag = bundle.get("category_diagnostics") or []
+        weakest = None
+        for row in cat_diag:
+            if not isinstance(row, dict):
+                continue
+            gap = row.get("gap_vs_pool_pct")
+            if isinstance(gap, (int, float)) and (weakest is None or gap < weakest[1]):
+                weakest = (str(row.get("stat") or "").strip(), gap)
+        if weakest and weakest[0]:
+            direct_parts.append("")
+            direct_parts.append(
+                f"**Weakest scoring category: {weakest[0]}** — your roster runs "
+                f"**{weakest[1]:+.0f}%** vs the available pool here, so prioritize it on the stat side."
+            )
+        elif cats:
+            direct_parts.append("")
+            direct_parts.append(f"**Weakest scoring category: {cats[0]}** — target it on the stat side.")
         direct = "\n".join(direct_parts)
 
         framing = (

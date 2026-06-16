@@ -323,7 +323,47 @@ def route_suite_question(
     else:
         route = domain
 
-    return _attach_interpretation(route, interp)
+    route = _attach_interpretation(route, interp)
+    _refine_baseball_restatement(route, ctx)
+    return route
+
+
+def _refine_baseball_restatement(route: ProblemRoute, ctx: dict[str, Any]) -> None:
+    """Align the human-readable restatement with the final routed workflow.
+
+    The interpreter restatement is computed before final routing and can lag the
+    chosen workflow (e.g. say "who is better today" for an age-window historical
+    question, or "trend projection" for a two-player comparison). Rewrite it so the
+    displayed Interpretation matches what the solver will actually do.
+    """
+    pid = route.problem_type_id
+    pa = str(ctx.get("player_a") or "").strip()
+    pb = str(ctx.get("player_b") or "").strip()
+    age = str(ctx.get("comparison_age_range") or "").strip()
+    season = str(ctx.get("comparison_season_range") or "").strip()
+
+    if pid == BASEBALL_HISTORICAL and pa and pb:
+        if age:
+            route.intent_restatement = (
+                f"You're asking who was the better player between **{pa}** and **{pb}** "
+                f"during the **ages {age}** window — an age-matched historical comparison."
+            )
+        elif season:
+            route.intent_restatement = (
+                f"You're asking who was better between **{pa}** and **{pb}** during "
+                f"**{season}** — a season-matched historical comparison."
+            )
+    elif pid == BASEBALL_PLAYER_COMPARE and pa and pb:
+        if ctx.get("trend_comparison_mode"):
+            route.intent_restatement = (
+                f"You're comparing the recent statistical **trends** of **{pa}** and "
+                f"**{pb}** to decide who is the better pick."
+            )
+        else:
+            route.intent_restatement = (
+                f"You're asking who is the better pick between **{pa}** and **{pb}** "
+                f"across their attached stats."
+            )
 
 
 def _has_draft_context(ctx: dict[str, Any]) -> bool:
