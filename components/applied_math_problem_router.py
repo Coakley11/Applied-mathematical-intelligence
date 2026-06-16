@@ -246,6 +246,8 @@ def _route_aligns(domain: ProblemRoute, interp: ProblemInterpretation) -> bool:
         return False
     if domain.problem_type_id == interp.model_id:
         return True
+    if domain.problem_type_id == BASEBALL_TREND:
+        return True
     if interp.math_purpose == PURPOSE_FORECAST and domain.problem_type_id == BASEBALL_PLAYER_COMPARE:
         return False
     if interp.math_purpose == PURPOSE_ATTRIBUTE and domain.problem_type_id == INVESTMENT_MACRO:
@@ -272,6 +274,7 @@ def route_suite_question(
     topics = _topics(question)
     workflow = str(ctx.get("workflow") or "").lower()
     page = str(ctx.get("page") or "").lower()
+    source_page = str(ctx.get("source_page") or page or "").lower()
     low = question.lower()
     interp = interpret_suite_question(
         question,
@@ -290,7 +293,7 @@ def route_suite_question(
         return _attach_interpretation(route, interp)
 
     if "baseball" in app:
-        domain = _route_baseball(question, ctx, topics, workflow, page, interp.intent)
+        domain = _route_baseball(question, ctx, topics, workflow, page, interp.intent, source_page=source_page)
     elif "nba" in app:
         domain = _route_nba(question, ctx, topics, workflow, low, interp.intent)
     elif "investment" in app:
@@ -337,8 +340,48 @@ def _route_baseball(
     workflow: str,
     page: str,
     intent: QuestionIntent,
+    *,
+    source_page: str = "",
 ) -> ProblemRoute:
     low = question.lower()
+    low_page = (source_page or page).lower()
+    is_trend_page = "trend" in low_page
+    trend_q = any(
+        w in low
+        for w in (
+            "trend",
+            "slope",
+            "sustainable",
+            "regression",
+            "breakout",
+            "expected stat",
+            "projection",
+            "2026",
+            "based on these trend",
+            "meaningful",
+            "noise",
+        )
+    )
+    if is_trend_page and trend_q:
+        trend_sum = ctx.get("trend_summary")
+        has_trend_ctx = isinstance(trend_sum, dict) and bool(trend_sum)
+        players = ctx.get("players") if isinstance(ctx.get("players"), list) else []
+        has_trend_player = bool(
+            str(ctx.get("player") or ctx.get("question_player") or (trend_sum or {}).get("player") or "").strip()
+            or (players and str(players[0] or "").strip())
+        )
+        req = FIELD_SPECS[BASEBALL_TREND]
+        avail, miss = _audit_fields(ctx, req)
+        conf = 0.94 if has_trend_ctx and not miss else 0.88 if has_trend_player else 0.72
+        return ProblemRoute(
+            problem_type_id=BASEBALL_TREND,
+            problem_type="Trend significance",
+            confidence=conf,
+            source_app="baseball",
+            required_fields=list(req),
+            available_fields=avail,
+            missing_fields=miss,
+        )
     if is_player_explanation_question(question):
         req = ("draft_snapshot", "question_player")
         avail, miss = _audit_fields(ctx, req)
@@ -441,42 +484,13 @@ def _route_baseball(
             available_fields=avail,
             missing_fields=miss,
         )
-    low_page = page.lower()
-    is_trend_page = "trend" in low_page
     trend_sum = ctx.get("trend_summary")
     has_trend_ctx = isinstance(trend_sum, dict) and bool(trend_sum)
-    has_trend_player = bool(str(ctx.get("player") or (trend_sum or {}).get("player") or "").strip())
-    trend_q = any(
-        w in low
-        for w in (
-            "trend",
-            "slope",
-            "sustainable",
-            "regression",
-            "breakout",
-            "expected stat",
-            "projection",
-            "2026",
-            "based on these trend",
-            "meaningful",
-            "noise",
-        )
+    players = ctx.get("players") if isinstance(ctx.get("players"), list) else []
+    has_trend_player = bool(
+        str(ctx.get("player") or ctx.get("question_player") or (trend_sum or {}).get("player") or "").strip()
+        or (players and str(players[0] or "").strip())
     )
-    if is_trend_page and (has_trend_ctx or has_trend_player) and trend_q:
-        req = FIELD_SPECS[BASEBALL_TREND]
-        avail, miss = _audit_fields(ctx, req)
-        conf = 0.92 if has_trend_ctx and not miss else 0.75 if has_trend_player else 0.55
-        return ProblemRoute(
-            problem_type_id=BASEBALL_TREND,
-            problem_type="Trend significance",
-            confidence=conf,
-            source_app="baseball",
-            required_fields=list(req),
-            available_fields=avail,
-            missing_fields=miss,
-        )
-    trend_sum = ctx.get("trend_summary")
-    has_trend_ctx = isinstance(trend_sum, dict) and bool(trend_sum)
     if has_trend_ctx and (
         "trend" in topics
         or "trend" in workflow
@@ -496,8 +510,9 @@ def _route_baseball(
             missing_fields=miss,
         )
     # Future accumulation beats static compare when user asks about next N seasons.
-    if intent.intent_id == INTENT_WILL_HAPPEN or (
-        intent.intent_id == INTENT_WHO_IS_BETTER and intent.horizon
+    if not is_trend_page and (
+        intent.intent_id == INTENT_WILL_HAPPEN
+        or (intent.intent_id == INTENT_WHO_IS_BETTER and intent.horizon)
     ):
         req = ("player_a", "player_b")
         avail, miss = _audit_fields(ctx, req)
@@ -531,6 +546,18 @@ def _route_baseball(
             missing_fields=miss,
         )
     if ("compare" in topics or "comparison" in workflow) and intent.intent_id == INTENT_WHO_IS_BETTER:
+        if is_trend_page:
+            req = FIELD_SPECS[BASEBALL_TREND]
+            avail, miss = _audit_fields(ctx, req)
+            return ProblemRoute(
+                problem_type_id=BASEBALL_TREND,
+                problem_type="Trend significance",
+                confidence=0.86 if has_trend_ctx or has_trend_player else 0.68,
+                source_app="baseball",
+                required_fields=list(req),
+                available_fields=avail,
+                missing_fields=miss,
+            )
         if _has_draft_context(ctx) and is_draft_head_to_head_question(question):
             req = ("draft_snapshot", "player_a", "player_b")
             avail, miss = _audit_fields(ctx, req)

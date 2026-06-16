@@ -841,6 +841,20 @@ def solve_baseball_trend(
             "strength": strength,
             "noise": noise,
             "meaningful": meaningful,
+            **{
+                k: v
+                for k, v in {
+                    **(ctx.get("trend_send_diagnostics") or {}),
+                    **(ctx.get("send_pipeline_diagnostics") or {}),
+                    "source_page": ctx.get("source_page") or ctx.get("page"),
+                    "trend_player": player,
+                    "trend_mode_selected": "baseball_trend_significance",
+                    "routing_reason": "trend_solver",
+                    "player_a_present": bool(str(ctx.get("player_a") or "").strip()),
+                    "player_b_present": bool(str(ctx.get("player_b") or "").strip()),
+                }.items()
+                if v is not None and v != "" and v != []
+            },
         },
         default_controls={"min_slope": min_slope, "min_r2": min_r2},
         conclusion=conclusion,
@@ -2762,17 +2776,21 @@ def _filter_undrafted_player_rows(
 def _draft_roster_note(bundle: dict[str, Any]) -> str:
     """Describe roster without implying drafted roster players are draft targets."""
     roster = bundle.get("roster") or []
+    review_team = str(bundle.get("draft_review_team") or "").strip()
     if not roster:
-        return "your roster"
+        return f"**{review_team}**'s roster" if review_team else "your roster"
     drafted_tokens = _drafted_name_tokens(bundle.get("drafted_players"))
     parts: list[str] = []
     for name in roster[:4]:
         clean = str(name).split(" (")[0].strip()
         if _player_name_token(clean) in drafted_tokens:
-            parts.append(f"**{clean}** (already on your roster)")
+            parts.append(f"**{clean}** (already drafted)")
         else:
             parts.append(f"**{clean}**")
     tail = "…" if len(roster) > 4 else ""
+    owner = review_team or "your"
+    if review_team:
+        return f"**{review_team}**'s **{len(roster)}**-player roster ({', '.join(parts)}{tail})"
     return f"your **{len(roster)}**-player roster ({', '.join(parts)}{tail})"
 
 
@@ -2819,7 +2837,8 @@ def _draft_context_bundle(ctx: dict[str, Any]) -> dict[str, Any]:
     proj = proj_raw if isinstance(proj_raw, dict) else {}
 
     roster = _ctx_list(ctx.get("roster"))
-    if not roster:
+    review_team = str(ctx.get("draft_review_team") or snap.get("draft_review_team") or "").strip()
+    if not roster and not review_team:
         ur = snap.get("user_roster") or sleepers_snap.get("synced_roster")
         if isinstance(ur, list):
             roster = [str(x).strip() for x in ur if str(x).strip()]
@@ -5306,6 +5325,21 @@ def solve_baseball_draft(
             "projected_rank": rank,
             "draft_mode": mode,
             "coach_sections": coach,
+            **{
+                k: v
+                for k, v in {
+                    **(ctx.get("_draft_team_diagnostics") or {}),
+                    **(ctx.get("send_pipeline_diagnostics") or {}),
+                }.items()
+                if k
+                in (
+                    "requested_team",
+                    "resolved_team",
+                    "roster_owner_used",
+                    "roster_player_count",
+                    "roster_players_used",
+                )
+            },
         },
         default_controls={
             **({"draft_round": rnd} if rnd is not None else {}),

@@ -49,7 +49,8 @@ class TestProblemRouter(unittest.TestCase):
             "What are Ben Rice's expected statistics for 2026 based on these trends?",
             source_app="baseball",
             context={
-                "page": "Trend Value",
+                "source_page": "Trend Value",
+                "page": "Trends",
                 "player": "Ben Rice",
                 "metrics": ["HR", "OPS"],
                 "trend_summary": {"player": "Ben Rice", "stat": "HR", "slope": 1.2, "r2": 0.48},
@@ -57,6 +58,23 @@ class TestProblemRouter(unittest.TestCase):
         )
         self.assertEqual(route.problem_type_id, BASEBALL_TREND)
         self.assertNotEqual(route.problem_type_id, "baseball_player_compare")
+
+    def test_trend_page_ignores_stale_compare_players(self) -> None:
+        route = route_suite_question(
+            "What are Ben Rice's expected statistics for 2026 based on these trends?",
+            source_app="baseball",
+            context={
+                "source_page": "Trend Value",
+                "page": "Trends",
+                "workflow": "Multi-player trend analysis",
+                "player": "Ben Rice",
+                "player_a": "Juan Soto",
+                "player_b": "Aaron Judge",
+                "metrics": ["HR"],
+                "trend_summary": {"player": "Ben Rice", "stat": "HR", "slope": 1.2, "r2": 0.48},
+            },
+        )
+        self.assertEqual(route.problem_type_id, BASEBALL_TREND)
 
     def test_investment_rebalance_route(self) -> None:
         route = route_suite_question(

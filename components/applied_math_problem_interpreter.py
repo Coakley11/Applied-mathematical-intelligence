@@ -257,6 +257,9 @@ def _select_model(source_app: str, purpose: str, ctx: dict[str, Any], question: 
     low = question.lower()
 
     if "baseball" in app:
+        source_page = str(ctx.get("source_page") or ctx.get("page") or "").lower()
+        if "trend" in source_page:
+            return "baseball_trend_significance"
         if purpose == PURPOSE_FORECAST:
             return "baseball_future_accumulation"
         if purpose == PURPOSE_TEST_SIGNIFICANCE:
@@ -264,12 +267,16 @@ def _select_model(source_app: str, purpose: str, ctx: dict[str, Any], question: 
         if purpose == PURPOSE_CHECK_REALISM:
             return "baseball_projection_realism"
         if purpose == PURPOSE_COMPARE:
+            if "trend" in source_page or "trend" in str(ctx.get("workflow") or "").lower():
+                return "baseball_trend_significance"
             return "baseball_player_comparison"
         if purpose == PURPOSE_DECIDE and "draft" in low:
             return "baseball_draft_decision"
         if "trend" in low:
             return "baseball_trend_significance"
         if _has_value(ctx.get("player_a")) and _has_value(ctx.get("player_b")):
+            if "trend" in source_page:
+                return "baseball_trend_significance"
             if purpose == PURPOSE_FORECAST or classify_question_intent(question).horizon:
                 return "baseball_future_accumulation"
             return "baseball_player_comparison"
@@ -326,18 +333,30 @@ def _build_restatement(question: str, intent: QuestionIntent, purpose: str, enti
             return draft_rest
     except ImportError:
         pass
+    low = question.lower()
     pa = entities.get("player_a") or "Player A"
     pb = entities.get("player_b") or "Player B"
     stat = entities.get("focus_stat") or "the stat"
     horizon = entities.get("horizon") or intent.horizon
     ticker = entities.get("attribution_target") or (entities.get("tickers") or [None])[0]
+    page_label = str(entities.get("page") or "").lower()
+
+    if "trend" in page_label and any(
+        w in low for w in ("trend", "2026", "project", "expected stat", "sustain", "regression", "breakout")
+    ):
+        pl = str(entities.get("player_a") or entities.get("player") or "").strip()
+        if pl and pl not in ("Player A", "Player B"):
+            return (
+                f"You're asking for **{pl}**'s trend-based projection and sustainability "
+                f"— expected stats forward, not a head-to-head comparison."
+            )
+        return "You're asking for a **trend projection / sustainability** read from Trend Value context."
 
     if purpose == PURPOSE_FORECAST and pa and pb:
         h = f" over **{horizon}**" if horizon else " over the coming seasons"
         return f"You're asking whether **{pa}** is likely to accumulate more **{stat}** than **{pb}**{h}."
     if purpose == PURPOSE_ATTRIBUTE and ticker:
         return f"You're asking **why {ticker}** contributes to portfolio drawdown risk — cause first, not stress-test first."
-    low = question.lower()
     if "sleeper" in low or "undervalued" in low or "fantasy edge" in low or "market sleeper" in low:
         pl = str(entities.get("player_a") or entities.get("player") or "").strip()
         if pl and pl not in ("Player A", "Player B"):
