@@ -2268,7 +2268,11 @@ def _fmt_num(value: Any, rate: bool = False) -> str:
         v = float(value)
     except (TypeError, ValueError):
         return "n/a"
-    return f"{v:.3f}" if rate else (f"{v:.0f}" if abs(v) >= 10 else f"{v:.1f}")
+    if rate:
+        return f"{v:.3f}"
+    if abs(v - round(v)) < 0.05:
+        return f"{int(round(v))}"
+    return f"{v:.0f}" if abs(v) >= 10 else f"{v:.1f}"
 
 
 _TREND_COUNTING_STATS = {"HR", "RBI", "R", "SB", "H", "BB", "2B", "3B"}
@@ -4037,7 +4041,8 @@ def _player_profile_bits(row: dict[str, Any]) -> str:
     ):
         val = _player_metric(row, *keys)
         if val is not None:
-            parts.append(f"{label} **{val}**")
+            is_rate = label in ("AVG", "OBP")
+            parts.append(f"{label} **{_fmt_num(val, rate=is_rate)}**")
     return ", ".join(parts[:5])
 
 
@@ -5143,12 +5148,26 @@ def _build_baseball_draft_coach_sections(
             if profile:
                 direct += f" Profile: {profile}."
         elif focus and top and _player_name_token(focus) != _player_name_token(top) and not pos_query:
+            roster_list = bundle.get("roster") or []
+            roster_hint = ""
+            if isinstance(roster_list, list) and roster_list and needs_label != "balanced coverage":
+                roster_hint = (
+                    f" Your roster (**{', '.join(str(x) for x in roster_list[:4])}"
+                    f"{'…' if len(roster_list) > 4 else ''}**) needs **{needs_label}** — "
+                    f"**{focus}** addresses that shape more directly than **{top}**."
+                )
             direct = (
-                f"**{focus}** is a good player, but **{top}** is the better overall fit on your current board "
-                f"because **{needs_label}** and recommendation priority favor **{top}**."
+                f"**{focus}** can help your team as a value add at {pick_note}"
+                + (f" — {profile}." if profile else ".")
+                + roster_hint
             )
-            if profile:
-                direct += f" **{focus}** still offers: {profile}."
+            if not roster_hint:
+                direct = (
+                    f"**{focus}** is a good player, but **{top}** is the better overall fit on your current board "
+                    f"because **{needs_label}** and recommendation priority favor **{top}**."
+                )
+                if profile:
+                    direct += f" **{focus}** still offers: {profile}."
         else:
             direct = (
                 f"**{focus}** can work at {pick_note} if he addresses **{needs_label}**, "
