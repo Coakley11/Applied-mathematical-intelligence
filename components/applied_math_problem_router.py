@@ -59,6 +59,34 @@ INVESTMENT_GENERIC = "investment_generic"
 GENERIC_FALLBACK = "generic_fallback"
 GENERIC_INTERACTIVE = "generic_interactive"
 
+MUSIC_PRACTICE_PLAN = "music_practice_plan"
+MUSIC_SECTION_FOCUS = "music_section_focus"
+MUSIC_CHORD_TRANSITION = "music_chord_transition"
+MUSIC_TEMPO_KEY = "music_tempo_key"
+MUSIC_BACKING_TRACK = "music_backing_track"
+MUSIC_SKILL_TECHNIQUE = "music_skill_technique"
+MUSIC_GENERIC = "music_generic"
+
+_MUSIC_INTENT_TO_PID: dict[str, str] = {
+    "practice_plan": MUSIC_PRACTICE_PLAN,
+    "chord_transition": MUSIC_CHORD_TRANSITION,
+    "section_focus": MUSIC_SECTION_FOCUS,
+    "tempo_key": MUSIC_TEMPO_KEY,
+    "backing_track": MUSIC_BACKING_TRACK,
+    "skill_technique": MUSIC_SKILL_TECHNIQUE,
+    "difficulty": MUSIC_SKILL_TECHNIQUE,
+}
+
+_MUSIC_PID_LABELS: dict[str, str] = {
+    MUSIC_PRACTICE_PLAN: "Music practice plan",
+    MUSIC_SECTION_FOCUS: "Music section focus",
+    MUSIC_CHORD_TRANSITION: "Music chord transitions",
+    MUSIC_TEMPO_KEY: "Music tempo & key",
+    MUSIC_BACKING_TRACK: "Music backing track practice",
+    MUSIC_SKILL_TECHNIQUE: "Music technique & readiness",
+    MUSIC_GENERIC: "Music practice coaching",
+}
+
 FIELD_SPECS: dict[str, tuple[str, ...]] = {
     NBA_STAT_CHASE: (
         "stat_gap.gap",
@@ -93,6 +121,13 @@ MODEL_ID_TO_ROUTE: dict[str, tuple[str, str, tuple[str, ...]]] = {
     INVESTMENT_DRAWDOWN_ATTRIBUTION: ("Drawdown risk attribution", "investment", ("current_weights",)),
     INVESTMENT_MACRO: ("Macro sensitivity", "investment", ("macro_outlook", "expected_return", "volatility")),
     INVESTMENT_GENERIC: ("Portfolio analysis", "investment", ("holdings", "health_score")),
+    MUSIC_PRACTICE_PLAN: ("Music practice plan", "music", ("instrument", "song", "question")),
+    MUSIC_SECTION_FOCUS: ("Music section focus", "music", ("practice_focus_section", "song")),
+    MUSIC_CHORD_TRANSITION: ("Music chord transitions", "music", ("instrument", "song")),
+    MUSIC_TEMPO_KEY: ("Music tempo & key", "music", ("display_key", "bpm")),
+    MUSIC_BACKING_TRACK: ("Music backing track practice", "music", ("practice_focus_section",)),
+    MUSIC_SKILL_TECHNIQUE: ("Music technique coaching", "music", ("instrument", "level")),
+    MUSIC_GENERIC: ("Music practice coaching", "music", ("question",)),
     GENERIC_INTERACTIVE: ("Interactive partial model", "unknown", ("question",)),
 }
 
@@ -190,16 +225,18 @@ def _with_intent(route: ProblemRoute, intent: QuestionIntent) -> ProblemRoute:
 
 def _attach_interpretation(route: ProblemRoute, interp: ProblemInterpretation) -> ProblemRoute:
     route = _with_intent(route, interp.intent)
-    route.intent_restatement = interp.restatement
-    route.math_purpose = interp.math_purpose
-    route.purpose_label = interp.purpose_label
-    route.model_name = interp.model_name
-    route.model_rationale = interp.model_rationale
-    route.model_variables = interp.model_variables
-    route.solvability = interp.solvability
-    route.data_relevant = list(interp.data_relevant)
-    route.data_missing_interp = list(interp.data_missing)
-    if interp.confidence > route.confidence:
+    is_music = route.problem_type_id.startswith("music_")
+    if not is_music:
+        route.intent_restatement = interp.restatement
+        route.math_purpose = interp.math_purpose
+        route.purpose_label = interp.purpose_label
+        route.model_name = interp.model_name
+        route.model_rationale = interp.model_rationale
+        route.model_variables = interp.model_variables
+        route.solvability = interp.solvability
+        route.data_relevant = list(interp.data_relevant)
+        route.data_missing_interp = list(interp.data_missing)
+    if interp.confidence > route.confidence and not is_music:
         route.confidence = interp.confidence
     return route
 
@@ -259,7 +296,46 @@ def _route_aligns(domain: ProblemRoute, interp: ProblemInterpretation) -> bool:
         return True
     if domain.problem_type_id == BASEBALL_DRAFT and domain.problem_type == "Draft player compare":
         return True
+    if domain.problem_type_id.startswith("music_"):
+        return True
     return domain.confidence >= 0.65
+
+
+def _route_music(question: str, ctx: dict[str, Any]) -> ProblemRoute:
+    from components.music_ami_intent import detect_music_send_intent, minutes_from_question
+
+    coach_page = str(ctx.get("coach_page") or ctx.get("source_page") or "").strip().lower()
+    intent = detect_music_send_intent(question, coach_page, ctx)
+    pid = _MUSIC_INTENT_TO_PID.get(intent, MUSIC_PRACTICE_PLAN)
+    if intent == "music_general":
+        low = question.lower()
+        if any(p in low for p in ("practice", "song", "chorus", "verse", "chord", "tempo", "groove")):
+            pid = MUSIC_PRACTICE_PLAN
+    label = _MUSIC_PID_LABELS.get(pid, "Music practice coaching")
+    avail, miss = _audit_fields(ctx, ("instrument", "song", "question"))
+    if question.strip() and "question" not in avail:
+        avail = list(avail) + ["question"]
+    restatement = "You're asking for a **practice coaching plan** for your current song and session."
+    parsed_minutes = minutes_from_question(question)
+    if parsed_minutes is not None:
+        restatement = (
+            f"You're asking how to use **{parsed_minutes} minutes** of practice time on this song."
+        )
+    return ProblemRoute(
+        problem_type_id=pid,
+        problem_type=label,
+        confidence=0.92,
+        source_app="music",
+        required_fields=["question"],
+        available_fields=avail,
+        missing_fields=miss,
+        intent_restatement=restatement,
+        math_purpose="practice_coaching",
+        purpose_label="Music practice coaching",
+        model_name=label,
+        model_rationale=f"Music intent `{intent}` routed to {pid}.",
+        solvability="approximate" if miss else "exact",
+    )
 
 
 def route_suite_question(
@@ -298,6 +374,8 @@ def route_suite_question(
         domain = _route_nba(question, ctx, topics, workflow, low, interp.intent)
     elif "investment" in app:
         domain = _route_investment(question, ctx, topics, low, interp.intent)
+    elif "music" in app or "music practice" in workflow:
+        domain = _route_music(question, ctx)
     else:
         domain = ProblemRoute(
             problem_type_id=GENERIC_INTERACTIVE,

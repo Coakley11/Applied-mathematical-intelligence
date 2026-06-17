@@ -11,6 +11,7 @@ _SUITE_QUANT_AREA: dict[str, tuple[str, str]] = {
     "baseball": ("Sports Prediction", "🏈"),
     "nba": ("Sports Prediction", "🏈"),
     "investment": ("Forecasting & Uncertainty", "🌦"),
+    "music": ("Music Practice Coaching", "🎵"),
 }
 
 
@@ -22,6 +23,8 @@ def suite_quant_area_label(source_app: str) -> tuple[str, str]:
         return _SUITE_QUANT_AREA["nba"]
     if "investment" in app:
         return _SUITE_QUANT_AREA["investment"]
+    if "music" in app:
+        return _SUITE_QUANT_AREA["music"]
     return ("Modeling Real Systems", "📐")
 
 

@@ -121,6 +121,36 @@ MODEL_INFO: dict[str, dict[str, str]] = {
         "why": "The question asks whether the **matchup advantage is meaningful** vs probability and injuries.",
         "variables": "edge_score = prob_edge + stat_edge − injury_penalty",
     },
+    "music_practice_plan": {
+        "name": "Music practice plan",
+        "why": "The question asks how to **allocate practice time** across skills for this song.",
+        "variables": "session_minutes split across technique, groove, repertoire, run-through",
+    },
+    "music_section_focus": {
+        "name": "Music section focus",
+        "why": "The question targets a **specific song section** (chorus, verse, bridge).",
+        "variables": "loop minutes, tempo ladder, connect to full song",
+    },
+    "music_chord_transition": {
+        "name": "Music chord transitions",
+        "why": "The question is about **cleaner chord changes** and transition drills.",
+        "variables": "pair loops, tempo ladder, drill minutes",
+    },
+    "music_tempo_key": {
+        "name": "Music tempo & key",
+        "why": "The question is about **tempo or key** choices for practice.",
+        "variables": "learning tempo %, written key, level-based BPM steps",
+    },
+    "music_backing_track": {
+        "name": "Music backing track practice",
+        "why": "The question is about **practicing with a backing track or groove**.",
+        "variables": "loop section, groove, dry-then-track order",
+    },
+    "music_skill_technique": {
+        "name": "Music technique coaching",
+        "why": "The question is about **technique readiness or difficulty** for this song.",
+        "variables": "slow reps, tempo bursts, hardest-bar isolation",
+    },
     "generic_interactive": {
         "name": "Interactive partial model",
         "why": "No exact solver matched, but we can still model the closest problem with your assumptions.",
@@ -312,6 +342,13 @@ def _select_model(source_app: str, purpose: str, ctx: dict[str, Any], question: 
         if _has_value(ctx.get("rebalance_drift")):
             return "investment_rebalance"
         return "investment_generic"
+
+    if "music" in app or "music practice" in str(ctx.get("workflow") or "").lower():
+        from components.music_ami_intent import detect_music_send_intent, music_intent_to_problem_type_id
+
+        coach_page = str(ctx.get("coach_page") or ctx.get("source_page") or "").strip().lower()
+        intent = detect_music_send_intent(question, coach_page, ctx)
+        return music_intent_to_problem_type_id(intent, question)
 
     return "generic_interactive"
 

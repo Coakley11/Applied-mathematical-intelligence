@@ -3267,14 +3267,28 @@ def solve_investment_drawdown_attribution(
     )
 
 
-def _player_adp_from_row(row: Any) -> float | None:
+def _player_market_rank_from_row(row: Any) -> float | None:
     if not isinstance(row, dict):
         return None
-    for key in ("Market Rank", "market_rank", "ADP", "adp", "Model Rank", "model_rank"):
+    for key in ("Market Rank", "market_rank", "ADP", "adp", "ADP Rank", "adp_rank"):
         v = _num(row.get(key))
         if v is not None and v >= 3:
             return float(v)
     return None
+
+
+def _player_model_rank_from_row(row: Any) -> float | None:
+    if not isinstance(row, dict):
+        return None
+    for key in ("Model Rank", "model_rank"):
+        v = _num(row.get(key))
+        if v is not None and v >= 3:
+            return float(v)
+    return None
+
+
+def _player_adp_from_row(row: Any) -> float | None:
+    return _player_market_rank_from_row(row)
 
 
 def _player_metric(row: Any, *keys: str) -> Any:
@@ -3556,6 +3570,12 @@ def _draft_context_bundle(ctx: dict[str, Any]) -> dict[str, Any]:
         "ami_answer_template": ctx.get("ami_answer_template") if isinstance(ctx.get("ami_answer_template"), list) else [],
         "my_next_pick": _num(snap.get("my_next_pick")) or _num(proj.get("my_next_pick")) or _num(ctx.get("my_next_pick")),
         "draft_review_team": str(ctx.get("draft_review_team") or snap.get("draft_review_team") or "").strip(),
+        "requested_team": str(
+            ctx.get("requested_team")
+            or ctx.get("resolved_team")
+            or sleepers_snap.get("sync_team")
+            or ""
+        ).strip(),
     }
     _attach_player_position_index(bundle, ctx)
     return bundle
@@ -4128,13 +4148,108 @@ def _draft_scoring_label(scoring: dict[str, Any]) -> str:
     return "standard"
 
 
+def _join_readable_list(items: list[str]) -> str:
+    cleaned = [str(x).strip() for x in items if str(x).strip()]
+    if not cleaned:
+        return ""
+    if len(cleaned) == 1:
+        return cleaned[0]
+    if len(cleaned) == 2:
+        return f"{cleaned[0]} and {cleaned[1]}"
+    return f"{', '.join(cleaned[:-1])}, and {cleaned[-1]}"
+
+
+def _format_position_needs_label(positions: list[str]) -> str:
+    pos = [str(p).strip() for p in positions[:6] if str(p).strip()]
+    if not pos:
+        return ""
+    return f"Your roster still has needs at {_join_readable_list(pos)}"
+
+
+def _format_category_needs_label(categories: list[str]) -> str:
+    cats = [str(c).strip() for c in categories[:6] if str(c).strip()]
+    if not cats:
+        return ""
+    return f"Remaining category priorities include {_join_readable_list(cats)}"
+
+
 def _format_need_list(positions: list[str], categories: list[str]) -> str:
     parts: list[str] = []
-    if positions:
-        parts.append("/".join(positions[:6]))
-    if categories:
-        parts.append(" + ".join(categories[:6]))
+    pos_label = _format_position_needs_label(positions)
+    cat_label = _format_category_needs_label(categories)
+    if pos_label:
+        parts.append(pos_label)
+    if cat_label:
+        parts.append(cat_label)
     return " · ".join(parts) if parts else "balanced coverage"
+
+
+def _draft_comparison_peer(
+    focus: str,
+    *,
+    alt: str = "",
+    top: str = "",
+    avail_names: list[str] | None = None,
+    sleeper_names: list[str] | None = None,
+) -> str:
+    focus_tok = _player_name_token(focus)
+    for candidate in (
+        alt,
+        top,
+        *(avail_names or []),
+        *(sleeper_names or []),
+    ):
+        name = str(candidate or "").strip()
+        if name and _player_name_token(name) != focus_tok:
+            return name
+    return ""
+
+
+def _fantasy_team_fit_direct(
+    bundle: dict[str, Any],
+    *,
+    focus: str,
+    row: dict[str, Any],
+    needs_label: str,
+    pick_note: str,
+    profile: str,
+) -> str:
+    owner = str(
+        bundle.get("requested_team")
+        or bundle.get("draft_review_team")
+        or "your"
+    ).strip()
+    possessive = f"{owner}'s" if owner.lower() not in ("your", "my") else "your"
+    weak_cats, strong_cats = _categorize_diagnostics(bundle.get("category_diagnostics") or [])
+    model = _player_metric(row, "Model Rank", "model_rank")
+    market = _player_metric(row, "Market Rank", "market_rank")
+    edge = _player_metric(row, "Fantasy Edge", "fantasy_edge")
+
+    sentences: list[str] = [f"**{focus}** helps {possessive} roster"]
+    if strong_cats and weak_cats:
+        strong_txt = _join_readable_list([c for c, _ in strong_cats[:3]])
+        weak_txt = _join_readable_list([c for c, _ in weak_cats[:3]])
+        sentences.append(
+            f"because it is **{strong_txt}**-heavy but still needs **{weak_txt}** depth"
+        )
+    elif needs_label != "balanced coverage":
+        sentences.append(f"because {needs_label.lower()}")
+    if model is not None and market is not None:
+        sentences.append(
+            f"The model ranks him **{model}** while the market ranks him **{market}**"
+        )
+    if edge is not None:
+        try:
+            edge_val = float(edge)
+            sentences.append(
+                f"Fantasy Edge **{edge_val:+.0f}** indicates surplus value relative to draft cost"
+            )
+        except (TypeError, ValueError):
+            sentences.append(f"Fantasy Edge **{edge}** indicates surplus value relative to draft cost")
+    if profile:
+        sentences.append(f"Profile: {profile}")
+    direct = " — ".join(sentences) + f" at {pick_note}."
+    return direct
 
 
 def _draft_context_notes(bundle: dict[str, Any]) -> list[str]:
@@ -5141,19 +5256,21 @@ def _build_baseball_draft_coach_sections(
                 if profile:
                     direct += f" Profile: {profile}."
         elif is_top_rec or (rec_names and _player_name_token(focus) == _player_name_token(rec_names[0])):
-            direct = (
-                f"**{focus}** is a strong pick for you right now because he matches your board recommendation "
-                f"and fits **{needs_label}** at {pick_note}."
+            direct = _fantasy_team_fit_direct(
+                bundle,
+                focus=focus,
+                row=row if isinstance(row, dict) else {},
+                needs_label=needs_label,
+                pick_note=pick_note,
+                profile=profile,
             )
-            if profile:
-                direct += f" Profile: {profile}."
         elif focus and top and _player_name_token(focus) != _player_name_token(top) and not pos_query:
             roster_list = bundle.get("roster") or []
             roster_hint = ""
             if isinstance(roster_list, list) and roster_list and needs_label != "balanced coverage":
                 roster_hint = (
                     f" Your roster (**{', '.join(str(x) for x in roster_list[:4])}"
-                    f"{'…' if len(roster_list) > 4 else ''}**) needs **{needs_label}** — "
+                    f"{'…' if len(roster_list) > 4 else ''}**) — {needs_label} — "
                     f"**{focus}** addresses that shape more directly than **{top}**."
                 )
             direct = (
@@ -5164,14 +5281,14 @@ def _build_baseball_draft_coach_sections(
             if not roster_hint:
                 direct = (
                     f"**{focus}** is a good player, but **{top}** is the better overall fit on your current board "
-                    f"because **{needs_label}** and recommendation priority favor **{top}**."
+                    f"because {needs_label.lower()} and recommendation priority favor **{top}**."
                 )
                 if profile:
                     direct += f" **{focus}** still offers: {profile}."
         else:
             direct = (
-                f"**{focus}** can work at {pick_note} if he addresses **{needs_label}**, "
-                "but verify he is still available on your saved board."
+                f"**{focus}** can work at {pick_note} if he addresses your roster needs "
+                f"({needs_label.lower()}), but verify he is still available on your saved board."
             )
             if profile:
                 direct += f" Profile: {profile}."
@@ -5190,7 +5307,7 @@ def _build_baseball_draft_coach_sections(
                 f"Remaining **{pos_label}** pool: {', '.join(remaining_pos) or '—'}."
             )
         elif needs_label != "balanced coverage":
-            framing_parts.append(f"Broader roster context: **{needs_label}** in **{scoring_label}**.")
+            framing_parts.append(f"Broader roster context: {needs_label} in **{scoring_label}**.")
         framing = " ".join(framing_parts) + context_suffix
         if reason:
             framing += f" Model note: {reason}."
@@ -5203,10 +5320,20 @@ def _build_baseball_draft_coach_sections(
                 f"**{', '.join(pos_alts[:3])}** — a clear step down in tier."
             )
         elif alt or (top and not is_top_rec and not pos_query):
-            tradeoffs = (
-                f"Compared with **{alt or top}**: **{focus}** vs **{top}** trades recommendation priority "
-                f"against your stated interest in **{focus}**."
+            peer = _draft_comparison_peer(
+                focus,
+                alt=alt,
+                top=top,
+                avail_names=avail_names,
+                sleeper_names=sleeper_names,
             )
+            if peer:
+                tradeoffs = (
+                    f"Compared with **{peer}**: **{focus}** vs **{peer}** trades recommendation priority "
+                    f"against your stated interest in **{focus}**."
+                )
+            else:
+                tradeoffs = f"Alternatives on board: {', '.join(avail_names[:3]) or 'see available_players'}."
         else:
             tradeoffs = f"Alternatives on board: {', '.join(avail_names[:3]) or 'see available_players'}."
         what_if = [
@@ -5361,7 +5488,7 @@ def _build_baseball_draft_coach_sections(
     elif mode == "team_fit":
         focus = _resolve_focus_player(question, bundle, bundle) or player or top
         direct = (
-            f"**{focus}** fits your team best at {pick_note} because he closes **{needs_label}** "
+            f"**{focus}** fits your team best at {pick_note} because {needs_label.lower()} "
             f"on your saved board recommendations."
         )
         framing = f"Team-fit optimization vs raw rank at {pick_note}.{context_suffix}"
@@ -5857,7 +5984,7 @@ def _build_baseball_draft_coach_sections(
             )
         ).strip()
         framing = (
-            f"Sleeper **{target}** fits roster needs **{needs_label}**"
+            f"Sleeper **{target}** — {needs_label}"
             + (f"; Fantasy Edge **{edge}**" if edge is not None else "")
             + (f" — {reason}" if reason else " — model rank beats market on your sleeper board")
             + f".{context_suffix}"
@@ -6004,8 +6131,14 @@ def solve_baseball_draft(
     elif focus_row is None and bundle["best_available"]:
         focus_row = bundle["best_available"][0]
 
-    adp_val = adp if adp is not None else _player_adp_from_row(focus_row)
-    if adp_val is None:
+    market_rank = _player_market_rank_from_row(focus_row)
+    model_rank = _player_model_rank_from_row(focus_row)
+
+    if adp is not None:
+        adp_val = float(adp)
+    elif market_rank is not None:
+        adp_val = float(market_rank)
+    else:
         adp_val = parsed.get("adp")
     if adp_val is None and projected_rank is not None:
         adp_val = float(projected_rank)
@@ -6016,7 +6149,12 @@ def solve_baseball_draft(
     if adp_val is None:
         adp_val = float(pick) if pick_known and pick is not None else 0.0
 
-    rank = projected_rank if projected_rank is not None else parsed.get("projected_rank") or int(round(float(adp_val))) if adp_val else 0
+    if projected_rank is not None:
+        rank = int(projected_rank)
+    elif model_rank is not None:
+        rank = int(round(float(model_rank)))
+    else:
+        rank = parsed.get("projected_rank") or int(round(float(adp_val))) if adp_val else 0
     pick_for_edge = int(pick) if pick_known and pick is not None else 0
     adp_val = float(adp_val)
     rank_edge = adp_val - pick_for_edge if pick_known else 0.0
@@ -6168,6 +6306,10 @@ def solve_baseball_draft(
         "Rank edge": f"{rank_edge:+.0f}" if pick_known else "n/a",
         "ADP vs pick": f"{adp_val:g} vs {pick_for_edge}" if pick_known else "pick unknown",
     }
+    if model_rank is not None:
+        live_metrics["Model Rank"] = int(round(float(model_rank)))
+    if market_rank is not None:
+        live_metrics["Market Rank"] = int(round(float(market_rank)))
     if bundle["recommendations"]:
         live_metrics["Top rec"] = _draft_player_name(bundle["recommendations"][0])
     if bundle.get("position_scarcity") is not None:
@@ -6232,6 +6374,8 @@ def solve_baseball_draft(
             "rank_edge": rank_edge,
             "value_edge": value_edge,
             "adp": adp_val,
+            "model_rank": int(round(float(model_rank))) if model_rank is not None else None,
+            "market_rank": int(round(float(market_rank))) if market_rank is not None else None,
             "pick": pick,
             "projected_rank": rank,
             "draft_mode": mode,
@@ -6796,6 +6940,11 @@ def dispatch_solver(
             vol_shock=float(p.get("vol_shock", 4.0)),
             recession_prob=float(p.get("recession_prob", 30.0)),
         )
+
+    if str(pid or "").startswith("music_"):
+        from components.music_ami_solvers import solve_music_question
+
+        return solve_music_question(route, question, ctx)
 
     if pid in (
         BASEBALL_GENERIC,
