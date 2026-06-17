@@ -649,7 +649,11 @@ def _route_baseball(
             )
         # Age/season range constraint on a two-player comparison → historical age-window solver.
         # comparison_age_range or historical_comparison flag is set by the Comparison Tool send hook.
-        if ctx.get("comparison_age_range") or ctx.get("historical_comparison"):
+        if (
+            ctx.get("comparison_age_range")
+            or ctx.get("historical_comparison")
+            or ctx.get("peak_comparison_mode")
+        ):
             req = ("player_a", "player_b", "comparison_age_range")
             avail, miss = _audit_fields(ctx, req)
             return ProblemRoute(

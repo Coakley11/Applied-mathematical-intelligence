@@ -1118,6 +1118,82 @@ def solve_baseball_historical(ctx: dict[str, Any], question: str) -> SolverResul
     age_range = str(ctx.get("comparison_age_range") or "").strip()
     season_range = str(ctx.get("comparison_season_range") or "").strip()
     window_label = age_range or season_range
+    peak_mode = bool(ctx.get("peak_comparison_mode"))
+
+    # Two-player peak comparison (Historical Explorer — Wright vs Beltran style).
+    if pa and pb and peak_mode and not window_label:
+        sort_stat_peak = str(
+            snap.get("sort_stat") or (ctx.get("metrics") or ["OPS"])[0] if isinstance(ctx.get("metrics"), list) else "OPS"
+        ).strip()
+        filters_label = str(filters)
+        a_row = b_row = None
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            name = str(row.get("player") or "").strip()
+            if _name_matches(name, pa):
+                a_row = row
+            if _name_matches(name, pb):
+                b_row = row
+        if a_row and b_row:
+            va = a_row.get(sort_stat_peak) or a_row.get(str(sort_stat_peak))
+            vb = b_row.get(sort_stat_peak) or b_row.get(str(sort_stat_peak))
+            ya = a_row.get("year", "")
+            yb = b_row.get("year", "")
+            try:
+                fa, fb = float(va), float(vb)
+                winner = pa if fa >= fb else pb
+                loser = pb if winner == pa else pa
+                wv, lv = (fa, fb) if winner == pa else (fb, fa)
+                short = (
+                    f"**{winner}** had the stronger peak in the Historical Explorer table "
+                    f"({sort_stat_peak} **{wv:g}** vs **{lv:g}** under **{filters_label}**)."
+                )
+                if ya and yb:
+                    short += f" Snapshot rows: {pa} ({ya}), {pb} ({yb})."
+                why = (
+                    f"Peak comparison uses the active Historical Explorer filters "
+                    f"({filters_label}), sorted by **{sort_stat_peak}**. "
+                    f"{winner} leads on the cited peak-season {sort_stat_peak} in this filtered view."
+                )
+            except (TypeError, ValueError):
+                short = (
+                    f"**{pa} vs {pb} — peak comparison** under **{filters_label}**, "
+                    f"using **{sort_stat_peak}** from the Historical Explorer snapshot."
+                )
+                why = "Both players appear in the current snapshot; compare their listed peak-season values."
+        else:
+            short = (
+                f"**{pa} vs {pb} — peak comparison.** Under **{filters_label}**, identify each player's "
+                f"best **{sort_stat_peak}** season (single-season peak or best multi-year stretch if "
+                f"specified). Filter the Historical Explorer to each player's career and compare "
+                f"their top **{sort_stat_peak}** seasons plus supporting power and run-production categories."
+            )
+            why = (
+                f"Peak analysis ranks best seasons in **{sort_stat_peak}** within the active year "
+                f"window — not career totals or present-day value."
+            )
+        return _coach_result(
+            question=question,
+            problem_type="Historical peak comparison",
+            math_idea=f"Compare best {sort_stat_peak} seasons for {pa} and {pb} under active filters.",
+            variables=f"player_a = {pa}\nplayer_b = {pb}\nsort_stat = {sort_stat_peak}",
+            data_used=_cap_data_used([f"**{pa}**", f"**{pb}**", f"Sort: **{sort_stat_peak}**", f"Filters: {filters_label}"]),
+            calculation=f"Rank peak {sort_stat_peak} seasons for each player in {filters_label}.",
+            result=short,
+            interpretation=why,
+            assumptions=["Peak = best single-season value in the filtered Historical Explorer window."],
+            sensitivity_notes="Widen filters or use era-adjusted stats (OPS+) for cross-era peaks.",
+            missing_fields=[] if (a_row and b_row) else ["historical_snapshot rows for both players"],
+            partial=not (a_row and b_row),
+            problem_type_id=BASEBALL_HISTORICAL,
+            computed={"player_a": pa, "player_b": pb, "peak_mode": True},
+            short_answer=short,
+            why=why,
+            confidence_pct=72 if (a_row and b_row) else 58,
+            reasons=[why],
+        )
+
     if pa and pb and window_label and not row_bits:
         window_type = "ages" if age_range else "seasons"
         metrics_hint = _ctx_list(ctx.get("metrics")) or ["OPS", "WAR", "HR", "SLG", "OBP"]
@@ -2195,6 +2271,22 @@ def _fmt_num(value: Any, rate: bool = False) -> str:
     return f"{v:.3f}" if rate else (f"{v:.0f}" if abs(v) >= 10 else f"{v:.1f}")
 
 
+_TREND_COUNTING_STATS = {"HR", "RBI", "R", "SB", "H", "BB", "2B", "3B"}
+
+
+def _clamp_trend_value(stat: str, value: Any) -> Any:
+    """Clamp impossible negative counting-stat projections for display."""
+    if value is None:
+        return None
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return value
+    if str(stat).upper() in _TREND_COUNTING_STATS and v < 0:
+        return 0.0
+    return v
+
+
 def _trend_comparison_verdict(pa: str, pb: str, tc: dict[str, Any], metric_hint: str):
     """Build a data-driven trend verdict from both players' cached trend metrics.
 
@@ -2214,7 +2306,7 @@ def _trend_comparison_verdict(pa: str, pb: str, tc: dict[str, Any], metric_hint:
         block = side.get(bucket) if isinstance(side.get(bucket), dict) else {}
         for k, v in block.items():
             if str(k).upper() == stat.upper():
-                return v
+                return _clamp_trend_value(stat, v)
         return None
 
     a_slope, b_slope = _get(a, "stat_deltas", focus_key), _get(b, "stat_deltas", focus_key)
@@ -2396,6 +2488,14 @@ def solve_baseball_player_compare(
         metric_hint = str(_metrics[0])
     elif isinstance(_metrics, str) and _metrics.strip():
         metric_hint = _metrics.strip()
+    if trend_mode:
+        _stat_m = re.search(
+            r"\b(OPS|OBP|SLG|BA|AVG|HR|RBI|R|SB|WAR)\b",
+            str(question or ""),
+            flags=re.I,
+        )
+        if _stat_m:
+            metric_hint = _stat_m.group(1).upper()
 
     # Default answers when no scored rows are attached — give a reasoned response
     # instead of a bare "attach data" dead-end (especially for trend-page comparisons).
