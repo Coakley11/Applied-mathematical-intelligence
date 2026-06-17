@@ -62,6 +62,35 @@ class TestTrendTwoPlayerComparison(unittest.TestCase):
         self.assertIn("Stone Garrett", ans)
         self.assertIn("OPS", ans)
 
+    def test_data_driven_verdict_with_trend_metrics(self) -> None:
+        """When per-player trend metrics are attached, give a direct numeric verdict."""
+        ctx = dict(self.CTX)
+        ctx["trend_comparison"] = {
+            "metric": "OPS",
+            "player_a": {
+                "player": "Kameron Misner",
+                "stat_deltas": {"OPS": -0.010, "HR": 1.0, "RBI": 3.0, "R": 2.0, "SB": 1.0},
+                "projections": {"OPS": 0.820, "HR": 24, "RBI": 78, "R": 80, "SB": 18},
+                "latest_season": {"OPS": 0.830, "HR": 23, "RBI": 75, "R": 78, "SB": 17},
+            },
+            "player_b": {
+                "player": "Stone Garrett",
+                "stat_deltas": {"OPS": 0.030, "HR": 2.0, "RBI": 4.0, "R": 1.0, "SB": 0.0},
+                "projections": {"OPS": 0.760, "HR": 18, "RBI": 62, "R": 60, "SB": 4},
+                "latest_season": {"OPS": 0.730, "HR": 16, "RBI": 58, "R": 57, "SB": 3},
+            },
+        }
+        res = _solve(self.Q, ctx)
+        ans = (res.short_answer or "")
+        why = (res.why or "")
+        # Picks the higher-projection / higher-level player, with numbers, not a tool punt.
+        self.assertIn("Kameron Misner", ans)
+        self.assertIn("better pick", ans.lower())
+        self.assertNotIn("comparison tool", (ans + why).lower())
+        self.assertNotIn("open the", (ans + why).lower())
+        # References real projected OPS values.
+        self.assertTrue("0.82" in ans or "0.83" in ans)
+
 
 class TestHistoricalAgeComparison(unittest.TestCase):
     Q = "Was Soto a better player than Griffey between ages 19-27?"
@@ -90,6 +119,30 @@ class TestHistoricalAgeComparison(unittest.TestCase):
     def test_answer_mentions_age_window(self) -> None:
         res = _solve(self.Q, self.CTX)
         self.assertIn("19-27", res.short_answer or "")
+
+    def test_data_driven_verdict_from_significance_tests(self) -> None:
+        """With age-filtered significance results attached, give a real category verdict."""
+        ctx = dict(self.CTX)
+        ctx["significance_tests"] = [
+            {"stat": "HR", "winner": "Griffey", "significance": "Significant", "interpretation": ""},
+            {"stat": "SLG", "winner": "Griffey", "significance": "Significant", "interpretation": ""},
+            {"stat": "RBI", "winner": "Griffey", "significance": "Borderline", "interpretation": ""},
+            {"stat": "OBP", "winner": "Soto", "significance": "Significant", "interpretation": ""},
+            {"stat": "BB", "winner": "Soto", "significance": "Significant", "interpretation": ""},
+            {"stat": "OVERALL", "winner": "Griffey", "significance": "Significant", "interpretation": ""},
+        ]
+        ctx["significance_overall"] = {"stat": "OVERALL", "winner": "Griffey", "significance": "Significant"}
+        res = _solve(self.Q, ctx)
+        ans = (res.short_answer or "")
+        why = (res.why or "")
+        # Names a winner and the categories each player led — not a "filter the explorer" stub.
+        self.assertIn("Griffey", ans)
+        self.assertIn("Soto", ans)
+        self.assertIn("19-27", ans)
+        self.assertNotIn("filter the", (ans + why).lower())
+        self.assertNotIn("historical explorer", (ans + why).lower())
+        # Mentions a real category that one player led.
+        self.assertTrue("HR" in ans or "power" in ans.lower())
 
 
 class TestRosterWeaknessWorkflow(unittest.TestCase):
@@ -124,6 +177,27 @@ class TestRosterWeaknessWorkflow(unittest.TestCase):
         # SB is the weakest category (-66.7%) and must be surfaced, not a player pick.
         self.assertIn("SB", text)
         self.assertNotIn("Ichiro", text)
+
+    def test_no_invented_weakness_when_all_categories_positive(self) -> None:
+        """If every category is at/above the pool, do not fabricate a statistical weakness."""
+        ctx = dict(self.CTX)
+        ctx["category_diagnostics"] = [
+            {"stat": "SB", "gap_vs_pool_pct": 8.0, "status": "strong"},
+            {"stat": "HR", "gap_vs_pool_pct": 27.3, "status": "strong"},
+            {"stat": "AVG", "gap_vs_pool_pct": 3.2, "status": "average"},
+        ]
+        res = _solve(self.Q, ctx)
+        text = (res.short_answer or "") + " " + (res.why or "")
+        low = text.lower()
+        # Must NOT label any of these (positive-gap) categories as the weakest.
+        self.assertNotIn("weakest scoring category", low)
+        self.assertNotRegex(text, r"-\d+(\.\d+)?%")  # no negative gap percentage printed
+        self.assertTrue(
+            "no statistical" in low or "no major statistical" in low,
+            msg=f"expected a no-weakness statement, got: {text}",
+        )
+        # Should redirect to positional scarcity.
+        self.assertIn("position", low)
 
 
 class TestComparisonExplanationQuality(unittest.TestCase):

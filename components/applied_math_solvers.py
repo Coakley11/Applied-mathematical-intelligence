@@ -980,6 +980,121 @@ def solve_baseball_valuation(
     )
 
 
+def _name_matches(a: str, b: str) -> bool:
+    """Loose player-name match (handles surname-only labels vs full names)."""
+    a = str(a or "").strip().lower()
+    b = str(b or "").strip().lower()
+    if not a or not b:
+        return False
+    if a == b or a in b or b in a:
+        return True
+    a_tokens = [t for t in a.replace(".", " ").split() if len(t) > 2]
+    b_tokens = [t for t in b.replace(".", " ").split() if len(t) > 2]
+    if not a_tokens or not b_tokens:
+        return False
+    # Match on shared surname (last token) or any shared long token.
+    if a_tokens[-1] == b_tokens[-1]:
+        return True
+    return bool(set(a_tokens) & set(b_tokens))
+
+
+_STAT_THEME = {
+    "HR": "power", "SLG": "power", "2B": "power", "3B": "power", "ISO": "power", "XBH": "power",
+    "RBI": "run production", "R": "run production",
+    "OBP": "on-base ability", "BB": "plate discipline", "BB%": "plate discipline",
+    "BA": "batting average", "AVG": "batting average", "H": "batting average",
+    "SB": "speed",
+}
+
+
+def _theme_phrase(themes: list[str]) -> str:
+    seen: list[str] = []
+    for t in themes:
+        if t and t not in seen:
+            seen.append(t)
+    if not seen:
+        return ""
+    if len(seen) == 1:
+        return seen[0]
+    return ", ".join(seen[:-1]) + " and " + seen[-1]
+
+
+def _age_window_significance_answer(pa, pb, window_type, window_label, sig_tests, sig_overall):
+    """Produce a real age-window verdict from per-stat significance results.
+
+    sig_tests: list of {stat, winner, significance, interpretation}.
+    sig_overall: {winner, ...}. Returns (short, why, live_metrics, conf) or None.
+    """
+    if not isinstance(sig_tests, list) or not sig_tests:
+        return None
+    a_cats: list[str] = []
+    b_cats: list[str] = []
+    a_sig: list[str] = []
+    b_sig: list[str] = []
+    for row in sig_tests:
+        if not isinstance(row, dict):
+            continue
+        stat = str(row.get("stat") or "").strip()
+        winner = str(row.get("winner") or "").strip()
+        if not stat or stat.upper() == "OVERALL" or winner in ("", "Tie", "Not enough data"):
+            continue
+        is_sig = str(row.get("significance") or "").lower().startswith("signif")
+        # winner may be a surname/clean label; match against pa/pb loosely.
+        if _name_matches(winner, pa):
+            a_cats.append(stat)
+            if is_sig:
+                a_sig.append(stat)
+        elif _name_matches(winner, pb):
+            b_cats.append(stat)
+            if is_sig:
+                b_sig.append(stat)
+    if not a_cats and not b_cats:
+        return None
+
+    a_themes = _theme_phrase([_STAT_THEME.get(s.upper(), "") for s in a_cats])
+    b_themes = _theme_phrase([_STAT_THEME.get(s.upper(), "") for s in b_cats])
+
+    overall_winner = ""
+    if isinstance(sig_overall, dict):
+        ow = str(sig_overall.get("winner") or "").strip()
+        if ow and ow not in ("Not significant", "Not enough data", "Tie"):
+            overall_winner = pa if _name_matches(ow, pa) else (pb if _name_matches(ow, pb) else ow)
+    if not overall_winner:
+        overall_winner = pa if len(a_sig or a_cats) >= len(b_sig or b_cats) else pb
+
+    def _clause(name, cats, themes):
+        if not cats:
+            return f"{name} did not clearly lead any category"
+        cat_str = ", ".join(cats[:5])
+        if themes:
+            return f"{name} produced more {themes} ({cat_str})"
+        return f"{name} led in {cat_str}"
+
+    short = (
+        f"**Between {window_type} {window_label}, {overall_winner} had the stronger peak.** "
+        f"{_clause(pa, a_cats, a_themes)}, while {_clause(pb, b_cats, b_themes)}."
+    )
+    sig_note = ""
+    winner_sig = a_sig if overall_winner == pa else b_sig
+    if winner_sig:
+        sig_note = (
+            f" {overall_winner}'s edge in {', '.join(winner_sig[:4])} is statistically significant "
+            f"(Welch test), not just noise."
+        )
+    why = (
+        f"Stats are restricted to {window_type} {window_label} and tested category-by-category. "
+        f"{overall_winner} wins the most (and the most significant) categories in that window."
+        + sig_note
+    )
+    live_metrics = {
+        f"{pa} leads": ", ".join(a_cats[:4]) or "—",
+        f"{pb} leads": ", ".join(b_cats[:4]) or "—",
+        "Window verdict": overall_winner,
+    }
+    conf = 74 if (a_sig or b_sig) else 60
+    return short, why, live_metrics, conf
+
+
 def solve_baseball_historical(ctx: dict[str, Any], question: str) -> SolverResult:
     """Explain historical leaderboard results — filters, comparison, and outlier rows."""
     snap = ctx.get("historical_snapshot") if isinstance(ctx.get("historical_snapshot"), dict) else {}
@@ -1007,6 +1122,59 @@ def solve_baseball_historical(ctx: dict[str, Any], question: str) -> SolverResul
         window_type = "ages" if age_range else "seasons"
         metrics_hint = _ctx_list(ctx.get("metrics")) or ["OPS", "WAR", "HR", "SLG", "OBP"]
         metrics_str = ", ".join(str(m) for m in metrics_hint[:5])
+
+        # If the Comparison Tool already ran age-filtered significance tests, USE them
+        # to deliver an actual verdict instead of telling the user how to do it.
+        sig_tests = ctx.get("significance_tests")
+        sig_overall = ctx.get("significance_overall")
+        verdict = _age_window_significance_answer(
+            pa, pb, window_type, window_label, sig_tests, sig_overall
+        )
+        if verdict is not None:
+            short, why, _awc_live, _awc_conf = verdict
+            return _coach_result(
+                question=question,
+                problem_type="Historical age-window comparison",
+                math_idea=(
+                    f"Age-window comparison: both players restricted to {window_type} "
+                    f"{window_label}, then tested category-by-category (Welch difference test)."
+                ),
+                variables=(
+                    f"player_a = {pa}\nplayer_b = {pb}\nwindow = {window_type} {window_label}\n"
+                    "per-stat winner + significance from filtered seasons"
+                ),
+                data_used=_cap_data_used([
+                    f"Player A: **{pa}**",
+                    f"Player B: **{pb}**",
+                    f"Window: {window_type} **{window_label}**",
+                    f"Categories tested: {len(sig_tests) if isinstance(sig_tests, list) else 0}",
+                ]),
+                calculation=(
+                    f"Filter both players to {window_type} {window_label}; compare category "
+                    f"means and flag statistically significant gaps."
+                ),
+                result=short,
+                interpretation=why,
+                assumptions=[
+                    f"Comparing {pa} and {pb} during {window_type} {window_label} only.",
+                    "Per-category winners come from age-filtered season means (Welch test).",
+                ],
+                sensitivity_notes=(
+                    "Widening the window pulls in non-peak seasons; era/park adjustment "
+                    "(OPS+) refines cross-generation gaps."
+                ),
+                missing_fields=[],
+                partial=False,
+                problem_type_id=BASEBALL_HISTORICAL,
+                computed={"player_a": pa, "player_b": pb, "window": window_label,
+                          "coach_sections": {"direct_answer": short, "why": why}},
+                short_answer=short,
+                why=why,
+                live_metrics=_awc_live,
+                confidence_pct=_awc_conf,
+                reasons=[why],
+            )
+
         short = (
             f"**{pa} vs {pb} — {window_type} {window_label}**: "
             f"To compare them in this window, filter the **Historical Explorer** to "
@@ -2015,6 +2183,139 @@ def solve_investment_concentration(
     )
 
 
+_TREND_RATE_STATS = {"OPS", "OBP", "SLG", "BA", "AVG"}
+_TREND_SUPPORT_CATS = ["HR", "RBI", "R", "SB", "OPS"]
+
+
+def _fmt_num(value: Any, rate: bool = False) -> str:
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return "n/a"
+    return f"{v:.3f}" if rate else (f"{v:.0f}" if abs(v) >= 10 else f"{v:.1f}")
+
+
+def _trend_comparison_verdict(pa: str, pb: str, tc: dict[str, Any], metric_hint: str):
+    """Build a data-driven trend verdict from both players' cached trend metrics.
+
+    Returns (short_answer, why, live_metrics, confidence_pct) or None when the
+    trend_comparison block lacks usable per-player data for either side.
+    """
+    a = tc.get("player_a") if isinstance(tc.get("player_a"), dict) else {}
+    b = tc.get("player_b") if isinstance(tc.get("player_b"), dict) else {}
+    if not a or not b:
+        return None
+
+    focus = (metric_hint or tc.get("metric") or "OPS").strip() or "OPS"
+    focus_key = focus.upper()
+    is_rate = focus_key in _TREND_RATE_STATS
+
+    def _get(side: dict[str, Any], bucket: str, stat: str):
+        block = side.get(bucket) if isinstance(side.get(bucket), dict) else {}
+        for k, v in block.items():
+            if str(k).upper() == stat.upper():
+                return v
+        return None
+
+    a_slope, b_slope = _get(a, "stat_deltas", focus_key), _get(b, "stat_deltas", focus_key)
+    a_proj, b_proj = _get(a, "projections", focus_key), _get(b, "projections", focus_key)
+    a_latest, b_latest = _get(a, "latest_season", focus_key), _get(b, "latest_season", focus_key)
+
+    # Score each player: projection (value) weighted highest, then current level, then
+    # trend slope (momentum, not value). Whoever wins more weighted points is the pick.
+    score_a = score_b = 0.0
+    if a_proj is not None and b_proj is not None:
+        score_a += 0.50 if a_proj >= b_proj else 0.0
+        score_b += 0.50 if b_proj > a_proj else 0.0
+    if a_latest is not None and b_latest is not None:
+        score_a += 0.30 if a_latest >= b_latest else 0.0
+        score_b += 0.30 if b_latest > a_latest else 0.0
+    if a_slope is not None and b_slope is not None:
+        score_a += 0.20 if a_slope >= b_slope else 0.0
+        score_b += 0.20 if b_slope > a_slope else 0.0
+
+    # Multi-category projection support (how many of HR/RBI/R/SB/OPS each leads).
+    a_cat_wins = b_cat_wins = 0
+    cat_detail: list[str] = []
+    for cat in _TREND_SUPPORT_CATS:
+        av, bv = _get(a, "projections", cat), _get(b, "projections", cat)
+        if av is None or bv is None:
+            continue
+        if av > bv:
+            a_cat_wins += 1
+            cat_detail.append(f"{cat} ({pa})")
+        elif bv > av:
+            b_cat_wins += 1
+            cat_detail.append(f"{cat} ({pb})")
+
+    if score_a == 0.0 and score_b == 0.0 and a_cat_wins == 0 and b_cat_wins == 0:
+        return None
+
+    # Break overall ties with multi-category projection edge.
+    if abs(score_a - score_b) < 1e-9:
+        better, other = (pa, pb) if a_cat_wins >= b_cat_wins else (pb, pa)
+    else:
+        better, other = (pa, pb) if score_a > score_b else (pb, pa)
+
+    trend_leader = ""
+    if a_slope is not None and b_slope is not None and abs(a_slope - b_slope) > 1e-9:
+        trend_leader = pa if a_slope > b_slope else pb
+
+    def _phrase(stat_label, av, bv, rate):
+        return f"{stat_label} {_fmt_num(av, rate)} vs {_fmt_num(bv, rate)}"
+
+    parts: list[str] = []
+    if trend_leader and trend_leader == other:
+        parts.append(
+            f"{other} has the stronger recent {focus} trend "
+            f"({_fmt_num(b_slope if other == pb else a_slope, True)}/yr vs "
+            f"{_fmt_num(a_slope if other == pb else b_slope, True)}/yr)"
+        )
+    elif trend_leader == better:
+        parts.append(
+            f"{better} carries the better {focus} trend "
+            f"({_fmt_num(a_slope if better == pa else b_slope, True)}/yr vs "
+            f"{_fmt_num(b_slope if better == pa else a_slope, True)}/yr)"
+        )
+
+    if a_proj is not None and b_proj is not None:
+        bp = a_proj if better == pa else b_proj
+        op = b_proj if better == pa else a_proj
+        parts.append(f"but {better} projects higher next season ({_phrase(focus, bp, op, is_rate)})")
+    if a_latest is not None and b_latest is not None:
+        bl = a_latest if better == pa else b_latest
+        ol = b_latest if better == pa else a_latest
+        parts.append(f"off a {'higher' if bl > ol else 'comparable'} current level ({_phrase(focus, bl, ol, is_rate)})")
+
+    body = ", ".join(parts) if parts else f"{better} has the stronger overall trend profile"
+    short_answer = f"**{better}** is the better pick over {other}: {body}."
+
+    why_bits = []
+    win_cats = a_cat_wins if better == pa else b_cat_wins
+    lose_cats = b_cat_wins if better == pa else a_cat_wins
+    if win_cats or lose_cats:
+        why_bits.append(
+            f"On next-season projections {better} leads {win_cats} of "
+            f"{win_cats + lose_cats} core categories ({other} leads {lose_cats})"
+        )
+    if trend_leader and trend_leader == other:
+        why_bits.append(
+            f"{other}'s hotter {focus} trend is recent momentum, not value — "
+            f"{better}'s higher projection and level outweigh it"
+        )
+    why = ". ".join(why_bits) + "." if why_bits else (
+        f"{better} grades out ahead on projected production and current level."
+    )
+
+    live_metrics = {
+        f"{pa} proj {focus}": _fmt_num(a_proj, is_rate),
+        f"{pb} proj {focus}": _fmt_num(b_proj, is_rate),
+        "Better pick": better,
+    }
+    confidence = 70 if abs(score_a - score_b) >= 0.3 else 58
+    return short_answer, why, live_metrics, confidence
+
+
 def solve_baseball_player_compare(
     ctx: dict[str, Any],
     question: str,
@@ -2098,23 +2399,30 @@ def solve_baseball_player_compare(
 
     # Default answers when no scored rows are attached — give a reasoned response
     # instead of a bare "attach data" dead-end (especially for trend-page comparisons).
+    trend_verdict_confidence = None
     if not pa or not pb:
         short_answer = "Name both players to compare (e.g. 'Is A a better pick than B?')."
     elif trend_mode:
         focus = metric_hint or "the stat in question"
-        short_answer = (
-            f"**{pa} vs {pb} — trend comparison.** A lower {focus} *trend* for {pa} is not "
-            f"disqualifying on its own. Trend slope measures *recent direction*, not overall value, "
-            f"so weigh three things before deciding: (1) each player's current absolute level in "
-            f"{focus} and supporting categories, (2) the direction and stability of their recent "
-            f"trends, and (3) role, playing time, and age. {pa} can still be the better pick if his "
-            f"absolute level, multi-category profile, or opportunity outweighs a softer {focus} trend."
-        )
-        why = (
-            f"Trend slope ranks recent momentum, not value. {pa}'s lower {focus} trend only decides "
-            f"the pick if {pb} also leads on absolute level and other categories — otherwise a "
-            f"trend gap can be short-term noise. Open the Comparison Tool for a scored head-to-head."
-        )
+        tc = ctx.get("trend_comparison") if isinstance(ctx.get("trend_comparison"), dict) else {}
+        verdict = _trend_comparison_verdict(pa, pb, tc, metric_hint) if tc else None
+        if verdict is not None:
+            short_answer, why, live_metrics, trend_verdict_confidence = verdict
+        else:
+            # No per-player trend metrics attached — give reasoned guidance, but still
+            # answer the framing directly rather than punting to another tool.
+            short_answer = (
+                f"**{pa} vs {pb} — trend comparison.** A softer {focus} *trend* for {pa} is not "
+                f"disqualifying: trend slope measures *recent direction*, not value. The pick "
+                f"hinges on (1) each player's current {focus} level and supporting categories, "
+                f"(2) the stability of their recent trends, and (3) role, playing time, and age. "
+                f"{pa} is still the better pick if his level, multi-category profile, or opportunity "
+                f"outweighs a hotter {focus} trend for {pb}."
+            )
+            why = (
+                f"Trend slope ranks recent momentum, not value. A {focus} trend gap only decides the "
+                f"pick when the trailing player also leads on absolute level and other categories."
+            )
     elif not rows:
         short_answer = (
             f"**{pa} vs {pb}.** No head-to-head stats are attached yet. Open the Comparison Tool "
@@ -2186,14 +2494,22 @@ def solve_baseball_player_compare(
             "weight_peak": weight_peak,
         },
         conclusion=short_answer,
-        confidence_pct=72 if rows and abs(score_a - score_b) > 0.15 else (58 if rows else 40),
+        confidence_pct=(
+            trend_verdict_confidence
+            if trend_verdict_confidence is not None
+            else (72 if rows and abs(score_a - score_b) > 0.15 else (58 if rows else 40))
+        ),
         reasons=[why] if why else [],
         short_answer=short_answer,
         why=why,
         sensitivity_plain="Increase rate-stat weight to favor OPS/WAR leaders; increase power weight for HR/SLG.",
         live_metrics=live_metrics,
         model_note=math_idea,
-        data_would_improve=["**comparison_stats** (OPS, WAR, HR) from Comparison Tool"] if not rows else [],
+        data_would_improve=(
+            ["**comparison_stats** (OPS, WAR, HR) from Comparison Tool"]
+            if not rows and trend_verdict_confidence is None
+            else []
+        ),
     )
 
 
@@ -3593,6 +3909,38 @@ def _draft_context_notes(bundle: dict[str, Any]) -> list[str]:
     return notes
 
 
+def _categorize_diagnostics(cat_diag: Any):
+    """Split category_diagnostics into (weak, strong) by sign of gap_vs_pool_pct.
+
+    A negative gap means the roster trails the available pool in that category (a real
+    weakness); a positive gap is a strength. Returns two lists of (stat, gap), weak
+    sorted most-negative-first and strong sorted most-positive-first. This is what
+    prevents the solver from labelling a +5% (strong) category as a "weakness".
+    """
+    weak: list[tuple[str, float]] = []
+    strong: list[tuple[str, float]] = []
+    for row in cat_diag or []:
+        if not isinstance(row, dict):
+            continue
+        stat = str(row.get("stat") or row.get("category") or "").strip()
+        if not stat:
+            continue
+        gap = row.get("gap_vs_pool_pct")
+        status = str(row.get("status") or "").strip().lower()
+        if isinstance(gap, (int, float)):
+            if gap < 0 or status == "weak":
+                weak.append((stat, float(gap)))
+            elif gap > 0 or status == "strong":
+                strong.append((stat, float(gap)))
+        elif status == "weak":
+            weak.append((stat, 0.0))
+        elif status == "strong":
+            strong.append((stat, 0.0))
+    weak.sort(key=lambda t: t[1])
+    strong.sort(key=lambda t: t[1], reverse=True)
+    return weak, strong
+
+
 def _draft_scarcity_line(
     bundle: dict[str, Any],
     *,
@@ -4783,30 +5131,79 @@ def _build_baseball_draft_coach_sections(
         risk_line = _draft_risk_line(bundle, upside, mode="sleeper")
     elif mode == "roster_weakness":
         pos = bundle.get("needed_positions") or []
-        cats = bundle.get("category_needs") or []
-        pos_text = ", ".join(pos[:6]) if pos else "positional depth"
-        cat_text = ", ".join(cats[:6]) if cats else "counting categories"
-        gap_pos = pos[0] if pos else "depth"
-        gap_cat = cats[0] if cats else "production"
-        direct = (
-            f"Your biggest **roster weakness** is **{gap_pos}** depth with a **{gap_cat}** category gap "
-            f"on {roster_note} at {pick_note}. **Target {top}** next to close the gap."
-        )
-        framing = (
-            f"**Weakness diagnosis:** positional gap at **{pos_text}**; category pressure on **{cat_text}**. "
-            f"Your saved board flags **{needs_label}** as the priority fix.{context_suffix}"
-        )
-        tradeoffs = (
-            f"Closing the **{gap_cat}** weakness may mean targeting **{top}** over higher-ADP names "
-            f"with less category impact; pivot **{alt or 'next tier'}** if you want raw rank."
-            if alt
-            else f"Target **{top}** to address the **{gap_pos}** weakness before the tier drops."
-        )
-        what_if = [
-            f"If you ignore the **{gap_cat}** gap → you need a late-round specialist.",
-            f"If a **{gap_pos} run** starts → take **{top}** before the tier clears.",
-            f"If you prioritize BPA → **{alt or top}** still helps **{cat_text}** most among available names.",
-        ]
+        cat_diag = bundle.get("category_diagnostics") or []
+        weak_cats, strong_cats = _categorize_diagnostics(cat_diag)
+        # Fall back to the pre-computed needs list only when diagnostics are absent.
+        if not cat_diag:
+            weak_cats = [(c, 0.0) for c in (bundle.get("category_needs") or [])]
+        cats = [c for c, _ in weak_cats]
+        pos_text = ", ".join(pos[:6]) if pos else "no open position groups"
+        gap_pos = pos[0] if pos else ""
+        strong_text = ", ".join(c for c, _ in strong_cats[:3])
+
+        if weak_cats:
+            gap_cat, gap_val = weak_cats[0]
+            gap_clause = f"**{gap_cat}** (**{gap_val:+.0f}%** vs the available pool)" if cat_diag else f"**{gap_cat}** production"
+            direct = (
+                f"Your biggest **statistical weakness** is {gap_clause}"
+                + (f", and positionally you're thin at **{gap_pos}**" if gap_pos else "")
+                + f" on {roster_note} at {pick_note}. **Target {top}** next to close it."
+            )
+            framing = (
+                f"**Weakness diagnosis:** category gap on **{', '.join(cats[:4])}**"
+                + (f"; open position groups: **{pos_text}**" if pos else "")
+                + (f". Strengths: **{strong_text}**" if strong_text else "")
+                + f".{context_suffix}"
+            )
+            tradeoffs = (
+                f"Closing the **{gap_cat}** gap may mean taking **{top}** over higher-ADP names "
+                f"with less category impact; pivot **{alt or 'next tier'}** if you want raw rank."
+                if alt
+                else f"Target **{top}** to address the **{gap_cat}** gap before the tier drops."
+            )
+            what_if = [
+                f"If you ignore the **{gap_cat}** gap → you'll need a late-round specialist.",
+                (f"If a **{gap_pos} run** starts → take **{top}** before the tier clears." if gap_pos
+                 else f"If the tier clears → **{top}** is the cleanest **{gap_cat}** fix available."),
+                f"If you prioritize BPA → **{alt or top}** still helps **{gap_cat}** most among available names.",
+            ]
+        else:
+            # No category runs below the pool — do NOT invent a statistical weakness.
+            strength_note = f" Strengths: **{strong_text}**." if strong_text else ""
+            if pos:
+                direct = (
+                    f"**No major statistical weakness exists** — every scored category projects at or "
+                    f"above the available pool.{strength_note} Your real gap is **positional**: "
+                    f"**{pos_text}**. **Target {top}** to fill it on {roster_note} at {pick_note}."
+                )
+                framing = (
+                    f"**Weakness diagnosis:** no category trails the pool, so positional scarcity at "
+                    f"**{pos_text}** is the bigger concern.{strength_note}{context_suffix}"
+                )
+                what_if = [
+                    f"If a **{pos[0]} run** starts → take **{top}** before the position dries up.",
+                    "If you chase stats anyway → you'd be adding to an already-balanced category profile.",
+                    f"If you prioritize BPA → **{alt or top}** addresses **{pos[0]}** without hurting balance.",
+                ]
+            else:
+                direct = (
+                    f"**No major statistical or positional weakness stands out.**{strength_note} Your roster "
+                    f"is balanced versus the pool at {pick_note}, so draft best player available — "
+                    f"**{top}** is the top option."
+                )
+                framing = (
+                    f"**Weakness diagnosis:** no category or position group lags the available pool."
+                    f"{strength_note} Stay flexible and take the highest-value name.{context_suffix}"
+                )
+                what_if = [
+                    f"If a tier breaks → **{top}** is the best value on the board.",
+                    "If you want upside → weigh ceiling over a marginal category edge.",
+                    f"If a position run starts → pivot to **{alt or top}** to stay ahead of scarcity.",
+                ]
+            tradeoffs = (
+                f"Don't reach for a category specialist to fix a non-existent gap — that costs raw value. "
+                f"Take **{top}**" + (f" or **{alt}**" if alt else "") + " and keep the balanced profile."
+            )
         scarcity_line = _draft_scarcity_line(bundle)
         risk_line = _draft_risk_line(bundle, player or top, mode=mode)
     elif mode == "draft_timing_decision":
@@ -4990,20 +5387,28 @@ def _build_baseball_draft_coach_sections(
             direct_parts.append("")
             direct_parts.append("No major positional holes flagged — build toward category balance.")
 
-        # Cite the single weakest scoring category with its roster-vs-pool gap.
+        # Cite the single weakest scoring category — but only if it actually trails the
+        # pool (negative gap). If every category is at/above the pool, do not invent a
+        # weakness; say so and point at positional scarcity instead.
         cat_diag = bundle.get("category_diagnostics") or []
-        weakest = None
-        for row in cat_diag:
-            if not isinstance(row, dict):
-                continue
-            gap = row.get("gap_vs_pool_pct")
-            if isinstance(gap, (int, float)) and (weakest is None or gap < weakest[1]):
-                weakest = (str(row.get("stat") or "").strip(), gap)
-        if weakest and weakest[0]:
+        weak_cats, strong_cats = _categorize_diagnostics(cat_diag)
+        if weak_cats:
+            w_stat, w_gap = weak_cats[0]
             direct_parts.append("")
             direct_parts.append(
-                f"**Weakest scoring category: {weakest[0]}** — your roster runs "
-                f"**{weakest[1]:+.0f}%** vs the available pool here, so prioritize it on the stat side."
+                f"**Weakest scoring category: {w_stat}** — your roster runs "
+                f"**{w_gap:+.0f}%** vs the available pool here, so prioritize it on the stat side."
+            )
+        elif cat_diag:
+            strongest = (
+                f" (strongest: **{strong_cats[0][0]}** at **{strong_cats[0][1]:+.0f}%**)"
+                if strong_cats else ""
+            )
+            direct_parts.append("")
+            direct_parts.append(
+                f"**No statistical category trails the pool** — every scored category projects at or "
+                f"above the available names{strongest}. Positional scarcity is the bigger concern, so "
+                f"prioritize open slots over chasing a stat."
             )
         elif cats:
             direct_parts.append("")
