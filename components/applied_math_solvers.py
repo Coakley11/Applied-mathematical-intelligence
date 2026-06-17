@@ -2275,15 +2275,26 @@ _TREND_COUNTING_STATS = {"HR", "RBI", "R", "SB", "H", "BB", "2B", "3B"}
 
 
 def _clamp_trend_value(stat: str, value: Any) -> Any:
-    """Clamp impossible negative counting-stat projections for display."""
+    """Clamp impossible projections for display (negative counting stats, extreme rates)."""
     if value is None:
         return None
     try:
         v = float(value)
     except (TypeError, ValueError):
         return value
-    if str(stat).upper() in _TREND_COUNTING_STATS and v < 0:
-        return 0.0
+    key = str(stat).upper()
+    if key in _TREND_COUNTING_STATS:
+        if v < 0:
+            return 0.0
+        if key == "HR" and v > 80:
+            return 80.0
+        if key in {"RBI", "R", "H"} and v > 200:
+            return 200.0
+    if key in _TREND_RATE_STATS:
+        if v < 0:
+            return 0.0
+        if v > 2.0:
+            return 2.0
     return v
 
 
@@ -2343,9 +2354,12 @@ def _trend_comparison_verdict(pa: str, pb: str, tc: dict[str, Any], metric_hint:
     if score_a == 0.0 and score_b == 0.0 and a_cat_wins == 0 and b_cat_wins == 0:
         return None
 
-    # Break overall ties with multi-category projection edge.
+    # Break overall ties with focus-stat projection edge first, then multi-category.
     if abs(score_a - score_b) < 1e-9:
-        better, other = (pa, pb) if a_cat_wins >= b_cat_wins else (pb, pa)
+        if a_proj is not None and b_proj is not None and a_proj != b_proj:
+            better, other = (pa, pb) if a_proj > b_proj else (pb, pa)
+        else:
+            better, other = (pa, pb) if a_cat_wins >= b_cat_wins else (pb, pa)
     else:
         better, other = (pa, pb) if score_a > score_b else (pb, pa)
 
@@ -2356,48 +2370,48 @@ def _trend_comparison_verdict(pa: str, pb: str, tc: dict[str, Any], metric_hint:
     def _phrase(stat_label, av, bv, rate):
         return f"{stat_label} {_fmt_num(av, rate)} vs {_fmt_num(bv, rate)}"
 
-    parts: list[str] = []
+    bp = a_proj if better == pa else b_proj
+    op = b_proj if better == pa else a_proj
+    bl = a_latest if better == pa else b_latest
+    ol = b_latest if better == pa else a_latest
+    bs = a_slope if better == pa else b_slope
+    os = b_slope if better == pa else a_slope
+
+    lead_bits: list[str] = []
+    if bp is not None and op is not None:
+        lead_bits.append(f"projects {_fmt_num(bp, is_rate)} {focus} vs {_fmt_num(op, is_rate)} for {other}")
+    if bl is not None and ol is not None:
+        lead_bits.append(f"current {focus} {_fmt_num(bl, is_rate)} vs {_fmt_num(ol, is_rate)}")
+    lead = ", ".join(lead_bits) if lead_bits else f"stronger overall {focus} profile"
+
+    short_answer = f"**{better}** is the better pick over {other}: {lead}."
     if trend_leader and trend_leader == other:
-        parts.append(
-            f"{other} has the stronger recent {focus} trend "
-            f"({_fmt_num(b_slope if other == pb else a_slope, True)}/yr vs "
-            f"{_fmt_num(a_slope if other == pb else b_slope, True)}/yr)"
+        short_answer += (
+            f" {other}'s {focus} trend is hotter "
+            f"({_fmt_num(os if other == pb else bs, True)}/yr vs "
+            f"{_fmt_num(bs if other == pb else os, True)}/yr), but projection and level favor {better}."
         )
     elif trend_leader == better:
-        parts.append(
-            f"{better} carries the better {focus} trend "
-            f"({_fmt_num(a_slope if better == pa else b_slope, True)}/yr vs "
-            f"{_fmt_num(b_slope if better == pa else a_slope, True)}/yr)"
+        short_answer += (
+            f" {better} also carries the better {focus} trend "
+            f"({_fmt_num(bs, True)}/yr vs {_fmt_num(os, True)}/yr)."
         )
 
-    if a_proj is not None and b_proj is not None:
-        bp = a_proj if better == pa else b_proj
-        op = b_proj if better == pa else a_proj
-        parts.append(f"but {better} projects higher next season ({_phrase(focus, bp, op, is_rate)})")
-    if a_latest is not None and b_latest is not None:
-        bl = a_latest if better == pa else b_latest
-        ol = b_latest if better == pa else a_latest
-        parts.append(f"off a {'higher' if bl > ol else 'comparable'} current level ({_phrase(focus, bl, ol, is_rate)})")
-
-    body = ", ".join(parts) if parts else f"{better} has the stronger overall trend profile"
-    short_answer = f"**{better}** is the better pick over {other}: {body}."
-
     why_bits = []
+    why_bits.append(
+        f"Pick uses weighted {focus} comparison: 50% projection, 30% current level, 20% trend slope"
+    )
     win_cats = a_cat_wins if better == pa else b_cat_wins
     lose_cats = b_cat_wins if better == pa else a_cat_wins
     if win_cats or lose_cats:
         why_bits.append(
-            f"On next-season projections {better} leads {win_cats} of "
-            f"{win_cats + lose_cats} core categories ({other} leads {lose_cats})"
+            f"{better} also leads {win_cats} of {win_cats + lose_cats} supporting categories on projections"
         )
     if trend_leader and trend_leader == other:
         why_bits.append(
-            f"{other}'s hotter {focus} trend is recent momentum, not value — "
-            f"{better}'s higher projection and level outweigh it"
+            f"{other}'s hotter {focus} trend is momentum only — it does not outweigh {better}'s value edge"
         )
-    why = ". ".join(why_bits) + "." if why_bits else (
-        f"{better} grades out ahead on projected production and current level."
-    )
+    why = ". ".join(why_bits) + "."
 
     live_metrics = {
         f"{pa} proj {focus}": _fmt_num(a_proj, is_rate),
@@ -2572,6 +2586,22 @@ def solve_baseball_player_compare(
 
     calc = "\n".join(calc_lines) if calc_lines else "Subtract rate-based value scores with your category weights."
 
+    sensitivity_plain = "Increase rate-stat weight to favor OPS/WAR leaders; increase power weight for HR/SLG."
+    if trend_mode and trend_verdict_confidence is not None:
+        focus_stat = (metric_hint or "OPS").strip() or "OPS"
+        math_idea = (
+            f"Weighted **{focus_stat}** trend comparison: 50% next-season projection, "
+            "30% current level, 20% recent trend slope. Trend slope is momentum, not total value."
+        )
+        variables = (
+            f"pick_score = 0.50×proj_{focus_stat} + 0.30×latest_{focus_stat} + 0.20×slope_{focus_stat}\n"
+            "Higher weighted score wins the pick verdict."
+        )
+        sensitivity_plain = (
+            f"If {focus_stat} projections diverge, the pick follows projection/level even when "
+            "the other player has a hotter trend slope."
+        )
+
     return _coach_result(
         question=question,
         problem_type="Player comparison",
@@ -2602,7 +2632,7 @@ def solve_baseball_player_compare(
         reasons=[why] if why else [],
         short_answer=short_answer,
         why=why,
-        sensitivity_plain="Increase rate-stat weight to favor OPS/WAR leaders; increase power weight for HR/SLG.",
+        sensitivity_plain=sensitivity_plain,
         live_metrics=live_metrics,
         model_note=math_idea,
         data_would_improve=(
