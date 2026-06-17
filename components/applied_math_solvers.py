@@ -3735,6 +3735,8 @@ def _extract_player_from_question_text(question: str) -> str:
     q = str(question or "").strip()
     low = q.lower()
     patterns = (
+        r"would (.+?) help (?:my team|my roster|the team|us)",
+        r"would (.+?) be (?:a )?good (?:fit|add|pick|draft|choice)(?: for my team)?",
         r"(?:should i )?(?:select|draft|take|grab)\s+(.+?)\s+at\s+(?:c\b|catcher|catchers|1b|2b|3b|ss|of|sp|rp)",
         r"(?:should i )?(?:select|draft|take|grab)\s+(.+?)\s+as a\s+",
         r"(?:should i )?(?:select|draft|take|grab)\s+(.+?)\s+now or wait",
@@ -3944,6 +3946,10 @@ def _draft_question_mode(question: str) -> str:
         return "roster_weakness"
     if re.search(r"which hitter.*(fit|fits).*(roster|team)|hitter.*fits.*better", low):
         return "hitter_fit"
+    if re.search(r"help (?:my team|my roster)", low) and (
+        _extract_player_from_question_text(question) or re.search(r"would .+ help", low)
+    ):
+        return "player_why"
     if any(p in low for p in ("fits my team", "fit my team", "fits my roster", "who fits")):
         return "team_fit"
     if "sleeper" in low and (
@@ -5331,8 +5337,9 @@ def _build_baseball_draft_coach_sections(
         scarcity_line = _draft_scarcity_line(bundle)
         risk_line = _draft_risk_line(bundle, winner, mode=mode)
     elif mode == "team_fit":
+        focus = _resolve_focus_player(question, bundle, bundle) or player or top
         direct = (
-            f"**{top}** fits your team best at {pick_note} because he closes **{needs_label}** "
+            f"**{focus}** fits your team best at {pick_note} because he closes **{needs_label}** "
             f"on your saved board recommendations."
         )
         framing = f"Team-fit optimization vs raw rank at {pick_note}.{context_suffix}"

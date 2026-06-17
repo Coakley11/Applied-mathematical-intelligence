@@ -140,8 +140,12 @@ def draft_question_restatement(question: str) -> str:
 
 
 def is_player_explanation_question(question: str) -> bool:
-    """True when the user asks why a named player is the right draft pick."""
+    """True when the user asks why a named player is the right draft pick or team fit."""
     low = str(question or "").strip().lower()
+    if re.search(r"would .+ help (?:my team|my roster|the team)", low):
+        return True
+    if re.search(r"would .+ be (?:a )?good (?:fit|add)", low):
+        return True
     if "why is" not in low:
         return False
     if re.search(r"why is .+? (?:the best|worth|a good|the right|the top)", low):

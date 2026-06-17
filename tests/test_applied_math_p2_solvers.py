@@ -211,6 +211,32 @@ class TestDraftPickSolver(unittest.TestCase):
             or "strong pick" in result.short_answer.lower()
         )
 
+    def test_team_fit_question_anchors_named_player(self) -> None:
+        ctx = {
+            "question_player": "Eric Wagaman",
+            "draft_snapshot": {
+                "current_pick": 12,
+                "draft_round": 2,
+                "user_roster": ["Aaron Judge"],
+                "recommended_players": [
+                    {"player": "Nathan Lukes", "Fantasy Edge": 226, "Market Rank": 350},
+                    {"player": "Eric Wagaman", "Fantasy Edge": 18, "Market Rank": 140, "Primary Position": "1B"},
+                ],
+                "available_players": [
+                    {"player": "Eric Wagaman", "Fantasy Edge": 18, "Market Rank": 140, "Primary Position": "1B"},
+                    {"player": "Nathan Lukes", "Fantasy Edge": 226},
+                ],
+            },
+            "needed_positions": ["1B"],
+            "category_needs": ["HR"],
+            "current_pick": 12,
+        }
+        q = "Would Eric Wagaman help my team if I draft him?"
+        result = solve_baseball_draft(ctx, q)
+        self.assertEqual(result.computed.get("draft_mode"), "player_why")
+        self.assertIn("Eric Wagaman", result.short_answer)
+        self.assertNotIn("Nathan Lukes", result.short_answer.split("Eric Wagaman")[0])
+
     def test_risk_question_mentions_variance(self) -> None:
         ctx = {
             "draft_snapshot": {
