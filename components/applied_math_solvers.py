@@ -3872,21 +3872,27 @@ def _sleeper_rank_scores(row: dict[str, Any]) -> dict[str, float]:
 
 def _sleeper_evidence_line(row: dict[str, Any], scores: dict[str, float]) -> str:
     parts: list[str] = []
-    if scores.get("edge"):
-        parts.append(f"Fantasy Edge {scores['edge']:+.0f}")
-    if scores.get("adp_discount"):
-        parts.append(f"ADP discount {scores['adp_discount']:+.0f} ranks vs market")
+    edge = scores.get("edge")
+    if edge:
+        parts.append(f"Fantasy Edge {edge:+.0f}")
+    market = _player_metric(row, "Market Rank", "market_rank")
+    model = _player_metric(row, "Model Rank", "model_rank")
+    if market is not None:
+        parts.append(f"Market Rank {market}")
+    if model is not None:
+        parts.append(f"Model Rank {model}")
     adp = _player_metric(row, "ADP", "adp")
     if adp is not None:
         parts.append(f"ADP {adp}")
     if scores.get("std"):
         parts.append(f"Expert Std Dev {scores['std']:.1f}")
     if scores.get("risk"):
-        parts.append(f"Risk/disagreement {scores['risk']:.1f}")
+        parts.append(f"Risk / Disagreement {scores['risk']:.1f}")
     if scores.get("current_prod"):
-        parts.append(f"Current production {scores['current_prod']:.2f}")
-    if scores.get("stability"):
-        parts.append(f"Projection stability {scores['stability']:.1f}")
+        parts.append(f"Current Production Score {scores['current_prod']:.2f}")
+    proj_ops = _player_metric(row, "Projected OPS", "proj_OPS", "proj_ops")
+    if proj_ops is not None:
+        parts.append(f"Projected OPS {proj_ops}")
     reason = str(_player_metric(row, "Reason", "reason") or "").strip()
     if reason:
         parts.append(reason[:140])
@@ -4179,7 +4185,7 @@ def _draft_scarcity_line(
     needs = _format_need_list(bundle.get("needed_positions") or [], bundle.get("category_needs") or [])
     if scarcity is not None:
         return (
-            f"Position scarcity index **{scarcity:g}** at this pick; "
+            f"Scarcity Dropoff **{scarcity:g}** at this pick; "
             f"**{pool}** available options tracked in context; prioritize scarce tiers (**{needs}**)."
         )
     return (
@@ -4197,11 +4203,11 @@ def _draft_risk_line(bundle: dict[str, Any], player: str, *, mode: str) -> str:
         edge = _player_metric(sleeper_row, "Fantasy Edge", "fantasy_edge")
     if mode == "sleeper":
         return (
-            f"**{target}** is an upside/variance bet — Fantasy Edge **{edge}** when available; "
-            "wider outcome swings than safe picks at this cost."
+            f"**{target}** is an upside pick — Fantasy Edge **{edge}** when available; "
+            "wider outcome swings than safer profiles at this cost."
         )
     if edge is not None:
-        return f"**{target}** carries projection edge **{edge}** with normal playing-time and role variance."
+        return f"**{target}** — Fantasy Edge **{edge}** with normal playing-time and role variance."
     return f"**{target}** balances floor and ceiling given your roster construction and category needs."
 
 
@@ -4231,10 +4237,10 @@ def _explain_market_rank(rank: Any) -> str:
     except (TypeError, ValueError):
         return ""
     if val <= 40:
-        return f"market rank **{val:g}** (early-round tier)"
+        return f"Market Rank **{val:g}** (early-round tier)"
     if val <= 80:
-        return f"market rank **{val:g}** (middle-round tier)"
-    return f"market rank **{val:g}** (later-round tier)"
+        return f"Market Rank **{val:g}** (middle-round tier)"
+    return f"Market Rank **{val:g}** (later-round tier)"
 
 
 def _explain_fantasy_edge(edge: Any) -> str:
@@ -4289,7 +4295,7 @@ def _explain_position_scarcity(
             sval = None
         if sval is not None and sval >= 2.0:
             return (
-                f"**{pos_label}** scarcity is elevated (index **{sval:g}**) — only **{pool_count}** "
+                f"**{pos_label}** scarcity is elevated (Scarcity Dropoff **{sval:g}**) — only **{pool_count}** "
                 f"viable options remain, so waiting usually means a steep drop in production."
             )
     if pool_count <= 4:
@@ -4852,7 +4858,7 @@ def _build_baseball_draft_coach_sections(
         elif subtype == "wait_timing":
             direct = (
                 f"You can likely wait **1–2 rounds** on **{pos_label}** if **{next_name}** is the only elite name left, "
-                f"but scarcity index **{bundle.get('position_scarcity') or 'rising'}** raises reach risk."
+                f"but Scarcity Dropoff **{bundle.get('position_scarcity') or 'rising'}** raises reach risk."
             )
             framing = (
                 f"{drafted_note}"
@@ -4938,7 +4944,7 @@ def _build_baseball_draft_coach_sections(
             scarcity_idx = bundle.get("position_scarcity")
             if scarcity_idx is not None:
                 scarcity_line = (
-                    f"**{pos_label}** scarcity index **{scarcity_idx:g}**; "
+                    f"**{pos_label}** Scarcity Dropoff **{scarcity_idx:g}**; "
                     f"**{len(remaining_names)}** undrafted **{pos_label}** remain in context."
                 )
             else:
@@ -5226,7 +5232,7 @@ def _build_baseball_draft_coach_sections(
             f"If you wait one round → **{second_at_pos or top_at_pos or 'next tier'}** may be the top **{pos_label}** left.",
             f"If you prioritize power → compare HR/OBP among {', '.join([n for n in (top_at_pos, second_at_pos, third_at_pos) if n]) or 'remaining options'}.",
             f"If you prioritize safety → favor **{top_at_pos}** (best market rank among remaining **{pos_label}**).",
-            f"If a run starts → scarcity index **{bundle['position_scarcity']:g}**" if bundle.get("position_scarcity") is not None else f"If a run starts → take **{top_at_pos}** before the **{pos_label}** pool thins.",
+            f"If a run starts → Scarcity Dropoff **{bundle['position_scarcity']:g}**" if bundle.get("position_scarcity") is not None else f"If a run starts → take **{top_at_pos}** before the **{pos_label}** pool thins.",
         ]
         scarcity_line = _draft_scarcity_line(
             bundle, available_count=len(pos_pool), position_query=pos_query
@@ -5263,7 +5269,7 @@ def _build_baseball_draft_coach_sections(
             f"recommendations favor **{top}** for overall fit.{context_suffix}"
         )
         tradeoffs = (
-            f"Closing **{weakest}** may mean passing on higher ADP names like **{alt or top}** with better raw rank."
+            f"Closing **{weakest}** may mean passing on players with better Market Rank like **{alt or top}**."
         )
         what_if = [
             f"If you fix **{weakest}** this round → next pick can target **{alt or 'BPA'}**.",
@@ -5368,8 +5374,8 @@ def _build_baseball_draft_coach_sections(
                 f"**Best balanced: {bal_name}** across {len(ranked)} sleepers on your board."
             )
             framing = (
-                f"Ranked from your sleeper board using Fantasy Edge, ADP discount vs market, "
-                f"expert disagreement (Std Dev / risk score), current production, and projection stability."
+                f"Ranked from your Fantasy Sleepers board using Fantasy Edge, Market Rank, Model Rank, "
+                f"ADP, Expert Std Dev, Risk / Disagreement, Current Production Score, and Projected OPS."
                 + context_suffix
             )
             tradeoffs = "\n".join(
@@ -5436,8 +5442,8 @@ def _build_baseball_draft_coach_sections(
                 + f".{context_suffix}"
             )
             tradeoffs = (
-                f"Closing the **{gap_cat}** gap may mean taking **{top}** over higher-ADP names "
-                f"with less category impact; pivot **{alt or 'next tier'}** if you want raw rank."
+                f"Closing the **{gap_cat}** gap may mean taking **{top}** over players with better Market Rank "
+                f"and less **{gap_cat}** impact; pivot **{alt or 'next tier'}** if you want raw rank."
                 if alt
                 else f"Target **{top}** to address the **{gap_cat}** gap before the tier drops."
             )
@@ -5635,7 +5641,7 @@ def _build_baseball_draft_coach_sections(
         scarcity_line = _draft_scarcity_line(bundle)
         risk_line = (
             "Risk profile: early roster is still forming — prioritize stable starters at scarce positions "
-            "before dart throws."
+            "before high-variance upside picks."
             if len(roster_list) <= 4
             else "Risk profile: mix of floor and upside based on your current roster construction."
         )
@@ -5711,7 +5717,7 @@ def _build_baseball_draft_coach_sections(
             f"If a **{needed[0]} run** starts → take the top name at that position." if needed else "If a position run starts → secure scarce positions early.",
             f"If you prioritize power → weight HR/OBP among available: {', '.join(avail_names[:3]) or 'see board'}.",
             f"If you prioritize speed → favor SB profiles (queue/watchlist: {', '.join(bundle.get('draft_queue')[:2] + bundle.get('watchlist')[:2]) or '—'}).",
-            f"If you prioritize safety → take **{top}** over upside dart throws.",
+            f"If you prioritize safety → take **{top}** over high-variance upside picks.",
         ]
         scarcity_line = _draft_scarcity_line(bundle)
         risk_line = _draft_risk_line(bundle, needed[0] if needed else (player or top), mode=mode)
@@ -5723,7 +5729,7 @@ def _build_baseball_draft_coach_sections(
             + ("; ".join(ranked[:4]) if ranked else "attach available_players / best_available in context.")
         )
         framing = (
-            f"Ranked by Fantasy Edge / model-vs-market gap from your saved available pool "
+            f"Ranked by Fantasy Edge from your saved available pool "
             f"in **{scoring_label}** scoring.{context_suffix}"
         )
         tradeoffs = (
@@ -5779,7 +5785,7 @@ def _build_baseball_draft_coach_sections(
             f"**{target}** is worth the risk as a sleeper when the upside (Fantasy Edge **{edge}**, "
             f"Model **{model}** vs Market **{market}**) outweighs the bust probability at this cost."
             if edge is not None
-            else f"**{target}** is worth the risk only if draft cost stays low — see Fantasy Edge vs market on your sleeper board."
+            else f"**{target}** is worth the risk only if draft cost stays low — check Fantasy Edge on your Fantasy Sleepers board."
         )
         framing = (
             f"Sleeper pool in context: {pool_line}. "
@@ -5834,7 +5840,7 @@ def _build_baseball_draft_coach_sections(
         )
         what_if = [
             "If you need floor → pass and take the safer recommendation.",
-            f"If you can absorb bust risk → **{target}** is a reasonable EV+ dart throw.",
+            f"If you can absorb bust risk → **{target}** is a reasonable upside pick at this cost.",
             f"If similar players remain available next round → compare tracked: {', '.join(bundle.get('tracked_players')[:3]) or '—'}.",
         ]
     elif mode == "risk":
