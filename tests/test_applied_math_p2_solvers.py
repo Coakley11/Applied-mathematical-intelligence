@@ -237,6 +237,28 @@ class TestDraftPickSolver(unittest.TestCase):
         self.assertIn("Eric Wagaman", result.short_answer)
         self.assertNotIn("Nathan Lukes", result.short_answer.split("Eric Wagaman")[0])
 
+    def test_team_fit_sleeper_question_anchors_named_player(self) -> None:
+        ctx = {
+            "question_player": "Eric Wagaman",
+            "sleepers": [{"player": "Nathan Lukes", "Fantasy Edge": 226}],
+            "sleeper_candidates": [
+                {"player": "Nathan Lukes", "Fantasy Edge": 226, "Market Rank": 350},
+                {"player": "Eric Wagaman", "Fantasy Edge": 18, "Market Rank": 140, "Primary Position": "1B"},
+            ],
+            "draft_snapshot": {
+                "user_roster": ["Aaron Judge"],
+                "recommended_players": [
+                    {"player": "Nathan Lukes", "Fantasy Edge": 226},
+                    {"player": "Eric Wagaman", "Fantasy Edge": 18, "Primary Position": "1B"},
+                ],
+            },
+            "needed_positions": ["1B"],
+        }
+        q = "Would Eric Wagaman help my fantasy team as a sleeper?"
+        result = solve_baseball_draft(ctx, q)
+        self.assertEqual(result.computed.get("draft_mode"), "player_why")
+        self.assertTrue(result.short_answer.strip().startswith("**Eric Wagaman**"))
+
     def test_risk_question_mentions_variance(self) -> None:
         ctx = {
             "draft_snapshot": {

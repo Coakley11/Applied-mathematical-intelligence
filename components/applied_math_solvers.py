@@ -3735,8 +3735,8 @@ def _extract_player_from_question_text(question: str) -> str:
     q = str(question or "").strip()
     low = q.lower()
     patterns = (
-        r"would (.+?) help (?:my team|my roster|the team|us)",
-        r"would (.+?) be (?:a )?good (?:fit|add|pick|draft|choice)(?: for my team)?",
+        r"would (.+?) help(?: my(?:\s+\w+){0,3}\s+team| my(?:\s+\w+){0,3}\s+roster| the team| us)",
+        r"would (.+?) be (?:a )?good (?:fit|add|pick|draft|choice)(?: for my(?:\s+\w+){0,3}\s+team)?",
         r"(?:should i )?(?:select|draft|take|grab)\s+(.+?)\s+at\s+(?:c\b|catcher|catchers|1b|2b|3b|ss|of|sp|rp)",
         r"(?:should i )?(?:select|draft|take|grab)\s+(.+?)\s+as a\s+",
         r"(?:should i )?(?:select|draft|take|grab)\s+(.+?)\s+now or wait",
@@ -3946,7 +3946,7 @@ def _draft_question_mode(question: str) -> str:
         return "roster_weakness"
     if re.search(r"which hitter.*(fit|fits).*(roster|team)|hitter.*fits.*better", low):
         return "hitter_fit"
-    if re.search(r"help (?:my team|my roster)", low) and (
+    if re.search(r"help(?: my(?:\s+\w+){0,3}\s+team| my(?:\s+\w+){0,3}\s+roster)", low) and (
         _extract_player_from_question_text(question) or re.search(r"would .+ help", low)
     ):
         return "player_why"
@@ -3973,7 +3973,10 @@ def _draft_question_mode(question: str) -> str:
         return "best_values"
     if "sleeper" in low and any(w in low for w in ("risk", "worth the risk", "how risky", "worth it")):
         return "sleeper_risk"
-    if "sleeper" in low:
+    if "sleeper" in low and not (
+        re.search(r"help(?: my(?:\s+\w+){0,3}\s+team| my(?:\s+\w+){0,3}\s+roster)", low)
+        and (_extract_player_from_question_text(question) or re.search(r"would .+ help", low))
+    ):
         return "sleeper"
     if any(w in low for w in ("risky", "take a risk", "risk in", "risk on", "how risky")):
         return "risk"
