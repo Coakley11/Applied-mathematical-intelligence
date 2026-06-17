@@ -140,6 +140,42 @@ class TestDraftPickSolver(unittest.TestCase):
         self.assertIn("Junior Caminero", result.short_answer)
         self.assertNotIn("this sleeper", result.short_answer.lower())
 
+    def test_sleeper_ranking_lists_upside_safety_balanced(self) -> None:
+        ctx = {
+            "routing_hint": "sleeper_ranking",
+            "intent": "sleeper_ranking_analysis",
+            "sleeper_candidates": [
+                {
+                    "player": "Nathan Lukes",
+                    "Fantasy Edge": 226,
+                    "Market Rank": 350,
+                    "Model Rank": 120,
+                    "ADP": 326,
+                    "Expert Std Dev": 10.0,
+                    "Current Production Score": 0.72,
+                    "Projected OPS": 0.78,
+                },
+                {
+                    "player": "Isaac Collins",
+                    "Fantasy Edge": 140,
+                    "Market Rank": 280,
+                    "Model Rank": 160,
+                    "ADP": 270,
+                    "Expert Std Dev": 35.0,
+                    "Current Production Score": 0.55,
+                    "Projected OPS": 0.74,
+                },
+            ],
+        }
+        q = "Which sleeper has the best combination of upside and safety?"
+        result = solve_baseball_draft(ctx, q)
+        self.assertEqual(result.computed.get("draft_mode"), "sleeper_ranking")
+        ans = result.short_answer
+        self.assertIn("Top upside", ans)
+        self.assertIn("Safest", ans)
+        self.assertIn("Best balanced", ans)
+        self.assertIn("Nathan Lukes", ans)
+
     def test_player_why_evaluates_named_player_against_board(self) -> None:
         ctx = {
             "question_player": "Jose Ramirez",

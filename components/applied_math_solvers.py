@@ -3794,6 +3794,92 @@ def _resolve_focus_player(question: str, ctx: dict[str, Any], bundle: dict[str, 
     return str(bundle.get("player") or "").strip()
 
 
+def _safe_metric_float(val: Any, default: float = 0.0) -> float:
+    try:
+        f = float(val)
+        if math.isnan(f) or math.isinf(f):
+            return default
+        return f
+    except (TypeError, ValueError):
+        return default
+
+
+def _sleeper_rank_scores(row: dict[str, Any]) -> dict[str, float]:
+    """Upside / safety / balanced scores from Fantasy Edge, ADP, disagreement, production."""
+    edge = _safe_metric_float(_player_metric(row, "Fantasy Edge", "fantasy_edge"))
+    market = _safe_metric_float(_player_metric(row, "Market Rank", "market_rank"), 400.0)
+    model = _safe_metric_float(_player_metric(row, "Model Rank", "model_rank"), 400.0)
+    adp = _safe_metric_float(_player_metric(row, "ADP Rank", "adp_rank", "ADP", "adp"), market)
+    efv = _safe_metric_float(_player_metric(row, "Expected Fantasy Value", "expected_fantasy_value"))
+    proj_ops = _safe_metric_float(_player_metric(row, "Projected OPS", "proj_OPS", "proj_ops"))
+    std = _safe_metric_float(_player_metric(row, "Expert Std Dev", "expert_std_dev"), 30.0)
+    risk = _safe_metric_float(_player_metric(row, "Risk / Disagreement", "risk_disagreement"), 30.0)
+    curr_prod = _safe_metric_float(_player_metric(row, "Current Production Score", "current_production_score"))
+    curr_rank = _safe_metric_float(_player_metric(row, "Current Rank", "current_rank"), 300.0)
+    rank_gap = market - model
+    adp_discount = market - adp if adp > 0 else rank_gap
+    upside = edge * 2.5 + rank_gap * 0.4 + efv * 0.25 + proj_ops * 40.0
+    safety = (
+        curr_prod * 2.0
+        + max(0.0, 40.0 - std) * 1.5
+        + max(0.0, 250.0 - curr_rank) * 0.15
+        + max(0.0, 50.0 - risk) * 0.4
+    )
+    stability = max(0.0, 40.0 - std) * 1.2 + max(0.0, 50.0 - risk) * 0.5
+    balanced = upside * 0.50 + safety * 0.35 + stability * 0.15
+    return {
+        "upside": upside,
+        "safety": safety,
+        "balanced": balanced,
+        "edge": edge,
+        "adp_discount": adp_discount,
+        "std": std,
+        "risk": risk,
+        "current_prod": curr_prod,
+        "stability": stability,
+    }
+
+
+def _sleeper_evidence_line(row: dict[str, Any], scores: dict[str, float]) -> str:
+    parts: list[str] = []
+    if scores.get("edge"):
+        parts.append(f"Fantasy Edge {scores['edge']:+.0f}")
+    if scores.get("adp_discount"):
+        parts.append(f"ADP discount {scores['adp_discount']:+.0f} ranks vs market")
+    adp = _player_metric(row, "ADP", "adp")
+    if adp is not None:
+        parts.append(f"ADP {adp}")
+    if scores.get("std"):
+        parts.append(f"Expert Std Dev {scores['std']:.1f}")
+    if scores.get("risk"):
+        parts.append(f"Risk/disagreement {scores['risk']:.1f}")
+    if scores.get("current_prod"):
+        parts.append(f"Current production {scores['current_prod']:.2f}")
+    if scores.get("stability"):
+        parts.append(f"Projection stability {scores['stability']:.1f}")
+    reason = str(_player_metric(row, "Reason", "reason") or "").strip()
+    if reason:
+        parts.append(reason[:140])
+    return "; ".join(parts)
+
+
+def _rank_sleeper_candidate_rows(rows: list[dict[str, Any]]) -> list[tuple[dict[str, Any], dict[str, float]]]:
+    ranked: list[tuple[dict[str, Any], dict[str, float]]] = []
+    for row in rows:
+        if isinstance(row, dict) and _draft_player_name(row):
+            ranked.append((row, _sleeper_rank_scores(row)))
+    return ranked
+
+
+def _best_sleeper_by_metric(
+    ranked: list[tuple[dict[str, Any], dict[str, float]]],
+    metric: str,
+) -> tuple[dict[str, Any], dict[str, float]] | None:
+    if not ranked:
+        return None
+    return max(ranked, key=lambda pair: pair[1].get(metric, 0.0))
+
+
 def _draft_question_mode(question: str) -> str:
     low = question.lower()
     if is_player_explanation_question(question):
@@ -3824,6 +3910,15 @@ def _draft_question_mode(question: str) -> str:
         return "hitter_fit"
     if any(p in low for p in ("fits my team", "fit my team", "fits my roster", "who fits")):
         return "team_fit"
+    if "sleeper" in low and (
+        "combination" in low
+        or ("upside" in low and ("safety" in low or "safest" in low))
+        or "balanced" in low
+        or "highest upside" in low
+        or re.search(r"best.{0,30}(upside|balance|combination|safety)", low)
+        or "risk-adjusted" in low
+    ):
+        return "sleeper_ranking"
     if ("safest" in low and "upside" in low) or re.search(r"safest.*upside|upside.*safest", low):
         return "safety_upside"
     if re.search(r"why is .+ the best", low) or (
@@ -5213,6 +5308,61 @@ def _build_baseball_draft_coach_sections(
         ]
         scarcity_line = _draft_scarcity_line(bundle)
         risk_line = _draft_risk_line(bundle, player or top, mode=mode)
+    elif mode == "sleeper_ranking":
+        candidates = [
+            r for r in (bundle.get("sleeper_candidates") or bundle.get("sleepers") or [])
+            if isinstance(r, dict)
+        ]
+        ranked = _rank_sleeper_candidate_rows(candidates)
+        upside_row: dict[str, Any] = {}
+        if not ranked:
+            direct = (
+                "No sleeper candidates in context — refresh the Fantasy Sleepers board "
+                "and ask again."
+            )
+            framing = "Sleeper ranking requires sleeper_candidates from the page snapshot."
+            tradeoffs = "Open Fantasy Sleepers & Busts, let the board load, then re-ask."
+            what_if = ["If the board is filtered too tightly → widen position/age filters."]
+        else:
+            upside_pick = _best_sleeper_by_metric(ranked, "upside")
+            safe_pick = _best_sleeper_by_metric(ranked, "safety")
+            bal_pick = _best_sleeper_by_metric(ranked, "balanced")
+            upside_row, upside_sc = upside_pick or ranked[0]
+            safe_row, safe_sc = safe_pick or ranked[0]
+            bal_row, bal_sc = bal_pick or ranked[0]
+            upside_name = _draft_player_name(upside_row)
+            safe_name = _draft_player_name(safe_row)
+            bal_name = _draft_player_name(bal_row)
+            direct = (
+                f"**Top upside: {upside_name}** · **Safest: {safe_name}** · "
+                f"**Best balanced: {bal_name}** across {len(ranked)} sleepers on your board."
+            )
+            framing = (
+                f"Ranked from your sleeper board using Fantasy Edge, ADP discount vs market, "
+                f"expert disagreement (Std Dev / risk score), current production, and projection stability."
+                + context_suffix
+            )
+            tradeoffs = "\n".join(
+                [
+                    f"**Upside ({upside_name}):** {_sleeper_evidence_line(upside_row, upside_sc)}",
+                    f"**Safety ({safe_name}):** {_sleeper_evidence_line(safe_row, safe_sc)}",
+                    f"**Balanced ({bal_name}):** {_sleeper_evidence_line(bal_row, bal_sc)}",
+                ]
+            )
+            what_if = [
+                f"If you need ceiling only → **{upside_name}** (Edge {upside_sc['edge']:+.0f}).",
+                f"If you need floor/variance control → **{safe_name}** (Std Dev {safe_sc['std']:.1f}).",
+                (
+                    f"If you want both → **{bal_name}** blends upside score "
+                    f"{bal_sc['upside']:.0f} with safety {bal_sc['safety']:.0f}."
+                ),
+            ]
+        scarcity_line = _draft_scarcity_line(bundle, available_count=len(ranked))
+        risk_line = _draft_risk_line(
+            bundle,
+            _draft_player_name(upside_row) if ranked else "",
+            mode="sleeper",
+        )
     elif mode == "safety_upside":
         safe = top
         upside = sleeper_names[0] if sleeper_names else (alt or top)
@@ -5770,6 +5920,9 @@ def solve_baseball_draft(
     proj_raw = ctx.get("draft_projection")
     parsed = _parse_draft_projection(proj_raw)
     mode = _draft_question_mode(question)
+    routing_hint = str(ctx.get("routing_hint") or ctx.get("intent") or "").lower()
+    if routing_hint in ("sleeper_ranking", "sleeper_ranking_analysis"):
+        mode = "sleeper_ranking"
 
     if current_pick is not None:
         bundle["pick"] = int(current_pick)
