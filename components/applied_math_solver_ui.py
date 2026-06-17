@@ -1008,6 +1008,89 @@ def _build_trace(
     )
 
 
+def _query_param(st: Any, name: str) -> str:
+    try:
+        raw = st.query_params.get(name)
+    except Exception:
+        return ""
+    if raw is None:
+        return ""
+    if isinstance(raw, list):
+        return str(raw[0] or "").strip()
+    return str(raw).strip()
+
+
+def _load_canonical_music_insight(st: Any, context: dict[str, Any]) -> dict[str, Any]:
+    ctx = dict(context or {})
+    instant = ctx.get("instant_insight")
+    if isinstance(instant, dict) and str(instant.get("conclusion") or "").strip():
+        return instant
+    try:
+        from applied_math_return_insight import (
+            load_applied_math_insight,
+            load_applied_math_insight_for_question,
+        )
+    except ImportError:
+        return {}
+    url_iid = _query_param(st, "suite_ami_insight") or str(st.session_state.get("_suite_ami_insight") or "").strip()
+    if url_iid:
+        loaded = load_applied_math_insight(url_iid, source_app="music")
+        if str(loaded.get("conclusion") or "").strip():
+            return loaded
+    qid = str(st.session_state.get("_suite_ai_question_id") or ctx.get("question_id") or "").strip()
+    if qid:
+        loaded = load_applied_math_insight_for_question(qid, source_app="music")
+        if str(loaded.get("conclusion") or "").strip():
+            return loaded
+    return {}
+
+
+def _render_canonical_music_answer(
+    st: Any,
+    *,
+    question: str,
+    source_app: str,
+    source_page: str,
+    context: dict[str, Any],
+    canonical: dict[str, Any],
+) -> SolverRunTrace:
+    st.caption("Showing the same Music Coach answer from your practice page.")
+    st.markdown(str(canonical.get("conclusion") or ""))
+    method = str(canonical.get("method") or canonical.get("model_name") or "").strip()
+    if method:
+        st.markdown(f"**Coach guidance:** {method}")
+    assumptions = canonical.get("assumptions") or []
+    if assumptions:
+        st.markdown("**Assumptions:**")
+        for line in assumptions[:6]:
+            st.markdown(f"- {line}")
+    build_id = str(canonical.get("solver_build_id") or "").strip()
+    if build_id:
+        st.caption(f"Music Coach build: `{build_id}`")
+    trace = SolverRunTrace(
+        renderer_path="render_canonical_music_insight",
+        used_fallback=False,
+        fallback_error="",
+        generic_flow_rendered=False,
+        source_app=source_app,
+        source_page=source_page,
+        question=question,
+        problem_type_id=str(canonical.get("problem_type") or "music_canonical"),
+        problem_type=str(canonical.get("problem_type") or "music_canonical"),
+        router_confidence=1.0,
+        solver_id="music_instant_canonical",
+        fields_available=[],
+        fields_missing=[],
+        context_keys=sorted(context.keys()),
+        conclusion=str(canonical.get("conclusion") or ""),
+        confidence_pct=canonical.get("confidence_pct"),
+        reasons_count=0,
+        partial=False,
+    )
+    st.session_state["_ami_last_solver_trace"] = trace.to_dict()
+    return trace
+
+
 def render_suite_solver_answer(
     st: Any,
     *,
@@ -1018,6 +1101,19 @@ def render_suite_solver_answer(
 ) -> SolverRunTrace:
     """Route, solve, render interactive Applied Math answer for suite questions."""
     ctx = dict(context or {})
+    app_key = str(source_app or ctx.get("source_app") or "").strip().lower()
+    if app_key == "music":
+        canonical = _load_canonical_music_insight(st, ctx)
+        if canonical and str(canonical.get("conclusion") or "").strip():
+            return _render_canonical_music_answer(
+                st,
+                question=question,
+                source_app=source_app,
+                source_page=source_page,
+                context=ctx,
+                canonical=canonical,
+            )
+
     used_fallback = False
     fallback_error = ""
     corr_key = _purpose_correction_key(question)

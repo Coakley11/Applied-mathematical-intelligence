@@ -78,6 +78,10 @@ def _load_suite_context() -> tuple[str, str, str, dict]:
                 st.session_state["_suite_ai_question"] = blob_question
                 st.session_state["ps_library_problem"] = blob_question
             blob_ctx = payload.get("context") if isinstance(payload.get("context"), dict) else {}
+            instant = payload.get("instant_insight")
+            if isinstance(instant, dict) and instant:
+                blob_ctx = dict(blob_ctx)
+                blob_ctx["instant_insight"] = instant
             if blob_ctx:
                 ctx_dict = blob_ctx
                 load_source = str(payload.get("blob_load_source") or "saved_items")

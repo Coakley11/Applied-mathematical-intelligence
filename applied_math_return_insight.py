@@ -813,6 +813,42 @@ def load_applied_math_insight(insight_id: str, *, source_app: str = "") -> dict[
     return best
 
 
+def load_applied_math_insight_for_question(question_id: str, *, source_app: str = "") -> dict[str, Any]:
+    """Load the stored insight tied to a question_id (Music instant / canonical answer)."""
+    qid = str(question_id or "").strip()
+    if not qid:
+        return {}
+    app_filter = str(source_app or "").strip().lower()
+    search_apps: list[str] = []
+    if app_filter:
+        search_apps.append(app_filter)
+    for app_key in ("music", "applied_intelligence"):
+        if app_key not in search_apps:
+            search_apps.append(app_key)
+    best: dict[str, Any] = {}
+    best_score = -1
+    try:
+        from suite_account import load_saved_items
+
+        for app_key in search_apps:
+            rows = load_saved_items(app=app_key, item_type=INSIGHT_ITEM_TYPE, limit=100)
+            for row in rows:
+                payload = row.get("payload")
+                if not isinstance(payload, dict):
+                    continue
+                if str(payload.get("question_id") or "") != qid:
+                    continue
+                score = _insight_blob_restore_score(payload)
+                if payload.get("canonical_instant"):
+                    score += 10
+                if score > best_score:
+                    best = dict(payload)
+                    best_score = score
+    except Exception as exc:
+        log.warning("load_applied_math_insight_for_question failed: %s", exc)
+    return best
+
+
 def _get_dismissed_insight_ids(st: Any) -> set[str]:
     raw = st.session_state.get(SESSION_DISMISSED_KEY)
     if not isinstance(raw, (list, tuple, set)):
