@@ -1066,7 +1066,31 @@ def _render_canonical_instant_answer(
     problem_type: str,
 ) -> SolverRunTrace:
     st.caption(caption)
-    st.markdown(str(canonical.get("conclusion") or ""))
+    sections = canonical.get("analyst_sections")
+    if isinstance(sections, dict) and sections:
+        exp = str(context.get("experience_mode") or "").lower()
+        beginner = "beginner" in exp
+        section_order = (
+            ("direct_answer", "Direct Answer"),
+            ("portfolio_analyst_view", "What This Means" if beginner else "Portfolio Analyst View"),
+            ("key_variables", "Key Numbers" if beginner else "Key Variables"),
+            ("tradeoffs", "Tradeoffs"),
+            ("what_if_scenarios", "What-If Scenarios"),
+            ("recommended_actions", "What You Could Do" if beginner else "Recommended Actions"),
+            ("risk_notes", "Important Notes" if beginner else "Risk Notes"),
+        )
+        if beginner:
+            section_order = tuple(x for x in section_order if x[0] != "what_if_scenarios")
+        rendered = False
+        for key, label in section_order:
+            body = str(sections.get(key) or "").strip()
+            if body:
+                st.markdown(f"**{label}**\n\n{body}")
+                rendered = True
+        if not rendered:
+            st.markdown(str(canonical.get("conclusion") or ""))
+    else:
+        st.markdown(str(canonical.get("conclusion") or ""))
     method = str(canonical.get("method") or canonical.get("model_name") or "").strip()
     if method:
         st.markdown(f"**{guidance_label}:** {method}")
