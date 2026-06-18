@@ -1020,7 +1020,7 @@ def _query_param(st: Any, name: str) -> str:
     return str(raw).strip()
 
 
-def _load_canonical_music_insight(st: Any, context: dict[str, Any]) -> dict[str, Any]:
+def _load_canonical_instant_insight(st: Any, context: dict[str, Any], *, source_app: str) -> dict[str, Any]:
     ctx = dict(context or {})
     instant = ctx.get("instant_insight")
     if isinstance(instant, dict) and str(instant.get("conclusion") or "").strip():
@@ -1032,17 +1032,74 @@ def _load_canonical_music_insight(st: Any, context: dict[str, Any]) -> dict[str,
         )
     except ImportError:
         return {}
+    app_key = str(source_app or ctx.get("source_app") or "").strip().lower()
     url_iid = _query_param(st, "suite_ami_insight") or str(st.session_state.get("_suite_ami_insight") or "").strip()
     if url_iid:
-        loaded = load_applied_math_insight(url_iid, source_app="music")
+        loaded = load_applied_math_insight(url_iid, source_app=app_key)
         if str(loaded.get("conclusion") or "").strip():
             return loaded
     qid = str(st.session_state.get("_suite_ai_question_id") or ctx.get("question_id") or "").strip()
     if qid:
-        loaded = load_applied_math_insight_for_question(qid, source_app="music")
+        loaded = load_applied_math_insight_for_question(qid, source_app=app_key)
         if str(loaded.get("conclusion") or "").strip():
             return loaded
     return {}
+
+
+def _load_canonical_music_insight(st: Any, context: dict[str, Any]) -> dict[str, Any]:
+    return _load_canonical_instant_insight(st, context, source_app="music")
+
+
+def _render_canonical_instant_answer(
+    st: Any,
+    *,
+    question: str,
+    source_app: str,
+    source_page: str,
+    context: dict[str, Any],
+    canonical: dict[str, Any],
+    caption: str,
+    guidance_label: str,
+    build_label: str,
+    renderer_path: str,
+    solver_id: str,
+    problem_type: str,
+) -> SolverRunTrace:
+    st.caption(caption)
+    st.markdown(str(canonical.get("conclusion") or ""))
+    method = str(canonical.get("method") or canonical.get("model_name") or "").strip()
+    if method:
+        st.markdown(f"**{guidance_label}:** {method}")
+    assumptions = canonical.get("assumptions") or []
+    if assumptions:
+        st.markdown("**Assumptions:**")
+        for line in assumptions[:6]:
+            st.markdown(f"- {line}")
+    build_id = str(canonical.get("solver_build_id") or "").strip()
+    if build_id:
+        st.caption(f"{build_label}: `{build_id}`")
+    trace = SolverRunTrace(
+        renderer_path=renderer_path,
+        used_fallback=False,
+        fallback_error="",
+        generic_flow_rendered=False,
+        source_app=source_app,
+        source_page=source_page,
+        question=question,
+        problem_type_id=problem_type,
+        problem_type=problem_type,
+        router_confidence=1.0,
+        solver_id=solver_id,
+        fields_available=[],
+        fields_missing=[],
+        context_keys=sorted(context.keys()),
+        conclusion=str(canonical.get("conclusion") or ""),
+        confidence_pct=canonical.get("confidence_pct"),
+        reasons_count=0,
+        partial=False,
+    )
+    st.session_state["_ami_last_solver_trace"] = trace.to_dict()
+    return trace
 
 
 def _render_canonical_music_answer(
@@ -1054,41 +1111,45 @@ def _render_canonical_music_answer(
     context: dict[str, Any],
     canonical: dict[str, Any],
 ) -> SolverRunTrace:
-    st.caption("Showing the same Music Coach answer from your practice page.")
-    st.markdown(str(canonical.get("conclusion") or ""))
-    method = str(canonical.get("method") or canonical.get("model_name") or "").strip()
-    if method:
-        st.markdown(f"**Coach guidance:** {method}")
-    assumptions = canonical.get("assumptions") or []
-    if assumptions:
-        st.markdown("**Assumptions:**")
-        for line in assumptions[:6]:
-            st.markdown(f"- {line}")
-    build_id = str(canonical.get("solver_build_id") or "").strip()
-    if build_id:
-        st.caption(f"Music Coach build: `{build_id}`")
-    trace = SolverRunTrace(
-        renderer_path="render_canonical_music_insight",
-        used_fallback=False,
-        fallback_error="",
-        generic_flow_rendered=False,
+    return _render_canonical_instant_answer(
+        st,
+        question=question,
         source_app=source_app,
         source_page=source_page,
-        question=question,
-        problem_type_id=str(canonical.get("problem_type") or "music_canonical"),
-        problem_type=str(canonical.get("problem_type") or "music_canonical"),
-        router_confidence=1.0,
+        context=context,
+        canonical=canonical,
+        caption="Showing the same Music Coach answer from your practice page.",
+        guidance_label="Coach guidance",
+        build_label="Music Coach build",
+        renderer_path="render_canonical_music_insight",
         solver_id="music_instant_canonical",
-        fields_available=[],
-        fields_missing=[],
-        context_keys=sorted(context.keys()),
-        conclusion=str(canonical.get("conclusion") or ""),
-        confidence_pct=canonical.get("confidence_pct"),
-        reasons_count=0,
-        partial=False,
+        problem_type=str(canonical.get("problem_type") or "music_canonical"),
     )
-    st.session_state["_ami_last_solver_trace"] = trace.to_dict()
-    return trace
+
+
+def _render_canonical_investment_answer(
+    st: Any,
+    *,
+    question: str,
+    source_app: str,
+    source_page: str,
+    context: dict[str, Any],
+    canonical: dict[str, Any],
+) -> SolverRunTrace:
+    return _render_canonical_instant_answer(
+        st,
+        question=question,
+        source_app=source_app,
+        source_page=source_page,
+        context=context,
+        canonical=canonical,
+        caption="Showing the same Investment Insight from your portfolio page.",
+        guidance_label="Analyst framing",
+        build_label="Investment AMI build",
+        renderer_path="render_canonical_investment_insight",
+        solver_id="investment_instant_canonical",
+        problem_type=str(canonical.get("problem_type") or "investment_canonical"),
+    )
 
 
 def render_suite_solver_answer(
@@ -1106,6 +1167,17 @@ def render_suite_solver_answer(
         canonical = _load_canonical_music_insight(st, ctx)
         if canonical and str(canonical.get("conclusion") or "").strip():
             return _render_canonical_music_answer(
+                st,
+                question=question,
+                source_app=source_app,
+                source_page=source_page,
+                context=ctx,
+                canonical=canonical,
+            )
+    if app_key == "investment":
+        canonical = _load_canonical_instant_insight(st, ctx, source_app="investment")
+        if canonical and str(canonical.get("conclusion") or "").strip():
+            return _render_canonical_investment_answer(
                 st,
                 question=question,
                 source_app=source_app,
