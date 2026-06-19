@@ -41,7 +41,9 @@ class TestSuiteAccountStorage(unittest.TestCase):
         import suite_account as sa
 
         storage = MagicMock()
-        with patch.object(sa, "_import_storage", return_value=storage):
+        with patch.object(sa, "_import_storage", return_value=storage), patch(
+            "suite_workspace.resolve_workspace_id", return_value="daniel"
+        ):
             sa.remember_saved_item(
                 "investment",
                 "applied_math_insight",
@@ -57,15 +59,35 @@ class TestSuiteAccountStorage(unittest.TestCase):
             payload={"insight_id": "abc123"},
         )
 
+    def test_remember_saved_item_scopes_ariel_workspace(self) -> None:
+        import suite_account as sa
+
+        storage = MagicMock()
+        with patch.object(sa, "_import_storage", return_value=storage), patch(
+            "suite_workspace.resolve_workspace_id", return_value="ariel"
+        ):
+            sa.remember_saved_item(
+                "applied_intelligence",
+                "applied_math_insight",
+                "abc123",
+                title="Test",
+                payload={},
+            )
+        self.assertEqual(storage.upsert_saved_item.call_args[0][0], "applied_intelligence__ariel")
+
     def test_load_saved_items_uses_resolved_storage(self) -> None:
         import suite_account as sa
 
         storage = MagicMock()
         storage.load_saved_items.return_value = [{"item_key": "q1", "payload": {}}]
-        with patch.object(sa, "_import_storage", return_value=storage):
+        with patch.object(sa, "_import_storage", return_value=storage), patch(
+            "suite_workspace.resolve_workspace_id", return_value="ariel"
+        ):
             rows = sa.load_saved_items(app="baseball", item_type="analytical_question_context", limit=5)
         self.assertEqual(len(rows), 1)
-        storage.load_saved_items.assert_called_once()
+        storage.load_saved_items.assert_called_once_with(
+            app="baseball__ariel", item_type="analytical_question_context", limit=5
+        )
 
     def test_remember_saved_item_returns_write_result(self) -> None:
         import suite_account as sa

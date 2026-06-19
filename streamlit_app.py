@@ -30,6 +30,13 @@ st.set_page_config(
 )
 
 try:
+    from suite_workspace import init_suite_workspace
+
+    init_suite_workspace(st)
+except Exception:
+    pass
+
+try:
     from suite_cloud_state import has_resume_query_params
     from suite_resume_launch import apply_suite_resume_launch, hydrate_applied_intelligence_from_url
 
