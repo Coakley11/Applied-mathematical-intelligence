@@ -1107,6 +1107,73 @@ def _render_canonical_instant_answer(
     build_id = str(canonical.get("solver_build_id") or "").strip()
     if build_id:
         st.caption(f"{build_label}: `{build_id}`")
+    if deep_dive and str(source_app or "").strip().lower() == "investment":
+        try:
+            from investment_ami_instant_solver import ALLOCATION_SOLVER_VERSION, INVESTMENT_AMI_BUILD_ID
+
+            st.caption(
+                f"Live allocation module: `{INVESTMENT_AMI_BUILD_ID}` "
+                f"(solver `{ALLOCATION_SOLVER_VERSION}`)"
+            )
+            if build_id and build_id != INVESTMENT_AMI_BUILD_ID:
+                st.warning(
+                    "Displayed insight build differs from the live allocation module — "
+                    "move a slider or reopen the question to refresh."
+                )
+            diag = canonical.get("allocation_engine_diag")
+            if not isinstance(diag, dict) or not diag:
+                params = st.session_state.get("_ami_scenario_params")
+                if not isinstance(params, dict):
+                    params = canonical.get("scenario_params")
+                kn = canonical.get("key_numbers") if isinstance(canonical.get("key_numbers"), dict) else {}
+                if not isinstance(params, dict) and isinstance(kn.get("scenario_params"), dict):
+                    params = kn.get("scenario_params")
+                if isinstance(params, dict) and params.get("allocation_overrides"):
+                    from investment_ami_allocation import build_allocation_engine_diag
+
+                    kn_weights = kn.get("holdings_weights") if isinstance(kn.get("holdings_weights"), dict) else {}
+                    diag_ctx = {
+                        "experience_mode": canonical.get("experience_mode") or context.get("experience_mode") or "",
+                        "scenario_params": dict(params),
+                    }
+                    if kn_weights:
+                        diag_ctx["current_weights"] = {str(t).upper(): float(w) for t, w in kn_weights.items()}
+                    diag = build_allocation_engine_diag(diag_ctx)
+            if isinstance(diag, dict) and diag:
+                with st.expander("Allocation engine diagnostics", expanded=False):
+                    st.markdown(
+                        "**Input portfolio**\n"
+                        + "\n".join(
+                            f"- **{t}**: {p:.1f}%"
+                            for t, p in sorted(
+                                (diag.get("input_portfolio") or {}).items(),
+                                key=lambda x: x[1],
+                                reverse=True,
+                            )
+                        )
+                    )
+                    st.markdown("**Parsed scenario params**")
+                    st.json(diag.get("parsed_scenario_params") or {})
+                    st.markdown("**Computed proposed portfolio**")
+                    st.json(diag.get("computed_proposed_portfolio") or {})
+                    st.markdown("**Net allocation changes**")
+                    st.json(diag.get("net_allocation_changes") or {})
+                    st.markdown("**Overrides / funding / realloc (raw → filtered)**")
+                    st.json(
+                        {
+                            "allocation_overrides": diag.get("allocation_overrides"),
+                            "allocation_increase_funding_raw": diag.get("allocation_increase_funding_raw"),
+                            "allocation_increase_funding_filtered": diag.get("allocation_increase_funding_filtered"),
+                            "allocation_reallocations_raw": diag.get("allocation_reallocations_raw"),
+                            "allocation_reallocations_filtered": diag.get("allocation_reallocations_filtered"),
+                            "funding_breakdown": diag.get("funding_breakdown"),
+                            "module_build_id": diag.get("module_build_id"),
+                            "allocation_solver_version": diag.get("allocation_solver_version"),
+                            "insight_build_id": build_id or None,
+                        }
+                    )
+        except ImportError:
+            pass
     trace = SolverRunTrace(
         renderer_path=renderer_path,
         used_fallback=False,
