@@ -1021,29 +1021,12 @@ def _query_param(st: Any, name: str) -> str:
 
 
 def _load_canonical_instant_insight(st: Any, context: dict[str, Any], *, source_app: str) -> dict[str, Any]:
-    ctx = dict(context or {})
-    instant = ctx.get("instant_insight")
-    if isinstance(instant, dict) and str(instant.get("conclusion") or "").strip():
-        return instant
     try:
-        from applied_math_return_insight import (
-            load_applied_math_insight,
-            load_applied_math_insight_for_question,
-        )
+        from applied_math_return_insight import resolve_canonical_instant_insight
+
+        return resolve_canonical_instant_insight(st, context, source_app=source_app)
     except ImportError:
         return {}
-    app_key = str(source_app or ctx.get("source_app") or "").strip().lower()
-    url_iid = _query_param(st, "suite_ami_insight") or str(st.session_state.get("_suite_ami_insight") or "").strip()
-    if url_iid:
-        loaded = load_applied_math_insight(url_iid, source_app=app_key)
-        if str(loaded.get("conclusion") or "").strip():
-            return loaded
-    qid = str(st.session_state.get("_suite_ai_question_id") or ctx.get("question_id") or "").strip()
-    if qid:
-        loaded = load_applied_math_insight_for_question(qid, source_app=app_key)
-        if str(loaded.get("conclusion") or "").strip():
-            return loaded
-    return {}
 
 
 def _load_canonical_music_insight(st: Any, context: dict[str, Any]) -> dict[str, Any]:
@@ -1184,6 +1167,7 @@ def _render_canonical_investment_answer(
 ) -> SolverRunTrace:
     st.caption("Deep-dive analysis — explore assumptions, tradeoffs, and scenarios below.")
     try:
+        from applied_math_return_insight import SESSION_PENDING_KEY
         from investment_ami_sliders import render_ami_assumption_controls
 
         slider_data = {
@@ -1192,10 +1176,15 @@ def _render_canonical_investment_answer(
             "source_page": source_page,
             "question": question,
         }
-        if render_ami_assumption_controls(st, slider_data):
-            st.rerun()
+        refreshed = render_ami_assumption_controls(st, slider_data)
+        if refreshed:
+            updated = st.session_state.get(SESSION_PENDING_KEY)
+            if isinstance(updated, dict) and updated.get("conclusion"):
+                canonical = updated
     except ImportError:
         pass
+    except Exception as exc:
+        st.warning(f"Assumption controls could not update the analysis ({exc}). Showing the last result.")
     return _render_canonical_instant_answer(
         st,
         question=question,
