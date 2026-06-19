@@ -131,8 +131,14 @@ try:
     )
 except Exception:
     _ami_git_head = "unknown"
-st.sidebar.caption(f"Applied Mathematical Intelligence · v{VERSION}")
-st.sidebar.caption(f"**AMI insight store:** `{_ami_store_marker}` · commit `{_ami_git_head}` · branch `dev`")
+try:
+    from suite_workspace import can_show_developer_tools
+
+    if can_show_developer_tools(st=st):
+        st.sidebar.caption(f"Applied Mathematical Intelligence · v{VERSION}")
+        st.sidebar.caption(f"**AMI insight store:** `{_ami_store_marker}` · commit `{_ami_git_head}` · branch `dev`")
+except ImportError:
+    pass
 
 nav_index = (
     PRIMARY_NAV.index(st.session_state.view_mode)
