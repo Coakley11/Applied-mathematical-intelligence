@@ -1064,29 +1064,47 @@ def _render_canonical_instant_answer(
     renderer_path: str,
     solver_id: str,
     problem_type: str,
+    deep_dive: bool = False,
 ) -> SolverRunTrace:
-    st.caption(caption)
+    if caption:
+        st.caption(caption)
     sections = canonical.get("analyst_sections")
     if isinstance(sections, dict) and sections:
         exp = str(context.get("experience_mode") or "").lower()
         beginner = "beginner" in exp
-        section_order = (
-            ("direct_answer", "Direct Answer"),
-            ("portfolio_analyst_view", "What This Means" if beginner else "Portfolio Analyst View"),
-            ("key_variables", "Key Numbers" if beginner else "Key Variables"),
-            ("tradeoffs", "Tradeoffs"),
-            ("what_if_scenarios", "What-If Scenarios"),
-            ("recommended_actions", "What You Could Do" if beginner else "Recommended Actions"),
-            ("risk_notes", "Important Notes" if beginner else "Risk Notes"),
-        )
-        if beginner:
-            section_order = tuple(x for x in section_order if x[0] != "what_if_scenarios")
-        rendered = False
-        for key, label in section_order:
-            body = str(sections.get(key) or "").strip()
+        try:
+            from investment_ami_answer_format import render_ami_deep_dive_markdown
+
+            body = render_ami_deep_dive_markdown(sections, beginner=beginner)
             if body:
-                st.markdown(f"**{label}**\n\n{body}")
+                st.markdown(body)
                 rendered = True
+            else:
+                rendered = False
+        except ImportError:
+            rendered = False
+        if not rendered:
+            section_order = (
+                ("direct_answer", "Direct Answer"),
+                ("portfolio_analyst_view", "What This Means" if beginner else "Portfolio Analyst View"),
+                ("current_strengths", "Current Strengths"),
+                ("current_weaknesses", "Current Weaknesses"),
+                ("potential_increases", "Potential Increases"),
+                ("potential_reductions", "Potential Reductions"),
+                ("key_variables", "Key Numbers" if beginner else "Key Variables"),
+                ("tradeoffs", "Tradeoffs"),
+                ("what_if_scenarios", "What-If Scenarios"),
+                ("recommended_actions", "What You Could Do" if beginner else "Recommended Actions"),
+                ("risk_notes", "Important Notes" if beginner else "Risk Notes"),
+            )
+            if beginner:
+                section_order = tuple(x for x in section_order if x[0] != "what_if_scenarios")
+            rendered = False
+            for key, label in section_order:
+                body = str(sections.get(key) or "").strip()
+                if body:
+                    st.markdown(f"**{label}**\n\n{body}")
+                    rendered = True
         if not rendered:
             st.markdown(str(canonical.get("conclusion") or ""))
     else:
@@ -1097,8 +1115,12 @@ def _render_canonical_instant_answer(
     assumptions = canonical.get("assumptions") or []
     if assumptions:
         st.markdown("**Assumptions:**")
-        for line in assumptions[:6]:
+        for line in assumptions[:8]:
             st.markdown(f"- {line}")
+    conf = canonical.get("confidence")
+    if conf:
+        extra = f" ({canonical.get('confidence_pct')}%)" if canonical.get("confidence_pct") else ""
+        st.caption(f"Confidence: **{conf}**{extra}")
     build_id = str(canonical.get("solver_build_id") or "").strip()
     if build_id:
         st.caption(f"{build_label}: `{build_id}`")
@@ -1160,6 +1182,20 @@ def _render_canonical_investment_answer(
     context: dict[str, Any],
     canonical: dict[str, Any],
 ) -> SolverRunTrace:
+    st.caption("Deep-dive analysis — explore assumptions, tradeoffs, and scenarios below.")
+    try:
+        from investment_ami_sliders import render_ami_assumption_controls
+
+        slider_data = {
+            **canonical,
+            "source_app": "investment",
+            "source_page": source_page,
+            "question": question,
+        }
+        if render_ami_assumption_controls(st, slider_data):
+            st.rerun()
+    except ImportError:
+        pass
     return _render_canonical_instant_answer(
         st,
         question=question,
@@ -1167,12 +1203,13 @@ def _render_canonical_investment_answer(
         source_page=source_page,
         context=context,
         canonical=canonical,
-        caption="Showing the same Investment Insight from your portfolio page.",
+        caption="",
         guidance_label="Analyst framing",
         build_label="Investment AMI build",
         renderer_path="render_canonical_investment_insight",
         solver_id="investment_instant_canonical",
         problem_type=str(canonical.get("problem_type") or "investment_canonical"),
+        deep_dive=True,
     )
 
 

@@ -1,7 +1,7 @@
 """
 Per-app persistent user state for Daniel AI Streamlit apps.
 
-Local JSON under ``data/{app_id}_user_state.json`` plus optional Supabase
+Local JSON under ``data/workspaces/{workspace_id}/{app_id}_user_state.json`` plus optional Supabase
 ``metrics.full_session`` for cross-device restore on direct app open.
 """
 
@@ -40,9 +40,22 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
-def state_file_path(app_id: str) -> Path:
+def state_file_path(app_id: str, workspace_id: str | None = None) -> Path:
+    from suite_workspace import migrate_legacy_app_state_to_daniel, normalize_workspace_id, resolve_workspace_id, workspace_dir
+
     safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in str(app_id or "app"))
-    return DATA_DIR / f"{safe}_user_state.json"
+    ws = resolve_workspace_id(explicit=workspace_id) if workspace_id else resolve_workspace_id()
+    if ws == normalize_workspace_id("daniel"):
+        migrate_legacy_app_state_to_daniel(app_id)
+    path = workspace_dir(ws) / f"{safe}_user_state.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def legacy_state_file_path(app_id: str) -> Path:
+    from suite_workspace import legacy_state_file_path as _legacy
+
+    return _legacy(app_id)
 
 
 def _read_json(path: Path) -> dict[str, Any] | None:
@@ -80,9 +93,12 @@ def _migrate_legacy_combined(app_id: str) -> dict[str, Any] | None:
     return out
 
 
-def _load_raw(app_id: str) -> tuple[dict[str, Any], str | None, str | None]:
+def _load_raw(
+    app_id: str,
+    workspace_id: str | None = None,
+) -> tuple[dict[str, Any], str | None, str | None]:
     """Return ``(state_dict, warning, saved_at_iso)``."""
-    path = state_file_path(app_id)
+    path = state_file_path(app_id, workspace_id)
     raw = _read_json(path)
     if raw is None:
         raw = _migrate_legacy_combined(app_id)
@@ -109,7 +125,7 @@ def load_user_state(app_id: str) -> tuple[dict[str, Any], str | None]:
     return state, warning
 
 
-def save_user_state(app_id: str, state: dict[str, Any]) -> bool:
+def save_user_state(app_id: str, state: dict[str, Any], *, workspace_id: str | None = None) -> bool:
     if not isinstance(state, dict):
         return False
     payload = {
@@ -118,11 +134,11 @@ def save_user_state(app_id: str, state: dict[str, Any]) -> bool:
         "saved_at": _utc_now_iso(),
         "state": state,
     }
-    return _write_json(state_file_path(app_id), payload)
+    return _write_json(state_file_path(app_id, workspace_id), payload)
 
 
-def reset_user_state(app_id: str) -> bool:
-    path = state_file_path(app_id)
+def reset_user_state(app_id: str, *, workspace_id: str | None = None) -> bool:
+    path = state_file_path(app_id, workspace_id)
     try:
         if path.is_file():
             path.unlink()
@@ -856,6 +872,15 @@ def _set_restore_skip_reason(st: Any, reason: str) -> None:
     st.session_state["_suite_persist_restore_skip_reason"] = reason
 
 
+def _restore_cloud_first(has_disk_state: bool) -> bool:
+    try:
+        from suite_workspace import workspace_restore_cloud_first
+
+        return workspace_restore_cloud_first(has_disk_state=has_disk_state)
+    except ImportError:
+        return not has_disk_state
+
+
 def restore_once(
     st: Any,
     app_id: str,
@@ -936,7 +961,7 @@ def restore_once(
             disk_state,
             disk_ts,
             local_dirty=local_dirty,
-            cloud_first=True,
+            cloud_first=_restore_cloud_first(bool(disk_state)),
         )
         state = picked.state
         pick_source = picked.source

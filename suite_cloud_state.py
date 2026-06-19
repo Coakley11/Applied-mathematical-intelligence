@@ -52,7 +52,6 @@ _RESUME_QUERY_KEYS: dict[str, tuple[str, ...]] = {
         "suite_fl_view",
     ),
     "applied_intelligence": (
-        "suite_resume",
         "suite_page",
         "suite_lesson",
         "suite_ai_question",
@@ -77,12 +76,6 @@ _WORKSPACE_RESTORE_BLOCKING_QUERY_KEYS: dict[str, tuple[str, ...]] = {
         "suite_page",
         "suite_ami_insight",
         "suite_ai_question_id",
-    ),
-    "applied_intelligence": (
-        "suite_resume",
-        "suite_page",
-        "suite_ai_question_id",
-        "suite_ai_question",
     ),
 }
 
@@ -329,6 +322,15 @@ def probe_cloud_restore_diagnostics(st: Any, app_id: str) -> dict[str, Any]:
     return diag
 
 
+def _cloud_storage_app_id(app_id: str) -> str:
+    try:
+        from suite_workspace import scoped_cloud_app_id
+
+        return scoped_cloud_app_id(app_id)
+    except ImportError:
+        return str(app_id or "").strip()
+
+
 def load_cloud_full_session(app_id: str) -> tuple[dict[str, Any], str | None]:
     """Return ``(session_dict, updated_at_iso)`` from cloud, or empty dict."""
     try:
@@ -340,7 +342,7 @@ def load_cloud_full_session(app_id: str) -> tuple[dict[str, Any], str | None]:
     try:
         storage, _ = _import_storage()
 
-        app_key = storage.normalize_app_key(app_id)
+        app_key = storage.normalize_app_key(_cloud_storage_app_id(app_id))
         row = storage.load_current_states().get(app_key) or {}
         if not isinstance(row, dict):
             return {}, None
@@ -373,7 +375,7 @@ def save_cloud_full_session(
         return False
     try:
         storage, _ = _import_storage()
-        app_key = storage.normalize_app_key(app_id)
+        app_key = storage.normalize_app_key(_cloud_storage_app_id(app_id))
         storage.save_current_state(
             app_key,
             page=page or "",
@@ -395,7 +397,7 @@ def clear_cloud_full_session(app_id: str) -> None:
         return
     try:
         storage, _ = _import_storage()
-        app_key = storage.normalize_app_key(app_id)
+        app_key = storage.normalize_app_key(_cloud_storage_app_id(app_id))
         storage.save_current_state(
             app_key,
             page="",
