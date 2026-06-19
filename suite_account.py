@@ -39,6 +39,11 @@ def _scoped_storage_app(app: str | None) -> str | None:
         return str(app or "").strip() or None
 
 
+def scoped_storage_app(app: str) -> str:
+    """Public helper: workspace-scoped ``suite_saved_items`` / cloud app key."""
+    return _scoped_storage_app(app) or str(app or "").strip()
+
+
 def _import_storage():
     """Cloud-first on Streamlit deploys; optional local suite_storage for dev."""
     try:

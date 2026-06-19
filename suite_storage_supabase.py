@@ -105,6 +105,26 @@ def normalize_app_key(app: str) -> str:
     return cleaned
 
 
+def _scoped_resume_app(app: str) -> str:
+    """Workspace-scoped cloud key for resume rows (Daniel keeps legacy unscoped)."""
+    app_key = normalize_app_key(app)
+    try:
+        from suite_workspace import scoped_cloud_app_id
+
+        return scoped_cloud_app_id(app_key)
+    except Exception:
+        return app_key
+
+
+def _workspace_resume_app_keys() -> list[str]:
+    try:
+        from suite_workspace import scoped_cloud_app_id
+
+        return [scoped_cloud_app_id(app) for app in sorted(ACTIVE_APP_KEYS)]
+    except Exception:
+        return [normalize_app_key(app) for app in sorted(ACTIVE_APP_KEYS)]
+
+
 def _scoped_user_id() -> str:
     from suite_user import get_account_user_id
 
@@ -231,12 +251,13 @@ def upsert_resume_item(
     subtitle: str = "",
     action_url: str = "",
 ) -> None:
-    app_key = normalize_app_key(app)
+    logical_app = normalize_app_key(app)
+    app_key = _scoped_resume_app(app)
     key = str(item_key or "").strip()
     title_clean = str(title or "").strip()
     if not app_key or not key or not title_clean:
         return
-    if app_key not in ACTIVE_APP_KEYS:
+    if logical_app not in ACTIVE_APP_KEYS:
         return
     body: dict[str, Any] = {
         "app": app_key,
@@ -259,7 +280,7 @@ def upsert_resume_item(
 
 
 def invalidate_resume_item(app: str, item_key: str) -> None:
-    app_key = normalize_app_key(app)
+    app_key = _scoped_resume_app(app)
     key = str(item_key or "").strip()
     if not app_key or not key:
         return
@@ -276,7 +297,7 @@ def invalidate_resume_item(app: str, item_key: str) -> None:
 
 
 def invalidate_app_resume_items(app: str) -> None:
-    app_key = normalize_app_key(app)
+    app_key = _scoped_resume_app(app)
     if not app_key:
         return
     params: dict[str, str] = {"app": f"eq.{app_key}"}
@@ -362,17 +383,22 @@ def load_current_states() -> dict[str, dict[str, Any]]:
     return out
 
 
-def load_active_resume_items(limit: int = 8) -> list[dict[str, Any]]:
+def load_active_resume_items(limit: int = 8, *, app: str | None = None) -> list[dict[str, Any]]:
+    app_keys = [_scoped_resume_app(app)] if app else _workspace_resume_app_keys()
+    if not app_keys:
+        return []
+    params: dict[str, str] = {
+        "select": "app,item_key,title,subtitle,action_url,updated_at",
+        "user_id": f"eq.{_scoped_user_id()}",
+        "valid": "eq.true",
+        "order": "updated_at.desc",
+        "limit": str(limit),
+        "app": f"in.({','.join(app_keys)})",
+    }
     rows = _request(
         "GET",
         _TABLE_RESUME,
-        params={
-            "select": "app,item_key,title,subtitle,action_url,updated_at",
-            "user_id": f"eq.{_scoped_user_id()}",
-            "valid": "eq.true",
-            "order": "updated_at.desc",
-            "limit": str(limit),
-        },
+        params=params,
         prefer="return=representation",
     )
     if not isinstance(rows, list):
