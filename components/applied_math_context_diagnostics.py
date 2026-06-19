@@ -13,10 +13,22 @@ from applied_math_quality_validation import (
 
 
 def applied_math_developer_mode_enabled(st: Any) -> bool:
-    return bool(st.session_state.get("app_developer_mode", False))
+    try:
+        from suite_workspace import can_show_developer_tools
+
+        return can_show_developer_tools(st=st)
+    except ImportError:
+        return bool(st.session_state.get("app_developer_mode", False))
 
 
 def render_developer_mode_sidebar_toggle(st: Any) -> None:
+    try:
+        from suite_workspace import is_developer_workspace
+
+        if not is_developer_workspace(st=st):
+            return
+    except ImportError:
+        pass
     st.session_state.setdefault("app_developer_mode", False)
     st.sidebar.checkbox(
         "Developer Mode",
