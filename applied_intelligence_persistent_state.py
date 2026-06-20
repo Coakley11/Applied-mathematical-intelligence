@@ -36,6 +36,8 @@ _SUITE_PRELOAD_PREFIXES = (
 
 _CONTROL_STATE_KEY = "_ami_control_state"
 _UI_STATE_KEY = "_ami_ui_state"
+_RESTORED_UI_BLOB_KEY = "_ami_restored_ui_blob"
+_UI_PERSIST_SIG_KEY = "_ami_ui_persist_sig"
 _AMI_SOLVER_PREFIX = "ami_solver_"
 _PS_CONTROL_RE = re.compile(r"^ps_[a-z]+_[a-f0-9]{10}_")
 
@@ -208,7 +210,10 @@ def apply_applied_intelligence_disk_state(st: Any, state: dict[str, Any]) -> Non
         if url_authoritative and key in skip_when_url:
             continue
         st.session_state[key] = copy.deepcopy(val)
-    _apply_ami_ui_state(st.session_state, _merged_ui_blob(state))
+    ui_blob = _merged_ui_blob(state)
+    _apply_ami_ui_state(st.session_state, ui_blob)
+    if ui_blob:
+        st.session_state[_RESTORED_UI_BLOB_KEY] = copy.deepcopy(ui_blob)
     if url_authoritative and url_qid:
         st.session_state["_suite_ai_question_id"] = url_qid
     ensure_applied_intelligence_view_from_restore(st)
@@ -233,6 +238,43 @@ def ensure_applied_intelligence_view_mode(st: Any) -> None:
     if ss.get(VIEW_MODE_KEY) not in _valid_view_modes():
         ss[VIEW_MODE_KEY] = "Home"
     ensure_applied_intelligence_view_from_restore(st)
+
+
+def reapply_restored_ami_ui_state_before_render(st: Any) -> None:
+    """Re-apply restored widget keys immediately before main view widgets render."""
+    blob = st.session_state.get(_RESTORED_UI_BLOB_KEY)
+    if isinstance(blob, dict) and blob:
+        _apply_ami_ui_state(st.session_state, blob)
+
+
+def _ui_state_signature(st: Any) -> str:
+    import hashlib
+    import json
+
+    ui = _collect_ami_ui_state(st.session_state)
+    if not ui:
+        return ""
+    blob = json.dumps(ui, sort_keys=True, default=str)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:20]
+
+
+def maybe_persist_applied_intelligence_ui_changes(st: Any) -> bool:
+    """Force cloud+disk save when mie_/ps_/slider widget keys change."""
+    sig = _ui_state_signature(st)
+    if not sig:
+        return False
+    ss = st.session_state
+    if ss.get(_UI_PERSIST_SIG_KEY) == sig:
+        return False
+    ss[_UI_PERSIST_SIG_KEY] = sig
+    try:
+        from suite_user_persistence import clear_workspace_autosave_block
+
+        clear_workspace_autosave_block(st, APP_ID)
+    except ImportError:
+        pass
+    saved = persist_applied_intelligence_ui_state(st, reason="ui_change")
+    return saved
 
 
 def _valid_view_modes() -> tuple[str, ...]:
@@ -362,12 +404,35 @@ def persist_applied_intelligence_ui_state(
     from suite_user_persistence import _local_dirty_key, force_autosave
 
     ss[_local_dirty_key(APP_ID)] = True
-    return force_autosave(
+    try:
+        from suite_user_persistence import clear_workspace_autosave_block
+
+        clear_workspace_autosave_block(st, APP_ID)
+    except ImportError:
+        pass
+    saved = force_autosave(
         st,
         APP_ID,
         build_state=build_applied_intelligence_disk_state,
         reason=reason,
     )
+    if saved:
+        ss[_UI_PERSIST_SIG_KEY] = _ui_state_signature(st)
+        if reason in {"view_mode_change", "ui_change", "area_change"}:
+            try:
+                from applied_intelligence_activity import log_ami_session_activity
+
+                page = str(ss.get(VIEW_MODE_KEY) or view_mode or "Applied Intelligence")
+                if reason == "view_mode_change":
+                    act_summary = f"Opened {page}"
+                elif reason == "ui_change":
+                    act_summary = f"Updated {page} settings"
+                else:
+                    act_summary = f"Applied Intelligence: {page}"
+                log_ami_session_activity(page=page, summary=act_summary)
+            except Exception:
+                pass
+    return saved
 
 
 def default_reset_applied_intelligence_session(st: Any) -> None:

@@ -99,6 +99,23 @@ def _record(
         pass
 
 
+def log_ami_session_activity(*, page: str, summary: str = "", metrics: dict[str, Any] | None = None) -> None:
+    """Log AMI page/settings activity for Command Center feed and current-state row."""
+    label = str(page or "Applied Intelligence").strip()
+    payload = dict(metrics or {})
+    payload.setdefault("view_mode", label)
+    payload.setdefault("lesson", summary or label)
+    _record(
+        "session_activity",
+        page=label,
+        metrics=payload,
+        summary=summary or f"Applied Intelligence: {label}",
+        resume_key=f"ami:page:{label[:40]}",
+        resume_title=f"Continue: {label[:48]}",
+        resume_subtitle="Applied Mathematical Intelligence",
+    )
+
+
 def log_ami_workflow_activity(
     *,
     question: str,
@@ -203,6 +220,11 @@ def log_ami_explore_activity(
             action_url=action_url,
         )
         _upsert_applied_intelligence_resume(payload, action_url=action_url)
+        log_ami_session_activity(
+            page="Explore a Math Idea",
+            summary=f"Explored math idea: {idea[:80]}",
+            metrics=metrics,
+        )
     except Exception:
         _record(
             "problem_solved",

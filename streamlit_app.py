@@ -262,6 +262,13 @@ st.sidebar.caption("Think first · simulate second · optional depth last")
 # MAIN CONTENT
 # =====================================================
 
+try:
+    from applied_intelligence_persistent_state import reapply_restored_ami_ui_state_before_render
+
+    reapply_restored_ami_ui_state_before_render(st)
+except Exception:
+    pass
+
 if view_mode == "Home":
     render_home()
 
@@ -282,7 +289,11 @@ elif view_mode in ACTION_SECTION_TYPES:
         render_math_idea_explorer()
 
 try:
-    from applied_intelligence_persistent_state import autosave_applied_intelligence_state
+    from applied_intelligence_persistent_state import (
+        autosave_applied_intelligence_state,
+        maybe_persist_applied_intelligence_ui_changes,
+    )
+    from suite_user_persistence import clear_workspace_autosave_block
 
     try:
         from applied_intelligence_persistence_diagnostics import record_ami_persistence_phase
@@ -290,6 +301,8 @@ try:
         record_ami_persistence_phase(st, phase="pre_autosave")
     except Exception:
         pass
+    clear_workspace_autosave_block(st, "applied_intelligence")
+    maybe_persist_applied_intelligence_ui_changes(st)
     autosave_applied_intelligence_state(st)
     try:
         from applied_intelligence_persistence_diagnostics import record_ami_persistence_phase
@@ -297,9 +310,6 @@ try:
         record_ami_persistence_phase(st, phase="post_autosave")
     except Exception:
         pass
-    from suite_user_persistence import clear_workspace_autosave_block
-
-    clear_workspace_autosave_block(st, "applied_intelligence")
 except Exception:
     pass
 

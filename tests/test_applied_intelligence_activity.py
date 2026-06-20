@@ -73,10 +73,24 @@ class TestAmiWorkflowActivity(unittest.TestCase):
                 concept_id="derivative",
             )
 
-        self.assertEqual(record_mock.call_args.args[0], "analytical_question")
-        self.assertEqual(record_mock.call_args.kwargs["page"], "Explore a Math Idea")
-        self.assertEqual(record_mock.call_args.kwargs["metrics"]["workspace_id"], "ariel")
+        events = [call for call in record_mock.call_args_list if call.args[0] == "analytical_question"]
+        self.assertTrue(events)
+        self.assertEqual(events[0].kwargs["page"], "Explore a Math Idea")
+        self.assertEqual(events[0].kwargs["metrics"]["workspace_id"], "ariel")
+        self.assertGreaterEqual(record_mock.call_count, 2)
         upsert_mock.assert_called_once()
+
+    @patch("applied_intelligence_activity._record")
+    def test_log_session_activity_scoped(self, record_mock: MagicMock) -> None:
+        from applied_intelligence_activity import log_ami_session_activity
+
+        with patch("suite_workspace.get_active_workspace_id", return_value="ariel"):
+            log_ami_session_activity(page="Explore a Math Idea", summary="Opened Explore")
+
+        record_mock.assert_called_once()
+        self.assertEqual(record_mock.call_args.args[0], "session_activity")
+        self.assertEqual(record_mock.call_args.kwargs["page"], "Explore a Math Idea")
+        self.assertEqual(record_mock.call_args.kwargs["metrics"]["view_mode"], "Explore a Math Idea")
 
 
 if __name__ == "__main__":
