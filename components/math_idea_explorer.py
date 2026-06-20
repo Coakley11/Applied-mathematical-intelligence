@@ -40,6 +40,19 @@ def render_math_idea_explorer() -> None:
         return
 
     concept = detect_concept(user_input)
+    sig = (user_input, concept.get("id", ""))
+    if st.session_state.get("_ami_mie_activity_sig") != sig:
+        st.session_state["_ami_mie_activity_sig"] = sig
+        try:
+            from applied_intelligence_activity import log_ami_explore_activity
+
+            log_ami_explore_activity(
+                math_idea=user_input,
+                concept_name=str(concept.get("plain_name") or ""),
+                concept_id=str(concept.get("id") or ""),
+            )
+        except Exception:
+            pass
     _render_concept_exploration(user_input, concept)
 
 

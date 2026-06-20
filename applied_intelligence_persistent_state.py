@@ -271,6 +271,19 @@ def restore_applied_intelligence_disk_shell(st: Any) -> bool:
     """Fast disk-only restore — once per session before widgets."""
     if st.session_state.get(_DISK_SHELL_KEY):
         return bool(st.session_state.get("_applied_intelligence_disk_shell_had_state"))
+    cloud_newer = False
+    try:
+        from suite_cloud_state import load_cloud_full_session, parse_persist_timestamp
+        from suite_user_persistence import _load_raw
+
+        cloud_state, cloud_ts = load_cloud_full_session(APP_ID)
+        _, _, disk_ts = _load_raw(APP_ID)
+        cloud_epoch = parse_persist_timestamp(cloud_ts)
+        disk_epoch = parse_persist_timestamp(disk_ts)
+        cloud_newer = bool(cloud_state and cloud_ts and cloud_epoch > disk_epoch)
+        st.session_state["_ami_disk_shell_cloud_newer"] = cloud_newer
+    except Exception:
+        pass
     try:
         from suite_user_persistence import _load_raw
 
@@ -279,12 +292,14 @@ def restore_applied_intelligence_disk_shell(st: Any) -> bool:
         st.session_state[_DISK_SHELL_KEY] = True
         st.session_state["_applied_intelligence_disk_shell_had_state"] = False
         return False
-    if disk_state:
+    if disk_state and not cloud_newer:
         apply_applied_intelligence_disk_state(st, disk_state)
         _finalize_disk_shell_restore(st, disk_state)
+    elif cloud_newer:
+        st.session_state["_ami_disk_shell_skipped_for_cloud"] = True
     st.session_state[_DISK_SHELL_KEY] = True
-    st.session_state["_applied_intelligence_disk_shell_had_state"] = bool(disk_state)
-    return bool(disk_state)
+    st.session_state["_applied_intelligence_disk_shell_had_state"] = bool(disk_state) and not cloud_newer
+    return bool(disk_state) and not cloud_newer
 
 
 def _finalize_disk_shell_restore(st: Any, disk_state: dict[str, Any]) -> None:
@@ -303,20 +318,8 @@ def _finalize_disk_shell_restore(st: Any, disk_state: dict[str, Any]) -> None:
 
 def prepare_applied_intelligence_workspace(st: Any, *, cloud_first: bool = True) -> bool:
     """Authoritative workspace-scoped disk + cloud sync before sidebar widgets."""
-    has_disk = False
-    try:
-        from suite_user_persistence import _load_raw
-
-        disk_state, _, _ = _load_raw(APP_ID)
-        has_disk = bool(disk_state)
-    except Exception:
-        pass
-    try:
-        from suite_workspace import workspace_restore_cloud_first
-
-        cloud_first = workspace_restore_cloud_first(has_disk_state=has_disk)
-    except ImportError:
-        pass
+    # Cross-device AMI state must prefer cloud over per-container ephemeral disk.
+    cloud_first = True
     return sync_workspace_protocol(
         st,
         APP_ID,

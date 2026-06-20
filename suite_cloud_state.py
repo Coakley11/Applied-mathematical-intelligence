@@ -307,7 +307,9 @@ def probe_cloud_restore_diagnostics(st: Any, app_id: str) -> dict[str, Any]:
 
     try:
         storage, diag["storage_module"] = _import_storage()
-        app_key = storage.normalize_app_key(app_id)
+        scoped_key = _cloud_storage_app_id(app_id)
+        app_key = storage.normalize_app_key(scoped_key)
+        diag["cloud_read_namespace"] = scoped_key
         row = storage.load_current_states().get(app_key) or {}
         if isinstance(row, dict) and row:
             diag["cloud_row_found"] = True

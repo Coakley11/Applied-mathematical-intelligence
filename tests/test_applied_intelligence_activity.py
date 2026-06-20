@@ -55,6 +55,29 @@ class TestAmiWorkflowActivity(unittest.TestCase):
         self.assertEqual(record_mock.call_args.kwargs["metrics"]["workspace_id"], "ariel")
         upsert_mock.assert_called_once()
 
+    @patch("applied_intelligence_activity._record")
+    @patch("suite_analytical_question._upsert_applied_intelligence_resume")
+    @patch("suite_analytical_question.build_applied_math_resume_url", return_value="https://ami.test/resume")
+    def test_explore_activity_uses_explore_page(
+        self,
+        _url_mock,
+        upsert_mock,
+        record_mock,
+    ) -> None:
+        from applied_intelligence_activity import log_ami_explore_activity
+
+        with patch("suite_workspace.get_active_workspace_id", return_value="ariel"):
+            log_ami_explore_activity(
+                math_idea="derivative",
+                concept_name="Derivative",
+                concept_id="derivative",
+            )
+
+        self.assertEqual(record_mock.call_args.args[0], "analytical_question")
+        self.assertEqual(record_mock.call_args.kwargs["page"], "Explore a Math Idea")
+        self.assertEqual(record_mock.call_args.kwargs["metrics"]["workspace_id"], "ariel")
+        upsert_mock.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

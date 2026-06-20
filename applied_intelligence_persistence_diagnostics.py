@@ -10,7 +10,7 @@ from typing import Any
 APP_ID = "applied_intelligence"
 _DIAG_LOG_KEY = "_ami_persistence_diag_log"
 _DIAG_UI_KEY = "_ami_persistence_diag_ui"
-_EXPECTED_FIX_COMMIT = "7c3630e+ui-state"
+_EXPECTED_FIX_COMMIT = "e49503e+cloud-sync"
 
 
 def _git_short_head() -> str:
@@ -202,18 +202,18 @@ def record_ami_persistence_phase(st: Any, phase: str) -> None:
 
 
 def render_ami_persistence_diagnostics(st: Any) -> None:
-    """Sidebar panel — Daniel workspace + Developer Mode only."""
+    """Sidebar panel — Developer Mode (any workspace profile)."""
     try:
-        from suite_workspace import can_show_developer_tools
+        from suite_workspace import is_developer_mode_enabled
     except ImportError:
         return
-    if not can_show_developer_tools(st=st):
+    if not is_developer_mode_enabled(st=st):
         return
 
     ss = st.session_state
     record_ami_persistence_phase(st, phase="sidebar_panel")
 
-    with st.sidebar.expander("AMI persistence diagnostics (Daniel)", expanded=False):
+    with st.sidebar.expander("AMI persistence diagnostics", expanded=False):
         ui = ss.get(_DIAG_UI_KEY)
         if not isinstance(ui, dict):
             st.caption("No diagnostics captured yet.")
@@ -333,3 +333,38 @@ def render_ami_persistence_diagnostics(st: Any) -> None:
                     f"blocked={row.get('autosave_blocked')} "
                     f"disk={row.get('disk_file_exists')}"
                 )
+
+        try:
+            from applied_intelligence_cloud_sync_diagnostics import build_ami_cloud_sync_snapshot
+
+            cloud = build_ami_cloud_sync_snapshot(st)
+        except Exception as exc:
+            cloud = {"build_error": str(exc)}
+
+        st.markdown("**Cloud sync / namespace**")
+        st.code(
+            json.dumps(
+                {
+                    "workspace_id": cloud.get("workspace_id"),
+                    "suite_user_id": cloud.get("suite_user_id"),
+                    "account_user_id": cloud.get("account_user_id"),
+                    "cloud_read_namespace": cloud.get("cloud_read_namespace"),
+                    "cloud_write_namespace": cloud.get("cloud_write_namespace"),
+                    "cloud_updated_at": cloud.get("cloud_updated_at"),
+                    "disk_saved_at": cloud.get("disk_saved_at"),
+                    "cloud_ui_keys": cloud.get("cloud_ui_key_count"),
+                    "disk_ui_keys": cloud.get("disk_ui_key_count"),
+                    "cloud_has_ami_ui_state": cloud.get("cloud_has_ami_ui_state"),
+                    "disk_has_ami_ui_state": cloud.get("disk_has_ami_ui_state"),
+                    "startup_overwrite": cloud.get("startup_overwrite"),
+                },
+                indent=2,
+            ),
+            language="json",
+        )
+
+        st.markdown("**Activity emit (AMI → CC)**")
+        st.code(
+            json.dumps(cloud.get("activity") or {}, indent=2),
+            language="json",
+        )
