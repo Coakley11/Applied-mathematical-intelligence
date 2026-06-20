@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import re
 from typing import Any
 
 from suite_user_persistence import autosave_if_changed, finalize_suite_reset, sync_workspace_protocol
@@ -33,6 +34,34 @@ _SUITE_PRELOAD_PREFIXES = (
     "_cc_ai_",
 )
 
+_CONTROL_STATE_KEY = "_ami_control_state"
+_AMI_SOLVER_PREFIX = "ami_solver_"
+_PS_CONTROL_RE = re.compile(r"^ps_[a-z]+_[a-f0-9]{10}_")
+
+
+def _is_persisted_control_key(key: str) -> bool:
+    sk = str(key)
+    if sk.startswith(_AMI_SOLVER_PREFIX):
+        return True
+    return bool(_PS_CONTROL_RE.match(sk))
+
+
+def _collect_control_state(ss: Any) -> dict[str, Any]:
+    controls: dict[str, Any] = {}
+    for key in list(ss.keys()):
+        sk = str(key)
+        if _is_persisted_control_key(sk):
+            controls[sk] = copy.deepcopy(ss[sk])
+    return controls
+
+
+def _apply_control_state(ss: Any, controls: dict[str, Any] | None) -> None:
+    if not isinstance(controls, dict):
+        return
+    for key, val in controls.items():
+        if _is_persisted_control_key(str(key)):
+            ss[key] = copy.deepcopy(val)
+
 
 def build_applied_intelligence_disk_state(st: Any) -> dict[str, Any]:
     ss = st.session_state
@@ -40,6 +69,9 @@ def build_applied_intelligence_disk_state(st: Any) -> dict[str, Any]:
     for key in _PERSIST_KEYS:
         if key in ss:
             state[key] = copy.deepcopy(ss[key])
+    controls = _collect_control_state(ss)
+    if controls:
+        state[_CONTROL_STATE_KEY] = controls
     if ss.get("_suite_ai_question"):
         state[VIEW_MODE_KEY] = SOLVE_A_PROBLEM_VIEW
         state["ps_library_problem"] = ss.get("ps_library_problem") or ss.get("_suite_ai_question")
@@ -58,9 +90,12 @@ def apply_applied_intelligence_disk_state(st: Any, state: dict[str, Any]) -> Non
         "_suite_ai_area",
     }
     for key, val in state.items():
+        if key == _CONTROL_STATE_KEY:
+            continue
         if url_authoritative and key in skip_when_url:
             continue
         st.session_state[key] = copy.deepcopy(val)
+    _apply_control_state(st.session_state, state.get(_CONTROL_STATE_KEY))
     if url_authoritative and url_qid:
         st.session_state["_suite_ai_question_id"] = url_qid
     ensure_applied_intelligence_view_from_restore(st)
@@ -103,6 +138,8 @@ def apply_applied_intelligence_session_defaults(st: Any) -> None:
     for key in list(ss.keys()):
         sk = str(key)
         if any(sk.startswith(p) for p in _SUITE_PRELOAD_PREFIXES):
+            ss.pop(key, None)
+        elif _is_persisted_control_key(sk):
             ss.pop(key, None)
     ss[VIEW_MODE_KEY] = "Home"
     ss.pop("ps_library_problem", None)

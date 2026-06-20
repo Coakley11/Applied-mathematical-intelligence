@@ -628,6 +628,12 @@ def metrics_for_applied_math_resume(payload: dict[str, Any]) -> dict[str, Any]:
         iid = str(instant.get("insight_id") or "").strip()
         if iid:
             metrics["ami_insight"] = iid
+    try:
+        from suite_workspace import get_active_workspace_id
+
+        metrics["workspace_id"] = get_active_workspace_id()
+    except ImportError:
+        pass
     return metrics
 
 

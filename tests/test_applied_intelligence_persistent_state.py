@@ -195,3 +195,55 @@ class TestAppliedIntelligenceRefreshRestore(unittest.TestCase):
                     state_file_path("applied_intelligence", "daniel").read_text(encoding="utf-8")
                 )
                 self.assertEqual(blob["state"]["ps_area_id"], "finance")
+
+
+def test_control_state_persisted_and_restored() -> None:
+    st = _FakeSt()
+    st.session_state["ps_area_id"] = "sports"
+    st.session_state["ami_solver_hr_rate_games"] = 12
+    st.session_state["ps_sports_a1b2c3d4e5_ppp"] = 42
+
+    state = aips.build_applied_intelligence_disk_state(st)
+
+    assert "_ami_control_state" in state
+    assert state["_ami_control_state"]["ami_solver_hr_rate_games"] == 12
+    assert state["_ami_control_state"]["ps_sports_a1b2c3d4e5_ppp"] == 42
+
+    fresh = _FakeSt()
+    aips.apply_applied_intelligence_disk_state(fresh, state)
+    assert fresh.session_state["ami_solver_hr_rate_games"] == 12
+    assert fresh.session_state["ps_sports_a1b2c3d4e5_ppp"] == 42
+
+
+def test_control_state_isolated_per_workspace() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        data = Path(tmp)
+        with patch("suite_workspace.DATA_DIR", data), patch("suite_user_persistence.DATA_DIR", data):
+            save_user_state(
+                "applied_intelligence",
+                {
+                    "view_mode": "Solve a Problem",
+                    "ps_area_id": "finance",
+                    "_ami_control_state": {"ami_solver_beta_ret": -5.0},
+                },
+                workspace_id="daniel",
+            )
+            save_user_state(
+                "applied_intelligence",
+                {
+                    "view_mode": "Solve a Problem",
+                    "ps_area_id": "sports",
+                    "_ami_control_state": {"ami_solver_beta_ret": 3.0},
+                },
+                workspace_id="ariel",
+            )
+
+            daniel_st = _FakeSt()
+            with patch("suite_workspace.resolve_workspace_id", return_value="daniel"):
+                aips.restore_applied_intelligence_disk_shell(daniel_st)
+            assert daniel_st.session_state["ami_solver_beta_ret"] == -5.0
+
+            ariel_st = _FakeSt()
+            with patch("suite_workspace.resolve_workspace_id", return_value="ariel"):
+                aips.restore_applied_intelligence_disk_shell(ariel_st)
+            assert ariel_st.session_state["ami_solver_beta_ret"] == 3.0

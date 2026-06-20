@@ -16,6 +16,7 @@ def _record(
     resume_key: str = "",
     resume_title: str = "",
     resume_subtitle: str = "",
+    action_url: str = "",
 ) -> None:
     try:
         from suite_activity_client import record_activity
@@ -36,10 +37,66 @@ def _record(
             resume_key=resume_key,
             resume_title=resume_title,
             resume_subtitle=resume_subtitle,
+            action_url=action_url,
             local_state={"page": page, "lesson": payload.get("lesson", page)},
         )
     except Exception:
         pass
+
+
+def log_ami_workflow_activity(
+    *,
+    question: str,
+    area_id: str = "",
+    area_name: str = "",
+    interactive: str = "",
+) -> None:
+    """Log standalone AMI workflow for Command Center Continue, recent questions, and feed."""
+    q = str(question or "").strip()
+    if not q:
+        return
+    try:
+        from suite_analytical_question import (
+            analytical_question_continue_copy,
+            build_applied_math_resume_url,
+            build_question_payload,
+            metrics_for_applied_math_resume,
+            _upsert_applied_intelligence_resume,
+        )
+
+        ctx: dict[str, Any] = {}
+        if area_name:
+            ctx["area"] = area_name
+        if area_id:
+            ctx["quant_area"] = area_id
+        payload = build_question_payload(
+            source_app="applied_intelligence",
+            source_page="Solve a Problem",
+            question=q,
+            context=ctx,
+            quant_area=area_id,
+        )
+        action_url = build_applied_math_resume_url(payload)
+        metrics = metrics_for_applied_math_resume(payload)
+        if interactive:
+            metrics["interactive"] = interactive
+        if area_name:
+            metrics["topic"] = area_name
+        resume_key = str(payload.get("resume_key") or "")
+        card_title, card_subtitle, _ = analytical_question_continue_copy(payload)
+        _record(
+            "analytical_question",
+            page="Solve a Problem",
+            metrics=metrics,
+            summary=f"Applied Math: {q[:80]}",
+            resume_key=resume_key,
+            resume_title=card_title,
+            resume_subtitle=card_subtitle,
+            action_url=action_url,
+        )
+        _upsert_applied_intelligence_resume(payload, action_url=action_url)
+    except Exception:
+        log_problem_solved(topic=q, area=area_name, interactive=interactive)
 
 
 def log_problem_solved(*, topic: str, area: str = "", interactive: str = "") -> None:
