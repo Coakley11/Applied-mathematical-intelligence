@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from suite_account import load_saved_items, remember_saved_item, scoped_storage_app
+from suite_account import load_saved_items, remember_saved_item
 from suite_user_persistence import load_user_state, save_user_state
 from suite_workspace import scoped_cloud_app_id, set_active_workspace_id
 
@@ -135,11 +135,13 @@ class TestWorkspaceSwitchClearsAmiSession(unittest.TestCase):
         st.session_state["_ami_pending_insight"] = {"question": "Daniel"}
         st.session_state["_suite_ai_question"] = "Daniel Q"
         with patch("suite_workspace.persist_active_workspace_id"), patch(
-            "applied_intelligence_persistent_state.restore_applied_intelligence_disk_state_once"
+            "applied_intelligence_persistent_state.restore_applied_intelligence_disk_shell"
         ) as restore_mock, patch("applied_math_return_insight.sync_dismissed_insights_from_cloud") as dismiss_mock:
             set_active_workspace_id(st, "ariel")
         self.assertNotIn("_ami_pending_insight", st.session_state)
         self.assertNotIn("_suite_ai_question", st.session_state)
+        self.assertNotIn("view_mode", st.session_state)
+        self.assertNotIn("ps_area_id", st.session_state)
         restore_mock.assert_called_once()
         dismiss_mock.assert_called_once()
 

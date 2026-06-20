@@ -51,9 +51,16 @@ try:
         st.session_state["_suite_ai_query_params_present"] = []
     hydrate_applied_intelligence_from_url(st)
     if not _ami_deep_link:
-        from applied_intelligence_persistent_state import restore_applied_intelligence_disk_state_once
+        from applied_intelligence_persistent_state import (
+            _WORKSPACE_PREPARED_KEY,
+            prepare_applied_intelligence_workspace,
+            restore_applied_intelligence_disk_shell,
+        )
 
-        restore_applied_intelligence_disk_state_once(st)
+        restore_applied_intelligence_disk_shell(st)
+        if not st.session_state.get(_WORKSPACE_PREPARED_KEY):
+            prepare_applied_intelligence_workspace(st)
+            st.session_state[_WORKSPACE_PREPARED_KEY] = True
     else:
         st.session_state["_suite_persist_restore_skip_reason"] = "deep_link: skip restore before blob hydrate"
     apply_suite_resume_launch(st, "applied_intelligence")

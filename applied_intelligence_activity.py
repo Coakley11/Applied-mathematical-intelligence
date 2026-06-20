@@ -20,16 +20,23 @@ def _record(
     try:
         from suite_activity_client import record_activity
 
+        payload = dict(metrics or {})
+        try:
+            from suite_workspace import get_active_workspace_id
+
+            payload.setdefault("workspace_id", get_active_workspace_id())
+        except ImportError:
+            pass
         record_activity(
             "applied_intelligence",
             event,
             page=page or "Applied Intelligence",
-            metrics=metrics or {},
+            metrics=payload,
             summary=summary,
             resume_key=resume_key,
             resume_title=resume_title,
             resume_subtitle=resume_subtitle,
-            local_state={"page": page, "lesson": metrics.get("lesson", page)},
+            local_state={"page": page, "lesson": payload.get("lesson", page)},
         )
     except Exception:
         pass

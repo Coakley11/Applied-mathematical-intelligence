@@ -87,13 +87,26 @@ def _record_via_cloud(
         return False
 
 
-def _fallback_path(app: str) -> Path:
+def _fallback_path(app: str, metrics: dict[str, Any] | None = None) -> Path:
     LOCAL_FALLBACK_DIR.mkdir(parents=True, exist_ok=True)
-    return LOCAL_FALLBACK_DIR / f"{app}_activity_fallback.json"
+    try:
+        from suite_workspace import normalize_workspace_id, scoped_cloud_app_id
+
+        ws = ""
+        if metrics:
+            ws = str(metrics.get("workspace_id") or "").strip()
+        if ws:
+            scoped = scoped_cloud_app_id(app, normalize_workspace_id(ws))
+        else:
+            scoped = scoped_cloud_app_id(app)
+        safe = scoped.replace("/", "_").replace("\\", "_")
+        return LOCAL_FALLBACK_DIR / f"{safe}_activity_fallback.json"
+    except Exception:
+        return LOCAL_FALLBACK_DIR / f"{app}_activity_fallback.json"
 
 
 def _fallback_append(app: str, event: str, page: str, metrics: dict[str, Any], summary: str) -> None:
-    path = _fallback_path(app)
+    path = _fallback_path(app, metrics)
     rows: list[dict[str, Any]] = []
     if path.is_file():
         try:
@@ -163,6 +176,12 @@ def record_activity(
 ) -> None:
     global _LAST_RECORD_TRACE
     metrics = metrics or {}
+    try:
+        from suite_workspace import get_active_workspace_id
+
+        metrics.setdefault("workspace_id", get_active_workspace_id())
+    except ImportError:
+        pass
     trace: dict[str, Any] = {
         "app": app,
         "event": event,
@@ -175,21 +194,17 @@ def record_activity(
         "error": "",
     }
     if not str(action_url or "").strip():
-        continue_url = str(metrics.get("continue_action_url") or "").strip()
-        if continue_url:
-            action_url = continue_url
-        else:
-            try:
-                from suite_deep_links import build_resume_action_url
+        try:
+            from suite_deep_links import build_resume_action_url
 
-                action_url = build_resume_action_url(
-                    app,
-                    resume_key=resume_key,
-                    page=page,
-                    metrics=metrics,
-                )
-            except Exception:
-                pass
+            action_url = build_resume_action_url(
+                app,
+                resume_key=resume_key,
+                page=page,
+                metrics=metrics,
+            )
+        except Exception:
+            pass
     if _record_via_cloud(
         app,
         event,

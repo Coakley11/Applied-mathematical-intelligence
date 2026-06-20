@@ -5,9 +5,11 @@ from __future__ import annotations
 import copy
 from typing import Any
 
-from suite_user_persistence import autosave_if_changed, finalize_suite_reset, restore_once
+from suite_user_persistence import autosave_if_changed, finalize_suite_reset, sync_workspace_protocol
 
 APP_ID = "applied_intelligence"
+_DISK_SHELL_KEY = "_applied_intelligence_disk_shell_applied"
+_WORKSPACE_PREPARED_KEY = "_applied_intelligence_workspace_prepared"
 
 VIEW_MODE_KEY = "view_mode"
 SOLVE_A_PROBLEM_VIEW = "Solve a Problem"
@@ -106,14 +108,47 @@ def apply_applied_intelligence_session_defaults(st: Any) -> None:
     ss.pop("ps_library_problem", None)
     ss.pop("ps_area_id", None)
     ss.pop("_suite_ami_persistence_bootstrapped", None)
+    ss.pop(_WORKSPACE_PREPARED_KEY, None)
 
 
-def restore_applied_intelligence_disk_state_once(st: Any) -> bool:
-    return restore_once(
+def clear_applied_intelligence_startup_restore_flags(st: Any) -> None:
+    """Reset restore flags when workspace profile changes."""
+    for key in (_DISK_SHELL_KEY, "_applied_intelligence_disk_shell_had_state", _WORKSPACE_PREPARED_KEY):
+        st.session_state.pop(key, None)
+
+
+def restore_applied_intelligence_disk_shell(st: Any) -> bool:
+    """Fast disk-only restore — once per session before widgets."""
+    if st.session_state.get(_DISK_SHELL_KEY):
+        return bool(st.session_state.get("_applied_intelligence_disk_shell_had_state"))
+    try:
+        from suite_user_persistence import _load_raw
+
+        disk_state, _, _ = _load_raw(APP_ID)
+    except Exception:
+        st.session_state[_DISK_SHELL_KEY] = True
+        st.session_state["_applied_intelligence_disk_shell_had_state"] = False
+        return False
+    if disk_state:
+        apply_applied_intelligence_disk_state(st, disk_state)
+    st.session_state[_DISK_SHELL_KEY] = True
+    st.session_state["_applied_intelligence_disk_shell_had_state"] = bool(disk_state)
+    return bool(disk_state)
+
+
+def prepare_applied_intelligence_workspace(st: Any, *, cloud_first: bool = True) -> bool:
+    """Authoritative workspace-scoped disk + cloud sync before sidebar widgets."""
+    return sync_workspace_protocol(
         st,
         APP_ID,
         apply_state=lambda st_obj, s: apply_applied_intelligence_disk_state(st_obj, s),
+        cloud_first=cloud_first,
     )
+
+
+def restore_applied_intelligence_disk_state_once(st: Any) -> bool:
+    """Backward-compatible alias — prefer ``prepare_applied_intelligence_workspace()``."""
+    return prepare_applied_intelligence_workspace(st)
 
 
 def autosave_applied_intelligence_state(st: Any) -> None:
