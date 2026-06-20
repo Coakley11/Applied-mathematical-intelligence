@@ -46,6 +46,17 @@ class TestAppliedIntelligenceUiCloudPersist(unittest.TestCase):
         aips.reapply_restored_ami_ui_state_before_render(st)
         self.assertEqual(st.session_state["mie_example"], "Expected value of a bet")
         self.assertEqual(st.session_state["mie_expected-value_iep"], 55)
+        self.assertNotIn(aips._RESTORED_UI_BLOB_KEY, st.session_state)
+
+    def test_reapply_does_not_clobber_user_widget_changes_on_later_rerun(self) -> None:
+        st = _FakeSt()
+        st.session_state[aips._RESTORED_UI_BLOB_KEY] = {"mie_expected-value_iep": 55}
+        aips.reapply_restored_ami_ui_state_before_render(st)
+        self.assertEqual(st.session_state["mie_expected-value_iep"], 55)
+
+        st.session_state["mie_expected-value_iep"] = 70
+        aips.reapply_restored_ami_ui_state_before_render(st)
+        self.assertEqual(st.session_state["mie_expected-value_iep"], 70)
 
     def test_force_autosave_writes_ami_ui_state_to_cloud(self) -> None:
         st = _FakeSt()

@@ -241,10 +241,12 @@ def ensure_applied_intelligence_view_mode(st: Any) -> None:
 
 
 def reapply_restored_ami_ui_state_before_render(st: Any) -> None:
-    """Re-apply restored widget keys immediately before main view widgets render."""
-    blob = st.session_state.get(_RESTORED_UI_BLOB_KEY)
-    if isinstance(blob, dict) and blob:
-        _apply_ami_ui_state(st.session_state, blob)
+    """Apply restored widget keys once per restore, before main view widgets render."""
+    ss = st.session_state
+    blob = ss.pop(_RESTORED_UI_BLOB_KEY, None)
+    if not isinstance(blob, dict) or not blob:
+        return
+    _apply_ami_ui_state(ss, blob)
 
 
 def _ui_state_signature(st: Any) -> str:
@@ -301,6 +303,8 @@ def apply_applied_intelligence_session_defaults(st: Any) -> None:
     ss.pop("ps_area_id", None)
     ss.pop("_suite_ami_persistence_bootstrapped", None)
     ss.pop(_WORKSPACE_PREPARED_KEY, None)
+    ss.pop(_RESTORED_UI_BLOB_KEY, None)
+    ss.pop(_UI_PERSIST_SIG_KEY, None)
 
 
 def clear_applied_intelligence_startup_restore_flags(st: Any) -> None:
