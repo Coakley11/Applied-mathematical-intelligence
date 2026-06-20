@@ -76,10 +76,25 @@ class TestPersistenceDiagnostics(unittest.TestCase):
                 self.assertIn("applied_intelligence_user_state.json", snap["workspace_disk_path"])
                 self.assertEqual(snap["session_view_mode"], "Solve a Problem")
                 self.assertEqual(snap["disk_ps_area_id"], "sports")
+                self.assertIn("session_key_scan", snap)
+                self.assertIn("matched_keys", snap["session_key_scan"])
                 blob = json.loads(
                     state_file_path("applied_intelligence", "daniel").read_text(encoding="utf-8")
                 )
                 self.assertEqual(blob["state"]["ps_area_id"], "sports")
+
+    def test_snapshot_reports_math_idea_ui_keys(self) -> None:
+        st = _FakeSt()
+        st.session_state["view_mode"] = "Explore a Math Idea"
+        st.session_state["mie_example"] = "Expected value of a bet"
+        st.session_state["mie_expected-value_iep"] = 60
+        with patch("suite_workspace.resolve_workspace_id", return_value="daniel"):
+            snap = build_ami_persistence_snapshot(st, phase="test")
+        self.assertEqual(snap["session_mie_example"], "Expected value of a bet")
+        self.assertGreater(snap["built_ui_key_count"], 0)
+        self.assertIn("mie_example", snap["built_ui_keys"])
+        scan = snap.get("session_key_scan") or {}
+        self.assertIn("mie_example", scan.get("persisted_keys", []))
 
 
 if __name__ == "__main__":

@@ -205,14 +205,53 @@ def test_control_state_persisted_and_restored() -> None:
 
     state = aips.build_applied_intelligence_disk_state(st)
 
+    assert "_ami_ui_state" in state
     assert "_ami_control_state" in state
-    assert state["_ami_control_state"]["ami_solver_hr_rate_games"] == 12
-    assert state["_ami_control_state"]["ps_sports_a1b2c3d4e5_ppp"] == 42
+    assert state["_ami_ui_state"]["ami_solver_hr_rate_games"] == 12
+    assert state["_ami_ui_state"]["ps_sports_a1b2c3d4e5_ppp"] == 42
 
     fresh = _FakeSt()
     aips.apply_applied_intelligence_disk_state(fresh, state)
     assert fresh.session_state["ami_solver_hr_rate_games"] == 12
     assert fresh.session_state["ps_sports_a1b2c3d4e5_ppp"] == 42
+
+
+def test_math_idea_explorer_ui_state_persisted_and_restored() -> None:
+    st = _FakeSt()
+    st.session_state["view_mode"] = "Explore a Math Idea"
+    st.session_state["mie_example"] = "Expected value of a bet"
+    st.session_state["mie_expected-value_iep"] = 55
+    st.session_state["mie_expected-value_iew"] = 300.0
+
+    state = aips.build_applied_intelligence_disk_state(st)
+
+    assert state["view_mode"] == "Explore a Math Idea"
+    assert state["ami_last_mie_input"] == "Expected value of a bet"
+    assert state["_ami_ui_state"]["mie_example"] == "Expected value of a bet"
+    assert state["_ami_ui_state"]["mie_expected-value_iep"] == 55
+
+    fresh = _FakeSt()
+    aips.apply_applied_intelligence_disk_state(fresh, state)
+    assert fresh.session_state["view_mode"] == "Explore a Math Idea"
+    assert fresh.session_state["mie_example"] == "Expected value of a bet"
+    assert fresh.session_state["mie_expected-value_iep"] == 55
+
+
+def test_scan_ami_session_keys_for_diagnostics() -> None:
+    st = _FakeSt()
+    st.session_state["mie_example"] = "Derivative as slope"
+    st.session_state["ps_area_id"] = "finance"
+    st.session_state["_suite_ai_question"] = "What is beta?"
+    st.session_state["ami_solver_beta_ret"] = 1.2
+    st.session_state["_ami_persistence_diag_ui"] = {"hidden": True}
+
+    scan = aips.scan_ami_session_keys_for_diagnostics(st.session_state)
+
+    assert "mie_example" in scan["matched_keys"]
+    assert "ps_area_id" in scan["matched_keys"]
+    assert "_suite_ai_question" in scan["matched_keys"]
+    assert "ami_solver_beta_ret" in scan["persisted_keys"]
+    assert "_ami_persistence_diag_ui" not in scan["matched_keys"]
 
 
 def test_control_state_isolated_per_workspace() -> None:

@@ -10,6 +10,7 @@ from typing import Any
 APP_ID = "applied_intelligence"
 _DIAG_LOG_KEY = "_ami_persistence_diag_log"
 _DIAG_UI_KEY = "_ami_persistence_diag_ui"
+_EXPECTED_FIX_COMMIT = "7c3630e+ui-state"
 
 
 def _git_short_head() -> str:
@@ -26,6 +27,16 @@ def _git_short_head() -> str:
         return "unknown"
 
 
+def _ui_blob_from_state(state: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(state, dict):
+        return {}
+    ui = state.get("_ami_ui_state")
+    if isinstance(ui, dict) and ui:
+        return ui
+    legacy = state.get("_ami_control_state")
+    return legacy if isinstance(legacy, dict) else {}
+
+
 def _read_disk_file_meta(path: Path) -> dict[str, Any]:
     out: dict[str, Any] = {
         "path": str(path),
@@ -35,6 +46,10 @@ def _read_disk_file_meta(path: Path) -> dict[str, Any]:
         "state_keys": [],
         "view_mode": "",
         "ps_area_id": "",
+        "mie_example": "",
+        "mie_custom": "",
+        "ami_last_mie_input": "",
+        "ui_key_count": 0,
         "control_key_count": 0,
     }
     if not path.is_file():
@@ -53,10 +68,19 @@ def _read_disk_file_meta(path: Path) -> dict[str, Any]:
         out["state_keys"] = sorted(str(k) for k in state.keys())
         out["view_mode"] = str(state.get("view_mode") or "")
         out["ps_area_id"] = str(state.get("ps_area_id") or "")
+        ui = _ui_blob_from_state(state)
+        out["ui_key_count"] = len(ui)
+        out["ui_keys"] = sorted(str(k) for k in ui.keys())[:32]
+        out["mie_example"] = str(state.get("mie_example") or ui.get("mie_example") or ui.get("mie_tab_example") or "")
+        out["mie_custom"] = str(state.get("mie_custom") or ui.get("mie_custom") or ui.get("mie_tab_custom") or "")
+        out["ami_last_mie_input"] = str(state.get("ami_last_mie_input") or "")
         controls = state.get("_ami_control_state")
         if isinstance(controls, dict):
             out["control_key_count"] = len(controls)
-            out["control_keys"] = sorted(str(k) for k in controls.keys())[:24]
+            out["control_keys"] = sorted(str(k) for k in controls.keys())[:32]
+        elif ui:
+            out["control_key_count"] = len(ui)
+            out["control_keys"] = out["ui_keys"]
     return out
 
 
@@ -73,24 +97,19 @@ def build_ami_persistence_snapshot(st: Any, *, phase: str) -> dict[str, Any]:
     disk_path = Path(str(meta.get("local_state_path") or ""))
     disk_meta = _read_disk_file_meta(disk_path)
 
-    controls = ss.get("_ami_control_state")
-    if not isinstance(controls, dict):
-        controls = {
-            str(k): ss.get(k)
-            for k in ss.keys()
-            if str(k).startswith("ami_solver_") or str(k).startswith("ps_")
-        }
-
     try:
-        from applied_intelligence_persistent_state import build_applied_intelligence_disk_state
+        from applied_intelligence_persistent_state import (
+            build_applied_intelligence_disk_state,
+            scan_ami_session_keys_for_diagnostics,
+        )
 
+        key_scan = scan_ami_session_keys_for_diagnostics(ss)
         built = build_applied_intelligence_disk_state(st)
-        built_controls = built.get("_ami_control_state")
-        if not isinstance(built_controls, dict):
-            built_controls = {}
+        built_ui = _ui_blob_from_state(built if isinstance(built, dict) else None)
     except Exception as exc:
+        key_scan = {"scan_error": str(exc)}
         built = {"build_error": str(exc)}
-        built_controls = {}
+        built_ui = {}
 
     block_key = f"_suite_autosave_blocked::{APP_ID}"
     try:
@@ -108,9 +127,20 @@ def build_ami_persistence_snapshot(st: Any, *, phase: str) -> dict[str, Any]:
         )
     )
 
+    session_ui = _ui_blob_from_state(
+        {
+            "_ami_ui_state": {
+                str(k): ss.get(k)
+                for k in ss.keys()
+                if str(k).startswith(("mie_", "ami_", "ps_", "idea_", "opt_", "tw_"))
+            }
+        }
+    )
+
     return {
         "phase": phase,
         "git_head": _git_short_head(),
+        "expected_fix": _EXPECTED_FIX_COMMIT,
         "active_workspace_id": meta.get("active_workspace_id", ""),
         "workspace_disk_path": str(disk_path),
         "disk_file_exists": disk_meta.get("exists"),
@@ -118,19 +148,32 @@ def build_ami_persistence_snapshot(st: Any, *, phase: str) -> dict[str, Any]:
         "disk_state_keys": disk_meta.get("state_keys"),
         "disk_view_mode": disk_meta.get("view_mode"),
         "disk_ps_area_id": disk_meta.get("ps_area_id"),
+        "disk_mie_example": disk_meta.get("mie_example"),
+        "disk_mie_custom": disk_meta.get("mie_custom"),
+        "disk_ami_last_mie_input": disk_meta.get("ami_last_mie_input"),
+        "disk_ui_key_count": disk_meta.get("ui_key_count"),
+        "disk_ui_keys": disk_meta.get("ui_keys", []),
         "disk_control_key_count": disk_meta.get("control_key_count"),
         "session_view_mode": str(ss.get("view_mode") or ""),
         "session_ps_area_id": str(ss.get("ps_area_id") or ""),
         "session_ps_library_problem": str(ss.get("ps_library_problem") or "")[:80],
-        "session_control_keys": sorted(
-            str(k)
-            for k in ss.keys()
-            if str(k).startswith("ami_solver_") or str(k).startswith("ps_")
-        )[:24],
+        "session_mie_example": str(ss.get("mie_example") or ss.get("mie_tab_example") or ""),
+        "session_mie_custom": str(ss.get("mie_custom") or ss.get("mie_tab_custom") or "")[:80],
+        "session_ami_last_mie_input": str(ss.get("ami_last_mie_input") or ""),
+        "session_ui_key_count": len(session_ui),
+        "session_key_scan": key_scan,
         "built_state_keys": sorted(str(k) for k in built.keys()) if isinstance(built, dict) else [],
         "built_view_mode": str(built.get("view_mode") or "") if isinstance(built, dict) else "",
         "built_ps_area_id": str(built.get("ps_area_id") or "") if isinstance(built, dict) else "",
-        "built_control_key_count": len(built_controls),
+        "built_mie_example": str(
+            (built.get("mie_example") if isinstance(built, dict) else "")
+            or built_ui.get("mie_example", "")
+            or built_ui.get("mie_tab_example", "")
+        ),
+        "built_ami_last_mie_input": str(built.get("ami_last_mie_input") or "") if isinstance(built, dict) else "",
+        "built_ui_key_count": len(built_ui),
+        "built_ui_keys": sorted(str(k) for k in built_ui.keys())[:32],
+        "built_control_key_count": len(built_ui),
         "autosave_blocked": bool(ss.get(block_key)),
         "autosave_block_reason": str(ss.get("_suite_autosave_block_reason") or ""),
         "last_autosave_reason": str(ss.get("_suite_persist_last_save_reason") or ss.get("_suite_autosave_reason") or ""),
@@ -177,7 +220,7 @@ def render_ami_persistence_diagnostics(st: Any) -> None:
             return
 
         st.markdown(f"**Deploy commit:** `{ui.get('git_head', 'unknown')}`")
-        st.markdown(f"**Expected fix:** `0b9c5b1` (slider + CC activity)")
+        st.markdown(f"**Expected fix:** `{ui.get('expected_fix', _EXPECTED_FIX_COMMIT)}`")
         st.markdown(f"**Workspace:** `{ui.get('active_workspace_id')}`")
         st.markdown(f"**Disk path:** `{ui.get('workspace_disk_path')}`")
         st.markdown(
@@ -193,6 +236,10 @@ def render_ami_persistence_diagnostics(st: Any) -> None:
                 {
                     "view_mode": ui.get("disk_view_mode"),
                     "ps_area_id": ui.get("disk_ps_area_id"),
+                    "mie_example": ui.get("disk_mie_example"),
+                    "mie_custom": ui.get("disk_mie_custom"),
+                    "ami_last_mie_input": ui.get("disk_ami_last_mie_input"),
+                    "ui_keys": ui.get("disk_ui_key_count"),
                     "control_keys": ui.get("disk_control_key_count"),
                     "state_keys": ui.get("disk_state_keys"),
                 },
@@ -207,7 +254,10 @@ def render_ami_persistence_diagnostics(st: Any) -> None:
                     "view_mode": ui.get("session_view_mode"),
                     "ps_area_id": ui.get("session_ps_area_id"),
                     "problem": ui.get("session_ps_library_problem"),
-                    "control_keys": ui.get("session_control_keys"),
+                    "mie_example": ui.get("session_mie_example"),
+                    "mie_custom": ui.get("session_mie_custom"),
+                    "ami_last_mie_input": ui.get("session_ami_last_mie_input"),
+                    "ui_keys": ui.get("session_ui_key_count"),
                 },
                 indent=2,
             ),
@@ -220,13 +270,32 @@ def render_ami_persistence_diagnostics(st: Any) -> None:
                 {
                     "view_mode": ui.get("built_view_mode"),
                     "ps_area_id": ui.get("built_ps_area_id"),
-                    "control_key_count": ui.get("built_control_key_count"),
+                    "mie_example": ui.get("built_mie_example"),
+                    "ami_last_mie_input": ui.get("built_ami_last_mie_input"),
+                    "ui_key_count": ui.get("built_ui_key_count"),
+                    "ui_keys_sample": ui.get("built_ui_keys"),
                     "keys": ui.get("built_state_keys"),
                 },
                 indent=2,
             ),
             language="json",
         )
+
+        scan = ui.get("session_key_scan")
+        if isinstance(scan, dict):
+            st.markdown("**Session key scan** (area / question / problem / slider / control / solver / ps_ / ami_ / _suite_ai)")
+            st.code(
+                json.dumps(
+                    {
+                        "matched_keys": scan.get("matched_keys", [])[:48],
+                        "matched_values": scan.get("matched_values", {}),
+                        "persisted_keys": scan.get("persisted_keys", [])[:48],
+                        "persisted_values": scan.get("persisted_values", {}),
+                    },
+                    indent=2,
+                ),
+                language="json",
+            )
 
         st.markdown("**Restore / autosave**")
         st.code(
@@ -259,6 +328,8 @@ def render_ami_persistence_diagnostics(st: Any) -> None:
                 st.caption(
                     f"{row.get('phase')}: view={row.get('session_view_mode')!r} "
                     f"area={row.get('session_ps_area_id')!r} "
+                    f"mie={row.get('session_mie_example')!r} "
+                    f"ui_keys={row.get('session_ui_key_count')} "
                     f"blocked={row.get('autosave_blocked')} "
                     f"disk={row.get('disk_file_exists')}"
                 )

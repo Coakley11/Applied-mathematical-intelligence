@@ -293,6 +293,7 @@ def _render_area_hub() -> None:
         st.info("Pick a worked example above, or type your own quantitative question.")
         return
 
+    st.session_state.ps_library_problem = problem
     pattern_id = area["pattern_id"]
     pattern = _match_pattern(problem, pattern_id)
     if pattern.get("id") not in (pattern_id, "abstract"):

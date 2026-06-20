@@ -38,12 +38,13 @@ def render_optimization_workshop() -> None:
             key="opt_think_objective",
         )
 
-    problem_choice = st.selectbox("What do you want to improve?", EXAMPLE_PROBLEMS)
+    problem_choice = st.selectbox("What do you want to improve?", EXAMPLE_PROBLEMS, key="opt_problem_choice")
     custom_problem = ""
     if problem_choice == "Custom problem (describe below)":
         custom_problem = st.text_area(
             "Describe it in one sentence",
             placeholder="e.g. Reduce wait times at my restaurant without hiring more staff",
+            key="opt_custom_problem",
         )
 
     hints = PROBLEM_HINTS.get(problem_choice, {})

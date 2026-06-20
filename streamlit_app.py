@@ -227,26 +227,32 @@ if help_text and not pp.is_screenshot_mode(st):
 if not pp.is_screenshot_mode(st) and not pp.is_demo_mode(st):
     st.sidebar.caption("Items at the bottom of the list are optional reading.")
 
-ref_lens = "Statistics / Pattern Detection"
-ref_depth = "Professional Overview"
+ref_lens = str(st.session_state.get("ami_ref_lens") or "Statistics / Pattern Detection")
+ref_depth = str(st.session_state.get("ami_ref_depth") or "Professional Overview")
 if view_mode == "Advanced reference":
     st.sidebar.markdown("---")
     st.sidebar.caption("Optional filters for background reading")
+    _lens_options = [
+        "Calculus / Accumulation",
+        "Probability / Uncertainty",
+        "Statistics / Pattern Detection",
+        "Optimization / Improvement",
+        "Simulation / Alternate Futures",
+        "AI / Learning Systems",
+    ]
+    _depth_options = ["Professional Overview", "Technical Explanation", "Portfolio / Interview Framing"]
     ref_lens = st.sidebar.selectbox(
         "Focus area",
-        [
-            "Calculus / Accumulation",
-            "Probability / Uncertainty",
-            "Statistics / Pattern Detection",
-            "Optimization / Improvement",
-            "Simulation / Alternate Futures",
-            "AI / Learning Systems",
-        ],
+        _lens_options,
+        index=_lens_options.index(ref_lens) if ref_lens in _lens_options else 2,
         label_visibility="visible",
+        key="ami_ref_lens",
     )
     ref_depth = st.sidebar.radio(
         "Detail level",
-        ["Professional Overview", "Technical Explanation", "Portfolio / Interview Framing"],
+        _depth_options,
+        index=_depth_options.index(ref_depth) if ref_depth in _depth_options else 0,
+        key="ami_ref_depth",
     )
 
 st.sidebar.markdown("---")
