@@ -256,6 +256,14 @@ def _render_area_hub() -> None:
     )
     area = QUANT_AREA_BY_ID[area_id]
     st.session_state.ps_area_id = area_id
+    if st.session_state.get("_ami_persisted_area_id") != area_id:
+        try:
+            from applied_intelligence_persistent_state import persist_applied_intelligence_ui_state
+
+            persist_applied_intelligence_ui_state(st, ps_area_id=area_id, reason="area_change")
+            st.session_state["_ami_persisted_area_id"] = area_id
+        except Exception:
+            st.session_state["_ami_persisted_area_id"] = area_id
 
     st.markdown(f"*{area['tagline']}*")
 

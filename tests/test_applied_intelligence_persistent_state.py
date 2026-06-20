@@ -3,8 +3,13 @@
 from __future__ import annotations
 
 import json
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
 
 import applied_intelligence_persistent_state as aips
+from suite_user_persistence import save_user_state, state_file_path
 
 
 class _FakeSessionState(dict):
@@ -99,3 +104,94 @@ def test_reset_clears_suite_ai_question_keys() -> None:
     assert st.session_state.get("view_mode") == "Home"
     assert "_suite_ai_question" not in st.session_state
     assert "ps_library_problem" not in st.session_state
+
+
+class TestAppliedIntelligenceRefreshRestore(unittest.TestCase):
+    def test_refresh_restores_daniel_and_ariel_state_separately(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            data = Path(tmp)
+            with patch("suite_workspace.DATA_DIR", data), patch("suite_user_persistence.DATA_DIR", data):
+                save_user_state(
+                    "applied_intelligence",
+                    {
+                        "view_mode": "Solve a Problem",
+                        "ps_area_id": "finance",
+                        "ps_library_problem": "Daniel portfolio volatility question",
+                        "_suite_ai_question": "Daniel portfolio volatility question",
+                    },
+                    workspace_id="daniel",
+                )
+                save_user_state(
+                    "applied_intelligence",
+                    {
+                        "view_mode": "Solve a Problem",
+                        "ps_area_id": "sports",
+                        "ps_library_problem": "Ariel sports trend question",
+                        "_suite_ai_question": "Ariel sports trend question",
+                    },
+                    workspace_id="ariel",
+                )
+
+                daniel_st = _FakeSt()
+                with patch("suite_workspace.resolve_workspace_id", return_value="daniel"):
+                    aips.restore_applied_intelligence_disk_shell(daniel_st)
+                self.assertEqual(daniel_st.session_state.get("ps_area_id"), "finance")
+                self.assertEqual(
+                    daniel_st.session_state.get("_suite_ai_question"),
+                    "Daniel portfolio volatility question",
+                )
+                self.assertNotIn("Ariel", json.dumps(dict(daniel_st.session_state)))
+
+                ariel_st = _FakeSt()
+                with patch("suite_workspace.resolve_workspace_id", return_value="ariel"):
+                    aips.restore_applied_intelligence_disk_shell(ariel_st)
+                self.assertEqual(ariel_st.session_state.get("ps_area_id"), "sports")
+                self.assertEqual(
+                    ariel_st.session_state.get("_suite_ai_question"),
+                    "Ariel sports trend question",
+                )
+                self.assertNotIn("Daniel", json.dumps(dict(ariel_st.session_state)))
+
+    def test_persist_ui_state_writes_workspace_disk(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            data = Path(tmp)
+            with patch("suite_workspace.DATA_DIR", data), patch("suite_user_persistence.DATA_DIR", data):
+                st = _FakeSt()
+                st.session_state["view_mode"] = "Home"
+                with patch("suite_workspace.resolve_workspace_id", return_value="daniel"):
+                    saved = aips.persist_applied_intelligence_ui_state(
+                        st,
+                        view_mode="Solve a Problem",
+                        ps_area_id="finance",
+                        ps_library_problem="What is my portfolio beta?",
+                        reason="area_change",
+                    )
+                self.assertTrue(saved)
+                blob = json.loads(
+                    state_file_path("applied_intelligence", "daniel").read_text(encoding="utf-8")
+                )
+                self.assertEqual(blob["state"]["ps_area_id"], "finance")
+                self.assertEqual(blob["state"]["view_mode"], "Solve a Problem")
+                self.assertEqual(blob["state"]["ps_library_problem"], "What is my portfolio beta?")
+
+    def test_autosave_writes_after_restore_block_cleared(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            data = Path(tmp)
+            with patch("suite_workspace.DATA_DIR", data), patch("suite_user_persistence.DATA_DIR", data):
+                st = _FakeSt()
+                st.session_state["view_mode"] = "Solve a Problem"
+                st.session_state["ps_area_id"] = "finance"
+                st.session_state["_suite_autosave_blocked::applied_intelligence"] = True
+                with patch("suite_workspace.resolve_workspace_id", return_value="daniel"):
+                    aips.autosave_applied_intelligence_state(st)
+                self.assertFalse(state_file_path("applied_intelligence", "daniel").exists())
+
+                from suite_user_persistence import clear_workspace_autosave_block
+
+                clear_workspace_autosave_block(st, "applied_intelligence")
+                with patch("suite_workspace.resolve_workspace_id", return_value="daniel"):
+                    aips.autosave_applied_intelligence_state(st)
+                blob = json.loads(
+                    state_file_path("applied_intelligence", "daniel").read_text(encoding="utf-8")
+                )
+                self.assertEqual(blob["state"]["ps_area_id"], "finance")

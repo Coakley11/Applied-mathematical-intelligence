@@ -262,6 +262,8 @@ _FORCE_SAVE_CLOUD_REASONS = frozenset({
     "music_coach_send",
     "song_edit",
     "practice_edit",
+    "team_change",
+    "nba_settings_change",
 })
 
 
@@ -791,7 +793,6 @@ def sync_workspace_protocol(
             disk_state=disk_state, disk_ts=disk_ts, winner=picked.source,
             reason="already synced", applied=False,
         )
-        _mark_workspace_sync_skipped(st, app_id, skip_reason)
         _record_startup_restore_diagnostics(
             st, app_id,
             cloud_state=cloud_state, cloud_ts=cloud_ts,
@@ -886,9 +887,13 @@ def restore_once(
     app_id: str,
     *,
     apply_state: Callable[[Any, dict[str, Any]], None],
+    cloud_resync_needed: Callable[[Any, dict[str, Any], str | None], tuple[bool, str]] | None = None,
 ) -> bool:
     """
     Restore on direct open; re-apply when cloud is newer than last apply.
+
+    When ``cloud_resync_needed`` returns True, re-applies cloud state even if
+    ``updated_at`` is not newer than ``last_applied`` (cross-device content drift).
 
     Skipped when Continue/deep-link query params are present, or when this
     device has unsaved local edits (``_suite_persist_local_dirty``).
@@ -928,6 +933,12 @@ def restore_once(
         cloud_state, cloud_ts = load_cloud_full_session(app_id)
         already_restored = st.session_state.get(flag)
         applied_cloud_ts = st.session_state.get(applied_cloud_key)
+        content_resync = False
+        content_resync_detail = ""
+        if cloud_resync_needed and cloud_state:
+            content_resync, content_resync_detail = cloud_resync_needed(st, cloud_state, cloud_ts)
+        st.session_state["_suite_persist_content_resync_needed"] = content_resync
+        st.session_state["_suite_persist_content_resync_detail"] = content_resync_detail or None
 
         if already_restored:
             if local_dirty:
@@ -942,7 +953,8 @@ def restore_once(
                     local_dirty=True,
                 )
                 return False
-            if cloud_state and parse_persist_timestamp(cloud_ts) <= parse_persist_timestamp(applied_cloud_ts):
+            cloud_newer = parse_persist_timestamp(cloud_ts) > parse_persist_timestamp(applied_cloud_ts)
+            if not content_resync and cloud_state and not cloud_newer:
                 _set_restore_skip_reason(st, "already restored this session; cloud not newer than last apply")
                 _record_restore_debug_meta(
                     st,
@@ -955,18 +967,24 @@ def restore_once(
                 )
                 return False
 
-        picked = pick_restore_session(
-            cloud_state,
-            cloud_ts,
-            disk_state,
-            disk_ts,
-            local_dirty=local_dirty,
-            cloud_first=_restore_cloud_first(bool(disk_state)),
-        )
-        state = picked.state
-        pick_source = picked.source
-        pick_reason = picked.reason
-        from_cloud = picked.source == "cloud"
+        if content_resync and cloud_state:
+            state = copy.deepcopy(cloud_state)
+            pick_source = "cloud"
+            pick_reason = f"content resync ({content_resync_detail or 'drift'})"
+            from_cloud = True
+        else:
+            picked = pick_restore_session(
+                cloud_state,
+                cloud_ts,
+                disk_state,
+                disk_ts,
+                local_dirty=local_dirty,
+                cloud_first=_restore_cloud_first(bool(disk_state)),
+            )
+            state = picked.state
+            pick_source = picked.source
+            pick_reason = picked.reason
+            from_cloud = picked.source == "cloud"
 
         st.session_state["_suite_persist_debug_cloud_ts"] = cloud_ts
         st.session_state["_suite_persist_debug_disk_ts"] = disk_ts
@@ -1337,6 +1355,12 @@ def force_autosave(
             "insight_hydrate",
             "applied_math_send",
             "music_coach_send",
+            "team_change",
+            "nba_settings_change",
+            "ui_change",
+            "view_mode_change",
+            "area_change",
+            "decade_change",
         )
         if st.session_state.get(block_key) and not bypass_block:
             st.session_state["_suite_autosave_blocked_after_restore"] = True

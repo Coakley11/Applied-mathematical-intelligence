@@ -138,6 +138,20 @@ def restore_applied_intelligence_disk_shell(st: Any) -> bool:
 
 def prepare_applied_intelligence_workspace(st: Any, *, cloud_first: bool = True) -> bool:
     """Authoritative workspace-scoped disk + cloud sync before sidebar widgets."""
+    has_disk = False
+    try:
+        from suite_user_persistence import _load_raw
+
+        disk_state, _, _ = _load_raw(APP_ID)
+        has_disk = bool(disk_state)
+    except Exception:
+        pass
+    try:
+        from suite_workspace import workspace_restore_cloud_first
+
+        cloud_first = workspace_restore_cloud_first(has_disk_state=has_disk)
+    except ImportError:
+        pass
     return sync_workspace_protocol(
         st,
         APP_ID,
@@ -153,6 +167,39 @@ def restore_applied_intelligence_disk_state_once(st: Any) -> bool:
 
 def autosave_applied_intelligence_state(st: Any) -> None:
     autosave_if_changed(st, APP_ID, build_state=build_applied_intelligence_disk_state)
+
+
+def persist_applied_intelligence_ui_state(
+    st: Any,
+    *,
+    view_mode: str | None = None,
+    ps_area_id: str | None = None,
+    ps_library_problem: str | None = None,
+    suite_ai_question: str | None = None,
+    reason: str = "ui_change",
+) -> bool:
+    """Immediately persist AMI page/area/question state for the active workspace."""
+    ss = st.session_state
+    if view_mode is not None:
+        ss[VIEW_MODE_KEY] = view_mode
+    if ps_area_id is not None:
+        ss["ps_area_id"] = ps_area_id
+    if ps_library_problem is not None:
+        ss["ps_library_problem"] = ps_library_problem
+    if suite_ai_question is not None:
+        ss["_suite_ai_question"] = suite_ai_question
+        if not str(ss.get("ps_library_problem") or "").strip():
+            ss["ps_library_problem"] = suite_ai_question
+        ss[VIEW_MODE_KEY] = SOLVE_A_PROBLEM_VIEW
+    from suite_user_persistence import _local_dirty_key, force_autosave
+
+    ss[_local_dirty_key(APP_ID)] = True
+    return force_autosave(
+        st,
+        APP_ID,
+        build_state=build_applied_intelligence_disk_state,
+        reason=reason,
+    )
 
 
 def default_reset_applied_intelligence_session(st: Any) -> None:

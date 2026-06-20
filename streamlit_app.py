@@ -58,9 +58,14 @@ try:
         )
 
         restore_applied_intelligence_disk_shell(st)
+        had_disk = bool(st.session_state.get("_applied_intelligence_disk_shell_had_state"))
         if not st.session_state.get(_WORKSPACE_PREPARED_KEY):
-            prepare_applied_intelligence_workspace(st)
+            if not had_disk:
+                prepare_applied_intelligence_workspace(st)
             st.session_state[_WORKSPACE_PREPARED_KEY] = True
+        from applied_intelligence_persistent_state import ensure_applied_intelligence_view_mode
+
+        ensure_applied_intelligence_view_mode(st)
     else:
         st.session_state["_suite_persist_restore_skip_reason"] = "deep_link: skip restore before blob hydrate"
     apply_suite_resume_launch(st, "applied_intelligence")
@@ -90,8 +95,13 @@ pp.inject_polish_css(st, app_slug="applied-math")
 
 PRIMARY_NAV = ["Home"] + PRIMARY_ACTIONS + ["Advanced reference"]
 
-if "view_mode" not in st.session_state:
-    st.session_state.view_mode = "Home"
+try:
+    from applied_intelligence_persistent_state import ensure_applied_intelligence_view_mode
+
+    ensure_applied_intelligence_view_mode(st)
+except Exception:
+    if "view_mode" not in st.session_state:
+        st.session_state.view_mode = "Home"
 
 if st.session_state.get("_suite_ai_question") or st.session_state.get("_suite_ai_question_id"):
     st.session_state.view_mode = "Solve a Problem"
@@ -153,6 +163,8 @@ nav_index = (
     else 0
 )
 
+_prev_view_mode = st.session_state.get("view_mode")
+
 view_mode = st.sidebar.radio(
     "Choose",
     PRIMARY_NAV,
@@ -161,6 +173,14 @@ view_mode = st.sidebar.radio(
 )
 
 st.session_state.view_mode = view_mode
+
+if view_mode != _prev_view_mode:
+    try:
+        from applied_intelligence_persistent_state import persist_applied_intelligence_ui_state
+
+        persist_applied_intelligence_ui_state(st, view_mode=view_mode, reason="view_mode_change")
+    except Exception:
+        pass
 
 help_text = NAV_HELP.get(view_mode, "")
 if help_text and not pp.is_screenshot_mode(st):
@@ -224,6 +244,9 @@ try:
     from applied_intelligence_persistent_state import autosave_applied_intelligence_state
 
     autosave_applied_intelligence_state(st)
+    from suite_user_persistence import clear_workspace_autosave_block
+
+    clear_workspace_autosave_block(st, "applied_intelligence")
 except Exception:
     pass
 
