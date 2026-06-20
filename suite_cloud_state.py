@@ -507,5 +507,11 @@ def session_page_summary(app_id: str, state: dict[str, Any]) -> tuple[str, str]:
         if year is not None:
             summary = f"{skill} · {year}".strip(" ·")
         return str(state.get("_suite_fl_view") or "simulation"), summary or "Future Lens session"
+    if app_key in ("applied_intelligence", "math"):
+        page = str(state.get("view_mode") or state.get("page") or "")
+        problem = str(state.get("ps_library_problem") or state.get("_suite_ai_question") or "")
+        area = str(state.get("ps_area_id") or "")
+        summary = problem or area or page or "Applied Intelligence session"
+        return page, summary
     page = str(state.get("page") or "")
     return page, str(state.get("summary") or page or "Session")

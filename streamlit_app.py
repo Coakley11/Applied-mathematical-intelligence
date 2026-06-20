@@ -57,15 +57,37 @@ try:
             restore_applied_intelligence_disk_shell,
         )
 
+        try:
+            from applied_intelligence_persistence_diagnostics import record_ami_persistence_phase
+
+            record_ami_persistence_phase(st, phase="pre_restore")
+        except Exception:
+            pass
         restore_applied_intelligence_disk_shell(st)
-        had_disk = bool(st.session_state.get("_applied_intelligence_disk_shell_had_state"))
+        try:
+            from applied_intelligence_persistence_diagnostics import record_ami_persistence_phase
+
+            record_ami_persistence_phase(st, phase="post_disk_shell")
+        except Exception:
+            pass
         if not st.session_state.get(_WORKSPACE_PREPARED_KEY):
-            if not had_disk:
-                prepare_applied_intelligence_workspace(st)
+            prepare_applied_intelligence_workspace(st)
             st.session_state[_WORKSPACE_PREPARED_KEY] = True
+            try:
+                from applied_intelligence_persistence_diagnostics import record_ami_persistence_phase
+
+                record_ami_persistence_phase(st, phase="post_prepare")
+            except Exception:
+                pass
         from applied_intelligence_persistent_state import ensure_applied_intelligence_view_mode
 
         ensure_applied_intelligence_view_mode(st)
+        try:
+            from applied_intelligence_persistence_diagnostics import record_ami_persistence_phase
+
+            record_ami_persistence_phase(st, phase="post_view_seed")
+        except Exception:
+            pass
     else:
         st.session_state["_suite_persist_restore_skip_reason"] = "deep_link: skip restore before blob hydrate"
     apply_suite_resume_launch(st, "applied_intelligence")
@@ -129,6 +151,12 @@ try:
     render_developer_mode_sidebar_toggle(st)
     render_applied_math_build_sidebar(st)
     render_url_intake_sidebar_panel(st)
+    try:
+        from applied_intelligence_persistence_diagnostics import render_ami_persistence_diagnostics
+
+        render_ami_persistence_diagnostics(st)
+    except Exception:
+        pass
 except Exception:
     pass
 
@@ -173,6 +201,13 @@ view_mode = st.sidebar.radio(
 )
 
 st.session_state.view_mode = view_mode
+
+try:
+    from applied_intelligence_persistence_diagnostics import record_ami_persistence_phase
+
+    record_ami_persistence_phase(st, phase="post_sidebar_nav")
+except Exception:
+    pass
 
 if view_mode != _prev_view_mode:
     try:
@@ -243,7 +278,19 @@ elif view_mode in ACTION_SECTION_TYPES:
 try:
     from applied_intelligence_persistent_state import autosave_applied_intelligence_state
 
+    try:
+        from applied_intelligence_persistence_diagnostics import record_ami_persistence_phase
+
+        record_ami_persistence_phase(st, phase="pre_autosave")
+    except Exception:
+        pass
     autosave_applied_intelligence_state(st)
+    try:
+        from applied_intelligence_persistence_diagnostics import record_ami_persistence_phase
+
+        record_ami_persistence_phase(st, phase="post_autosave")
+    except Exception:
+        pass
     from suite_user_persistence import clear_workspace_autosave_block
 
     clear_workspace_autosave_block(st, "applied_intelligence")

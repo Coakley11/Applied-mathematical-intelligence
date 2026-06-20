@@ -168,9 +168,24 @@ def restore_applied_intelligence_disk_shell(st: Any) -> bool:
         return False
     if disk_state:
         apply_applied_intelligence_disk_state(st, disk_state)
+        _finalize_disk_shell_restore(st, disk_state)
     st.session_state[_DISK_SHELL_KEY] = True
     st.session_state["_applied_intelligence_disk_shell_had_state"] = bool(disk_state)
     return bool(disk_state)
+
+
+def _finalize_disk_shell_restore(st: Any, disk_state: dict[str, Any]) -> None:
+    """Lock restore fingerprint and block autosave until end-of-run clear."""
+    if not disk_state:
+        return
+    try:
+        from suite_user_persistence import _autosave_block_key, _lock_fingerprint_after_restore
+
+        _lock_fingerprint_after_restore(st, APP_ID, disk_state)
+        st.session_state[_autosave_block_key(APP_ID)] = True
+        st.session_state["_suite_autosave_block_reason"] = "post-disk-shell restore cooldown"
+    except ImportError:
+        pass
 
 
 def prepare_applied_intelligence_workspace(st: Any, *, cloud_first: bool = True) -> bool:
