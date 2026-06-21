@@ -192,15 +192,7 @@ def record_activity(
         "supabase_write_ok": False,
         "write_path": "none",
         "error": "",
-        "write_namespace": app,
-        "metrics_workspace_id": metrics.get("workspace_id"),
     }
-    try:
-        from suite_workspace import scoped_cloud_app_id
-
-        trace["write_namespace"] = scoped_cloud_app_id(app)
-    except Exception:
-        pass
     if not str(action_url or "").strip():
         try:
             from suite_deep_links import build_resume_action_url

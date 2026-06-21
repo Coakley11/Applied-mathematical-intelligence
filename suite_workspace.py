@@ -117,7 +117,7 @@ def set_active_workspace_id(st: Any, workspace_id: str) -> str:
 
 
 def _on_active_workspace_changed(st: Any) -> None:
-    """Drop cross-profile session caches and reload workspace-scoped AMI state."""
+    """Drop Command Center aggregation caches when the active profile changes."""
     ss = st.session_state
     for key in list(ss.keys()):
         sk = str(key)
@@ -127,22 +127,6 @@ def _on_active_workspace_changed(st: Any) -> None:
             ss.pop(key, None)
     for key in DEVELOPER_SESSION_FLAG_KEYS:
         ss.pop(key, None)
-    try:
-        from applied_intelligence_persistent_state import (
-            clear_applied_intelligence_startup_restore_flags,
-            restore_applied_intelligence_disk_shell,
-        )
-
-        clear_applied_intelligence_startup_restore_flags(st)
-        restore_applied_intelligence_disk_shell(st)
-    except ImportError:
-        pass
-    try:
-        from applied_math_return_insight import sync_dismissed_insights_from_cloud
-
-        sync_dismissed_insights_from_cloud(st, "applied_intelligence")
-    except ImportError:
-        pass
     try:
         import streamlit as st_module
 

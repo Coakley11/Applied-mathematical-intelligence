@@ -37,6 +37,12 @@ except Exception:
     pass
 
 try:
+    from suite_app_shell import apply_suite_auth_gate
+
+    apply_suite_auth_gate(st)
+except Exception:
+    pass
+try:
     from suite_cloud_state import has_resume_query_params
     from suite_resume_launch import apply_suite_resume_launch, hydrate_applied_intelligence_from_url
 
@@ -133,11 +139,16 @@ if st.session_state.get("_suite_ai_question") or st.session_state.get("_suite_ai
 # =====================================================
 
 try:
-    from suite_command_center_link import render_command_center_sidebar_link
+    from suite_app_shell import render_suite_sidebar_account_shell
 
-    render_command_center_sidebar_link(st)
+    render_suite_sidebar_account_shell(st)
 except Exception:
-    pass
+    try:
+        from suite_command_center_link import render_command_center_sidebar_link
+
+        render_command_center_sidebar_link(st)
+    except Exception:
+        pass
 
 pp.render_sidebar_toggle(st)
 

@@ -22,25 +22,6 @@ def _qp_get(st: Any, name: str) -> str:
     return str(raw).strip()
 
 
-def question_id_from_resume_key(resume_key: str) -> str:
-    """Extract analytical-question id from ``ai:question:{qid}`` resume keys."""
-    key = str(resume_key or "").strip()
-    if key.startswith("ai:question:"):
-        return key.split(":", 2)[-1].strip()
-    return ""
-
-
-def resolve_url_suite_ai_question_id(st: Any) -> str:
-    """Best-effort question id from URL query params (explicit id or suite_resume)."""
-    qid = _qp_get(st, "suite_ai_question_id")
-    if qid:
-        return qid
-    resume = _qp_get(st, "suite_resume")
-    if resume:
-        return question_id_from_resume_key(resume)
-    return ""
-
-
 def finalize_suite_resume_launch(
     st: Any,
     app_key: str,
@@ -72,9 +53,16 @@ def finalize_suite_resume_launch(
 
 def apply_suite_resume_launch(st: Any, app_key: str) -> bool:
     """
-    Map ?suite_resume= & ?suite_page= into session state (once per session).
-    Returns True when query params were applied.
+    Initialize workspace profile and map ?suite_resume= & ?suite_page= into session state.
+    Returns True when resume query params were applied.
     """
+    try:
+        from suite_workspace import init_suite_workspace
+
+        init_suite_workspace(st)
+    except ImportError:
+        pass
+
     flag = f"_suite_resume_launch_{app_key}"
     if st.session_state.get(flag):
         return False
@@ -82,9 +70,7 @@ def apply_suite_resume_launch(st: Any, app_key: str) -> bool:
     resume = _qp_get(st, "suite_resume")
     page = _qp_get(st, "suite_page")
     ami_insight = _qp_get(st, "suite_ami_insight")
-    ai_qid = _qp_get(st, "suite_ai_question_id")
-    ai_question = _qp_get(st, "suite_ai_question")
-    if not resume and not page and not ami_insight and not ai_qid and not ai_question:
+    if not resume and not page and not ami_insight:
         return False
 
     key = str(app_key or "").strip()
@@ -106,42 +92,10 @@ def apply_suite_resume_launch(st: Any, app_key: str) -> bool:
     elif key == "future_lens":
         _apply_future_lens(st, resume, page)
     elif key == "applied_intelligence":
-        _apply_applied_intelligence(st, page or "Solve a Problem")
+        _apply_applied_intelligence(st, page)
 
     st.session_state[flag] = True
     return True
-
-
-def hydrate_applied_intelligence_from_url(st: Any) -> bool:
-    """Hydrate analytical-question deep links even when suite_page is absent."""
-    qid = resolve_url_suite_ai_question_id(st)
-    question = _qp_get(st, "suite_ai_question")
-    resume = _qp_get(st, "suite_resume")
-    page = _qp_get(st, "suite_page")
-    try:
-        from suite_cloud_state import list_active_resume_query_params
-
-        st.session_state["_suite_ai_query_params_present"] = list_active_resume_query_params(
-            st, "applied_intelligence"
-        )
-    except Exception:
-        st.session_state["_suite_ai_query_params_present"] = []
-    st.session_state["_suite_ai_url_question_id"] = qid or None
-    if qid:
-        st.session_state["_suite_ai_question_id"] = qid
-    if not qid and not question and not resume and not page:
-        return False
-    try:
-        from suite_analytical_question import hydrate_applied_intelligence_session
-
-        hydrate_applied_intelligence_session(st)
-        st.session_state["_suite_ai_hydrate_attempted"] = True
-        st.session_state.pop("_suite_ai_hydrate_error", None)
-        return True
-    except Exception as exc:
-        st.session_state["_suite_ai_hydrate_attempted"] = True
-        st.session_state["_suite_ai_hydrate_error"] = str(exc)
-        return False
 
 
 def _finalize_music_resume(
