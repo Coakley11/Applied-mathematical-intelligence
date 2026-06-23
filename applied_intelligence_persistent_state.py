@@ -43,6 +43,7 @@ _PS_CONTROL_RE = re.compile(r"^ps_[a-z]+_[a-f0-9]{10}_")
 
 # Widget keys across AMI views (Solve a Problem, Math Idea Explorer, labs, workshop, …).
 _AMI_UI_PREFIXES = (
+    "imp_",
     "ami_solver_",
     "ami_ref_",
     "ps_",

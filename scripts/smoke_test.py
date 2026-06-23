@@ -76,6 +76,12 @@ def main() -> int:
         from data.registry import DATA_SOURCES, list_sources
         from simulations.labs import LAB_RUNNERS
         from simulations.registry import SIMULATION_RUNNERS, run_simulation  # noqa: F401
+        from decision_registry import DECISION_TYPES, ENABLED_DECISION_TYPES
+        from decision_router import route_imported_problem
+        from decision_parser import parse_prediction_market_text
+        from decision_math import enrich_bet_fields
+        from decision_templates import assess_completeness
+        from components.importer_ui import render_ami_importer  # noqa: F401
     except Exception as exc:
         errors.append(f"import: {exc}")
         print("SMOKE FAILED (imports)")
@@ -207,6 +213,21 @@ def main() -> int:
 
     if len(list_sources()) < 6:
         errors.append("Expected at least 6 data source modules")
+
+    if "prediction_market_bet" not in ENABLED_DECISION_TYPES:
+        errors.append("prediction_market_bet should be enabled in Phase 0")
+    sample = "Will team X win?\nYes: 45¢\nNo: 55¢"
+    route = route_imported_problem(sample)
+    if route.get("decision_type") != "prediction_market_bet":
+        errors.append("Kalshi-style text should route to prediction_market_bet")
+    fields = parse_prediction_market_text(sample)
+    if fields.get("price") != 45.0:
+        errors.append(f"Expected yes price 45, got {fields.get('price')}")
+    from decision_math import enrich_bet_fields
+
+    complete_fields = enrich_bet_fields({**fields, "stake": 100, "user_probability": 0.50, "contract_side": "Yes"})
+    if not assess_completeness("prediction_market_bet", complete_fields).get("can_solve"):
+        errors.append("Complete bet fields should be solvable")
 
     if errors:
         print("SMOKE FAILED")
