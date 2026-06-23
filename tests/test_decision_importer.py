@@ -14,7 +14,14 @@ from decision_math import (
     enrich_bet_fields,
     solve_decision,
 )
-from decision_ocr import extract_text_from_image, image_metadata, ocr_availability
+from decision_ocr import (
+    OCR_UNAVAILABLE_USER_MESSAGE,
+    extract_text_from_image,
+    image_metadata,
+    ocr_availability,
+    ocr_fallback_message,
+    resolve_tesseract_cmd,
+)
 from decision_parser import (
     apply_field_edits,
     extract_fields,
@@ -186,13 +193,35 @@ class TestDecisionOCR(unittest.TestCase):
     def test_ocr_availability_returns_dict(self) -> None:
         info = ocr_availability()
         self.assertIn("available", info)
+        self.assertIn("ready", info)
+        self.assertIn("pytesseract_installed", info)
+        self.assertIn("tesseract_available", info)
         self.assertIn("engines", info)
 
     def test_extract_text_empty_bytes_no_crash(self) -> None:
         result = extract_text_from_image(b"")
         self.assertIsInstance(result, dict)
-        self.assertIn("success", result)
+        self.assertFalse(result["success"])
         self.assertIn("error", result)
+        self.assertIn("Screenshot received", result["error"])
+
+    def test_ocr_graceful_failure_without_tesseract_binary(self) -> None:
+        with unittest.mock.patch("decision_ocr.resolve_tesseract_cmd", return_value=None):
+            with unittest.mock.patch("decision_ocr._pytesseract_installed", return_value=True):
+                with unittest.mock.patch("decision_ocr._pillow_installed", return_value=True):
+                    result = extract_text_from_image(b"\x89PNG\r\n\x1a\n")
+        self.assertFalse(result["success"])
+        self.assertIn(OCR_UNAVAILABLE_USER_MESSAGE, result["error"])
+
+    def test_ocr_fallback_message(self) -> None:
+        msg = ocr_fallback_message({"success": False, "error": "something"})
+        self.assertIn(OCR_UNAVAILABLE_USER_MESSAGE, msg)
+        self.assertEqual(ocr_fallback_message({"success": True}), "")
+
+    def test_resolve_tesseract_cmd_env(self) -> None:
+        with unittest.mock.patch.dict("os.environ", {"TESSERACT_CMD": "C:\\fake\\tesseract.exe"}):
+            with unittest.mock.patch("os.path.isfile", return_value=True):
+                self.assertEqual(resolve_tesseract_cmd(), "C:\\fake\\tesseract.exe")
 
     def test_image_metadata(self) -> None:
         data = b"not-an-image"

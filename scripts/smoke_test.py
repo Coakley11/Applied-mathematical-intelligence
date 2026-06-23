@@ -218,10 +218,24 @@ def main() -> int:
     req_text = (ROOT / "requirements.txt").read_text(encoding="utf-8")
     if "supabase>=" not in req_text:
         errors.append("requirements.txt must include supabase>=2.0.0 for Streamlit Cloud auth")
+    if "pytesseract" not in req_text:
+        errors.append("requirements.txt must include pytesseract for screenshot OCR")
+    if "Pillow" not in req_text:
+        errors.append("requirements.txt must include Pillow for screenshot OCR")
+    packages_file = ROOT / "packages.txt"
+    if not packages_file.is_file():
+        errors.append("packages.txt missing — needed for tesseract-ocr on Streamlit Cloud")
+    elif "tesseract-ocr" not in packages_file.read_text(encoding="utf-8"):
+        errors.append("packages.txt must include tesseract-ocr")
     try:
         import supabase  # noqa: F401
     except ImportError:
         errors.append("supabase package not installed in this environment (required for deploy)")
+    try:
+        import pytesseract  # noqa: F401
+        from PIL import Image  # noqa: F401
+    except ImportError:
+        errors.append("pytesseract/Pillow not installed in this environment (required for OCR)")
 
     if "prediction_market_bet" not in ENABLED_DECISION_TYPES:
         errors.append("prediction_market_bet should be enabled in Phase 0")
@@ -245,8 +259,10 @@ def main() -> int:
     if mfields.get("volume") != 10000.0:
         errors.append(f"Expected volume 10000, got {mfields.get('volume')}")
     ocr_info = ocr_availability()
-    if "available" not in ocr_info:
-        errors.append("ocr_availability should return available flag")
+    if "ready" not in ocr_info:
+        errors.append("ocr_availability should return ready flag")
+    if not ocr_info.get("pytesseract_installed"):
+        errors.append("pytesseract should be installed after requirements update")
     clip_info = clipboard_paste_available()
     if not clip_info.get("paste_zone"):
         errors.append("clipboard paste zone should be available")

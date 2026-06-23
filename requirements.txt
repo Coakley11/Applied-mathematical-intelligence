@@ -10,6 +10,6 @@ extra-streamlit-components>=0.1.60
 # Clipboard button fallback (Ctrl+V paste zone is built-in)
 streamlit-paste-button>=0.1.2
 
-# Optional OCR for screenshot import (requires system Tesseract binary)
-# pytesseract>=0.3.10
-# Pillow>=10.0.0
+# Screenshot OCR (system binary via packages.txt: tesseract-ocr)
+pytesseract>=0.3.10
+Pillow>=10.0.0

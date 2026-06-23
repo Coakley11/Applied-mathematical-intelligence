@@ -17,7 +17,7 @@ from components.clipboard_image_paste import (
 )
 from decision_history import delete_import_entry, list_import_history, save_import_entry
 from decision_math import enrich_bet_fields, solve_decision
-from decision_ocr import extract_text_from_image, ocr_availability
+from decision_ocr import extract_text_from_image, ocr_availability, ocr_fallback_message
 from decision_parser import apply_field_edits, extract_fields
 from decision_registry import DECISION_TYPES, ENABLED_DECISION_TYPES, get_decision_label, is_enabled
 from decision_router import route_imported_problem
@@ -41,7 +41,7 @@ def render_ami_importer() -> None:
 
     _init_importer_state()
     ocr_info = ocr_availability()
-    if not ocr_info["available"]:
+    if not ocr_info.get("ready"):
         st.caption(f"ℹ️ {ocr_info['note']}")
 
     tab_import, tab_history = st.tabs(["Import & analyze", "History"])
@@ -246,7 +246,7 @@ def _render_image_import() -> str:
                     filename=uploaded.name,
                     mime=uploaded.type or "image/png",
                     source="file_upload",
-                    auto_ocr=False,
+                    auto_ocr=True,
                 )
 
     image_bytes = st.session_state.get("imp_image_bytes")
@@ -267,7 +267,7 @@ def _render_image_import() -> str:
                     st.session_state["imp_image_manual_text"] = ocr_result.get("text", "")
                     st.success(f"OCR extracted {len(ocr_result['text'])} characters.")
                 else:
-                    st.warning(ocr_result.get("error") or "OCR failed — paste text manually below.")
+                    st.warning(ocr_fallback_message(ocr_result))
         with col_clear:
             if st.button("Clear image", key="imp_clear_image_btn"):
                 for k in (
@@ -277,8 +277,12 @@ def _render_image_import() -> str:
                     st.session_state.pop(k, None)
                 st.rerun()
 
-        if st.session_state.get("imp_ocr_auto_ran") and st.session_state.get("imp_ocr_result", {}).get("success"):
-            st.caption("OCR ran automatically on paste/upload.")
+        ocr_result = st.session_state.get("imp_ocr_result") or {}
+        if st.session_state.get("imp_ocr_auto_ran"):
+            if ocr_result.get("success"):
+                st.caption("OCR ran automatically on paste/upload.")
+            else:
+                st.warning(ocr_fallback_message(ocr_result))
 
     ocr_result = st.session_state.get("imp_ocr_result") or {}
     ocr_text = str(ocr_result.get("text") or "")
