@@ -459,6 +459,8 @@ def extract_fields(
 
 # --- Poker hand parsing ---
 
+_APOSTROPHE = r"['\u2019]"
+
 _SUIT_MAP = {
     "s": "s", "h": "h", "d": "d", "c": "c",
     "♠": "s", "♥": "h", "♦": "d", "♣": "c",
@@ -470,13 +472,13 @@ _CARD_TOKEN = re.compile(
     re.I,
 )
 _STREET_INLINE = re.compile(r"\b(preflop|pre-flop|flop|turn|river)\b", re.I)
-_GAME_TYPE = re.compile(r"\b(texas\s+hold'?em|hold'?em|omaha)\b", re.I)
+_GAME_TYPE = re.compile(rf"\b(texas\s+hold{_APOSTROPHE}?em|hold{_APOSTROPHE}?em|omaha)\b", re.I)
 _POT_INLINE = re.compile(
     r"(?:pot|main\s+pot)\s*(?:size|is|=|:)?\s*\$?\s*(\d+(?:\.\d{1,2})?)",
     re.I,
 )
 _CALL_INLINE = re.compile(
-    r"(?:amount\s+to\s+)?call\s*(?:amount|size|is|=|:)?\s*\$?\s*(\d+(?:\.\d{1,2})?)",
+    r"(?:amount\s+to\s+)?call(?:\s+amount)?\s*(?:size|is|=|:)?\s*\$?\s*(\d+(?:\.\d{1,2})?)",
     re.I,
 )
 _VILLAIN_BET = re.compile(
@@ -488,7 +490,7 @@ _BET_INLINE = re.compile(
     re.I,
 )
 _EQUITY_INLINE = re.compile(
-    r"(?:estimate\s+)?(?:equity|win\s+(?:prob(?:ability)?|rate)|my\s+equity)\s*(?:is|=|:)?\s*(\d{1,3})\s*%?",
+    r"(?:(?:estimated?|my)\s+)?(?:equity|win\s+(?:prob(?:ability)?|rate))\s*(?:is|=|:)?\s*(\d{1,3})\s*%?",
     re.I,
 )
 _HERO_HAND = re.compile(

@@ -62,6 +62,15 @@ Texas Hold'em. Hero has Ah Kh. Board: Qh Jh 2c. Flop.
 Pot $100. Villain bets $50. Call $50. Estimate equity 40%.
 """
 
+POKER_USER_EXACT = """Texas Hold'em.
+
+Hero has Ah Kh.
+Board: Qh Jh 2c.
+Pot: $100.
+Villain bets $50.
+Amount to call: $50.
+Estimated equity: 40%."""
+
 
 class TestDecisionRouter(unittest.TestCase):
     def test_routes_kalshi_text_to_prediction_market(self) -> None:
@@ -78,6 +87,15 @@ class TestDecisionRouter(unittest.TestCase):
         self.assertEqual(route["decision_type"], "poker_hand_decision")
         self.assertGreater(route["confidence"], 0.4)
 
+    def test_routes_exact_user_multiline_poker_text(self) -> None:
+        route = route_imported_problem(POKER_USER_EXACT)
+        self.assertEqual(route["decision_type"], "poker_hand_decision")
+        self.assertGreaterEqual(route["confidence"], 0.45)
+
+    def test_prediction_market_hint_overrides_auto_detect(self) -> None:
+        route = route_imported_problem(POKER_USER_EXACT, hint="prediction_market_bet")
+        self.assertEqual(route["decision_type"], "prediction_market_bet")
+
 
 class TestDecisionParserPoker(unittest.TestCase):
     def test_parses_ak_qj_example(self) -> None:
@@ -90,6 +108,31 @@ class TestDecisionParserPoker(unittest.TestCase):
         self.assertAlmostEqual(fields["pot_size"], 100.0)
         self.assertAlmostEqual(fields["amount_to_call"], 50.0)
         self.assertAlmostEqual(fields["hero_equity"], 0.40, places=2)
+
+    def test_parses_exact_user_multiline_example(self) -> None:
+        fields = parse_poker_hand_text(POKER_USER_EXACT)
+        self.assertEqual(fields["game_type"], "texas_holdem")
+        self.assertEqual(fields["hero_hand"], "Ah Kh")
+        self.assertEqual(fields["board"], "Qh Jh 2c")
+        self.assertAlmostEqual(fields["pot_size"], 100.0)
+        self.assertAlmostEqual(fields["villain_bet_size"], 50.0)
+        self.assertAlmostEqual(fields["amount_to_call"], 50.0)
+        self.assertAlmostEqual(fields["hero_equity"], 0.40, places=2)
+
+    def test_exact_user_example_end_to_end(self) -> None:
+        route = route_imported_problem(POKER_USER_EXACT)
+        self.assertEqual(route["decision_type"], "poker_hand_decision")
+        fields = extract_fields(POKER_USER_EXACT, route["decision_type"])
+        result = solve_decision("poker_hand_decision", fields)
+        self.assertAlmostEqual(result["pot_after_call"], 150.0)
+        self.assertAlmostEqual(result["break_even_equity"], 1 / 3, places=2)
+        self.assertAlmostEqual(result["ev_call"], 10.0, places=1)
+        self.assertEqual(result["recommendation"], "call")
+
+    def test_parses_curly_apostrophe_holdem(self) -> None:
+        text = POKER_USER_EXACT.replace("Hold'em", "Hold\u2019em")
+        fields = parse_poker_hand_text(text)
+        self.assertEqual(fields["game_type"], "texas_holdem")
 
     def test_poker_completeness_requires_equity(self) -> None:
         fields = parse_poker_hand_text("Pot $80. Villain bets $40.")

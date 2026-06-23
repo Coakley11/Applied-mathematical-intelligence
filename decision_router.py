@@ -20,14 +20,17 @@ _INVESTMENT_MARKERS = re.compile(
 )
 _JOB_MARKERS = re.compile(r"\b(job\s+offer|salary\s+offer|compensation\s+package|remote\s+work)\b", re.I)
 _LOAN_MARKERS = re.compile(r"\b(car\s+loan|auto\s+loan|financing|apr|monthly\s+payment)\b", re.I)
+_APOSTROPHE = r"['\u2019]"
+
 _POKER_MARKERS = re.compile(
     r"\b("
-    r"texas\s+hold'?em|hold'?em|poker|"
+    rf"texas\s+hold{_APOSTROPHE}?em|hold{_APOSTROPHE}?em|poker|"
     r"preflop|flop|turn|river|"
     r"hero|villain|opponent|"
     r"pot\s+odds|all[- ]?in|"
-    r"equity|fold|call|raise|check|"
-    r"board|stack|button|bb|sb"
+    r"estimated?\s+equity|equity|fold|call|raise|check|"
+    r"board|stack|button|bb|sb|"
+    r"amount\s+to\s+call|villain\s+bets?"
     r")\b",
     re.I,
 )
@@ -42,10 +45,13 @@ def _score_prediction_market(text: str) -> float:
         score += 0.25
     if _YES_NO_LINE.search(text):
         score += 0.2
-    if re.search(r"\b(will|chance|probability|odds|bet|wager|market)\b", text, re.I):
+    if re.search(r"\b(will|chance|probability|odds|wager|market)\b", text, re.I):
         score += 0.1
     if re.search(r"\b(yes|no)\b", text, re.I) and re.search(r"\d{1,2}", text):
         score += 0.1
+    # Poker phrasing ("villain bets", hole cards) should not inflate market score.
+    if _POKER_CARDS.search(text) and re.search(r"\b(hero|villain|board|flop|turn|river)\b", text, re.I):
+        score = max(0.0, score - 0.25)
     return min(score, 1.0)
 
 
@@ -72,10 +78,13 @@ def _score_poker_hand(text: str) -> float:
         score += 0.15
     if re.search(r"\bpot\b", text, re.I) and re.search(r"\$\s*\d+", text):
         score += 0.15
-    if re.search(r"\b(equity|pot\s+odds)\b", text, re.I):
+    if re.search(r"\b(estimated?\s+equity|equity|pot\s+odds)\b", text, re.I):
         score += 0.1
+    # Generic "bet"/"market" words appear in poker spots too — do not boost prediction markets.
     if _KALSHI_MARKERS.search(text) or _YES_NO_LINE.search(text):
         score -= 0.15
+    elif re.search(r"\b(villain|opponent)\s+bets?\b", text, re.I):
+        score += 0.05
     return max(0.0, min(score, 1.0))
 
 

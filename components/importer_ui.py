@@ -108,15 +108,18 @@ def _render_import_workflow() -> None:
     else:
         raw_input = _render_manual_entry(hint)
 
-    type_options = list(ENABLED_DECISION_TYPES) + [k for k in DECISION_TYPES if not is_enabled(k)]
-    type_labels = [f"{get_decision_label(t)}{' (coming soon)' if not is_enabled(t) else ''}" for t in type_options]
+    type_options = [""] + list(ENABLED_DECISION_TYPES) + [k for k in DECISION_TYPES if not is_enabled(k)]
+    type_labels = ["Auto-detect (recommended)"] + [
+        f"{get_decision_label(t)}{' (coming soon)' if not is_enabled(t) else ''}"
+        for t in type_options[1:]
+    ]
     selected_idx = st.selectbox(
         "Decision type (auto-detect or override)",
         range(len(type_options)),
         format_func=lambda i: type_labels[i],
         key="imp_type_select",
     )
-    hint = type_options[selected_idx] if is_enabled(type_options[selected_idx]) else ""
+    hint = type_options[selected_idx] if type_options[selected_idx] else ""
 
     col_a, col_b = st.columns(2)
     with col_a:
