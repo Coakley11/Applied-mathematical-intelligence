@@ -310,9 +310,107 @@ POKER_HAND_DECISION_FIELDS: dict[str, FieldSpec] = {
     },
 }
 
+JOB_OFFER_DECISION_FIELDS: dict[str, FieldSpec] = {
+    "title": {
+        "label": "Decision title",
+        "required": False,
+        "why": "Short label for this job comparison.",
+        "input_type": "text",
+        "editable": True,
+    },
+    "current_salary": {
+        "label": "Current salary ($/year)",
+        "required": True,
+        "why": "Base compensation at your current job.",
+        "input_type": "number",
+        "editable": True,
+    },
+    "current_commute_minutes": {
+        "label": "Current commute (minutes one way)",
+        "required": False,
+        "why": "Daily travel time to value time cost.",
+        "input_type": "number",
+        "editable": True,
+    },
+    "current_remote_days": {
+        "label": "Current remote days / week",
+        "required": False,
+        "why": "Work-from-home frequency today.",
+        "input_type": "number",
+        "editable": True,
+    },
+    "new_salary": {
+        "label": "New salary ($/year)",
+        "required": True,
+        "why": "Base compensation in the offer.",
+        "input_type": "number",
+        "editable": True,
+    },
+    "new_bonus": {
+        "label": "Signing / annual bonus ($)",
+        "required": False,
+        "why": "One-time or recurring cash beyond base salary.",
+        "input_type": "number",
+        "editable": True,
+    },
+    "new_commute_minutes": {
+        "label": "New commute (minutes one way)",
+        "required": False,
+        "why": "Expected daily travel at the new job.",
+        "input_type": "number",
+        "editable": True,
+    },
+    "new_remote_days": {
+        "label": "New remote days / week",
+        "required": False,
+        "why": "Hybrid / remote days in the offer.",
+        "input_type": "number",
+        "editable": True,
+    },
+    "value_per_hour": {
+        "label": "Value of your time ($/hour)",
+        "required": False,
+        "why": "Used to convert extra commute into annual cost.",
+        "input_type": "number",
+        "allow_estimate": True,
+        "editable": True,
+    },
+    "remote_day_value": {
+        "label": "Value per WFH day ($)",
+        "required": False,
+        "why": "Estimated benefit of each extra remote day (flexibility, etc.).",
+        "input_type": "number",
+        "allow_estimate": True,
+        "editable": True,
+    },
+    "quality_notes": {
+        "label": "Quality-of-life notes",
+        "required": False,
+        "why": "Culture, growth, stress, benefits not captured in numbers.",
+        "input_type": "text",
+        "allow_estimate": True,
+        "editable": True,
+    },
+    "work_days_per_year": {
+        "label": "Work days per year",
+        "required": False,
+        "why": "Commute cost scaling factor.",
+        "input_type": "number",
+        "editable": True,
+    },
+    "net_adjusted_advantage": {
+        "label": "Net adjusted advantage ($/year)",
+        "required": False,
+        "derived": True,
+        "why": "Salary + bonus − commute cost + remote benefit estimate.",
+        "input_type": "number",
+    },
+}
+
 DECISION_FIELD_TEMPLATES: dict[str, dict[str, FieldSpec]] = {
     "prediction_market_bet": PREDICTION_MARKET_BET_FIELDS,
     "poker_hand_decision": POKER_HAND_DECISION_FIELDS,
+    "job_offer_decision": JOB_OFFER_DECISION_FIELDS,
 }
 
 
@@ -414,6 +512,15 @@ def _active_uncertain(fields: dict[str, Any], decision_type: str) -> list[str]:
     return list(dict.fromkeys(still))
 
 
+def _job_missing_required(fields: dict[str, Any]) -> list[str]:
+    missing: list[str] = []
+    if not _has_value(fields.get("current_salary")):
+        missing.append("current_salary")
+    if not _has_value(fields.get("new_salary")):
+        missing.append("new_salary")
+    return missing
+
+
 def _poker_missing_required(fields: dict[str, Any]) -> list[str]:
     """Pricing fields required for poker pot-odds analysis."""
     missing: list[str] = []
@@ -470,6 +577,13 @@ def assess_completeness(
             if key not in missing_required:
                 missing_required.append(key)
 
+    if decision_type == "job_offer_decision":
+        for key in _job_missing_required(fields):
+            if key not in missing:
+                missing.append(key)
+            if key not in missing_required:
+                missing_required.append(key)
+
     missing = list(dict.fromkeys(missing))
     missing_required = list(dict.fromkeys(missing_required))
 
@@ -479,6 +593,7 @@ def assess_completeness(
             + [k for k, s in tpl.items() if _required_for_format(fields, k, s)]
             + _format_specific_missing(fields)
             + (_poker_missing_required(fields) if decision_type == "poker_hand_decision" else [])
+            + (_job_missing_required(fields) if decision_type == "job_offer_decision" else [])
         )
     )
     filled_req = sum(1 for k in req_keys if _has_value(fields.get(k)))
@@ -556,6 +671,33 @@ def clarification_questions(fields: dict[str, Any], decision_type: str = "predic
                 "id": "villain_range",
                 "question": "What range do you assign the villain?",
                 "why": "True equity is highly sensitive to opponent range.",
+            })
+        return questions
+
+    if decision_type == "job_offer_decision":
+        if not _has_value(fields.get("current_salary")):
+            questions.append({
+                "id": "current_salary",
+                "question": "What is your current base salary ($/year)?",
+                "why": "Needed to compare total compensation.",
+            })
+        if not _has_value(fields.get("new_salary")):
+            questions.append({
+                "id": "new_salary",
+                "question": "What is the offered base salary ($/year)?",
+                "why": "Core comparison against your current pay.",
+            })
+        if fields.get("current_commute_minutes") is None or fields.get("new_commute_minutes") is None:
+            questions.append({
+                "id": "current_commute_minutes",
+                "question": "What are the one-way commute times (minutes) for each job?",
+                "why": "Extra travel time has an annual time cost.",
+            })
+        if fields.get("new_remote_days") is None:
+            questions.append({
+                "id": "new_remote_days",
+                "question": "How many remote/hybrid days per week does the offer include?",
+                "why": "Flexibility can offset commute or pay tradeoffs.",
             })
         return questions
 

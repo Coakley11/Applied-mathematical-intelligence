@@ -451,6 +451,8 @@ def extract_fields(
             fields = parse_prediction_market_text(raw_input)
     elif decision_type == "poker_hand_decision":
         fields = parse_poker_hand_text(raw_input)
+    elif decision_type == "job_offer_decision":
+        fields = parse_job_offer_text(raw_input)
     else:
         fields = {"title": raw_input[:120], "source_excerpt": raw_input[:500]}
     fields["decision_type"] = decision_type
@@ -667,6 +669,111 @@ def parse_poker_hand_text(raw: str) -> dict[str, Any]:
     return enrich_poker_fields(fields)
 
 
+# --- Job offer parsing ---
+
+_MONEY_AMOUNT = re.compile(r"\$?\s*([\d,]+(?:\.\d{1,2})?)")
+_SALARY_LINE = re.compile(r"salary[:\s]*\$?\s*([\d,]+)", re.I)
+_BONUS_LINE = re.compile(r"(?:signing\s+)?bonus[:\s]*\$?\s*([\d,]+)", re.I)
+_COMMUTE_LINE = re.compile(r"commute[:\s]*(\d+)\s*(?:min(?:ute)?s?)?", re.I)
+_REMOTE_LINE = re.compile(
+    r"(?:remote|hybrid)[:\s]*(\d+)\s*(?:days?)?(?:\s*(?:per\s+week|/week))?",
+    re.I,
+)
+
+
+def _parse_money_amount(raw: str | None) -> float | None:
+    if raw is None:
+        return None
+    try:
+        return float(str(raw).replace(",", "").replace("$", "").strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_job_section(block: str) -> dict[str, float | None]:
+    out: dict[str, float | None] = {
+        "salary": None,
+        "bonus": None,
+        "commute_minutes": None,
+        "remote_days": None,
+    }
+    sm = _SALARY_LINE.search(block)
+    if sm:
+        out["salary"] = _parse_money_amount(sm.group(1))
+    bm = _BONUS_LINE.search(block)
+    if bm:
+        out["bonus"] = _parse_money_amount(bm.group(1))
+    cm = _COMMUTE_LINE.search(block)
+    if cm:
+        out["commute_minutes"] = float(cm.group(1))
+    rm = _REMOTE_LINE.search(block)
+    if rm:
+        out["remote_days"] = float(rm.group(1))
+    return out
+
+
+def parse_job_offer_text(raw: str) -> dict[str, Any]:
+    """Parse a job-offer comparison from pasted text."""
+    text = str(raw or "").strip()
+    fields: dict[str, Any] = {
+        "title": "Job offer decision",
+        "current_salary": None,
+        "current_commute_minutes": None,
+        "current_remote_days": 0.0,
+        "new_salary": None,
+        "new_bonus": None,
+        "new_commute_minutes": None,
+        "new_remote_days": None,
+        "value_per_hour": 50.0,
+        "remote_day_value": 40.0,
+        "work_days_per_year": 250,
+        "quality_notes": "",
+        "source_excerpt": text[:800],
+        "uncertain_fields": [],
+        "ocr_corrected": False,
+    }
+    if not text:
+        return fields
+
+    current_block = ""
+    new_block = ""
+    cm = re.search(r"current\s+job\s*:?\s*(.*)", text, re.I | re.S)
+    nm = re.search(r"new\s+job(?:\s+offer)?\s*:?\s*(.*)", text, re.I | re.S)
+    if cm:
+        current_block = cm.group(1)
+        if nm:
+            current_block = current_block[: current_block.lower().find("new job")]
+    if nm:
+        new_block = nm.group(1)
+
+    if not current_block and not new_block:
+        current_block = text
+        new_block = text
+
+    cur = _parse_job_section(current_block)
+    new = _parse_job_section(new_block)
+
+    fields["current_salary"] = cur["salary"]
+    fields["current_commute_minutes"] = cur["commute_minutes"]
+    if cur["remote_days"] is not None:
+        fields["current_remote_days"] = cur["remote_days"]
+    fields["new_salary"] = new["salary"]
+    fields["new_bonus"] = new["bonus"]
+    fields["new_commute_minutes"] = new["commute_minutes"]
+    fields["new_remote_days"] = new["remote_days"]
+
+    uncertain: list[str] = []
+    if fields["current_salary"] is None:
+        uncertain.append("current_salary")
+    if fields["new_salary"] is None:
+        uncertain.append("new_salary")
+    fields["uncertain_fields"] = uncertain
+
+    from decision_math import enrich_job_fields
+
+    return enrich_job_fields(fields)
+
+
 def apply_field_edits(fields: dict[str, Any], edits: dict[str, Any]) -> dict[str, Any]:
     """Merge user corrections and re-enrich derived values."""
     merged = dict(fields)
@@ -712,4 +819,8 @@ def apply_field_edits(fields: dict[str, Any], edits: dict[str, Any]) -> dict[str
         from decision_math import enrich_poker_fields
 
         return enrich_poker_fields(merged)
+    if dtype == "job_offer_decision":
+        from decision_math import enrich_job_fields
+
+        return enrich_job_fields(merged)
     return enrich_bet_fields(merged)

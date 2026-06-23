@@ -15,8 +15,9 @@ from components.clipboard_image_paste import (
     render_clipboard_paste_zone,
     render_paste_button,
 )
+from decision_examples import IMPORTER_EXAMPLES, get_example
 from decision_history import delete_import_entry, list_import_history, save_import_entry
-from decision_math import enrich_bet_fields, enrich_poker_fields, solve_decision
+from decision_math import enrich_bet_fields, enrich_job_fields, enrich_poker_fields, solve_decision
 from decision_ocr import extract_text_from_image, ocr_availability, ocr_fallback_message
 from decision_parser import apply_field_edits, extract_fields
 from decision_registry import DECISION_TYPES, ENABLED_DECISION_TYPES, get_decision_label, is_enabled
@@ -34,20 +35,68 @@ from decision_templates import (
 )
 
 
+_WORKFLOW_STEPS = (
+    "Import",
+    "Extract & Route",
+    "Review & Edit",
+    "Analyze",
+    "Save",
+)
+
+
+def _workflow_step_index(stage: str, *, has_analysis: bool = False) -> int:
+    if has_analysis:
+        return 5
+    if stage == "results":
+        return 4
+    if stage == "review":
+        return 3
+    return 1
+
+
+def _render_workflow_progress(stage: str, *, has_analysis: bool = False) -> None:
+    current = _workflow_step_index(stage, has_analysis=has_analysis)
+    cols = st.columns(len(_WORKFLOW_STEPS))
+    for i, (col, label) in enumerate(zip(cols, _WORKFLOW_STEPS), start=1):
+        with col:
+            if i < current:
+                st.markdown(f"✅ **{i}. {label}**")
+            elif i == current:
+                st.markdown(f"▶️ **{i}. {label}**")
+            else:
+                st.markdown(f"{i}. {label}")
+
+
+def _load_example(example_id: str) -> None:
+    ex = get_example(example_id)
+    if not ex:
+        return
+    if ex.get("coming_soon"):
+        st.info(f"{ex['title']} — structured analysis coming soon. Sample text loaded for preview.")
+    st.session_state["imp_paste_buffer"] = ex["text"]
+    st.session_state["imp_paste_input"] = ex["text"]
+    st.session_state["imp_source_type"] = ex.get("source_type", "text")
+    st.session_state["imp_stage"] = "import"
+
+
 def render_ami_importer() -> None:
-    """Full importer workflow."""
-    st.markdown("#### AMI Problem Importer")
+    """Real Problem Importer — paste, screenshot, analyze real-world decisions."""
+    st.markdown("## Real Problem Importer")
     st.caption(
-        "Paste prediction-market text, a poker hand spot, paste a screenshot (Ctrl+V), upload, or enter manually. "
-        "Review extracted fields, fill gaps, then run decision math — not gambling advice."
+        "Import a real decision — prediction markets, poker spots, job offers, and more. "
+        "Paste text, screenshots, or CSV; AMI extracts fields, flags gaps, and runs structured math."
     )
 
     _init_importer_state()
+    stage = str(st.session_state.get("imp_stage") or "import")
+    has_analysis = bool(st.session_state.get("imp_analysis"))
+    _render_workflow_progress(stage, has_analysis=has_analysis)
+
     ocr_info = ocr_availability()
     if not ocr_info.get("ready"):
         st.caption(f"ℹ️ {ocr_info['note']}")
 
-    tab_import, tab_history = st.tabs(["Import & analyze", "History"])
+    tab_import, tab_history = st.tabs(["Analyze a decision", "History"])
     with tab_import:
         _render_import_workflow()
     with tab_history:
@@ -67,13 +116,24 @@ def _init_importer_state() -> None:
 def _render_import_workflow() -> None:
     stage = st.session_state.get("imp_stage", "import")
 
-    st.markdown("**1 · Import**")
-    source = st.radio(
-        "Input method",
-        ["Paste text", "Screenshot / image", "Upload CSV", "Manual entry"],
-        horizontal=True,
-        key="imp_source_radio",
-    )
+    with st.container(border=True):
+        st.markdown("### 1 · Import")
+        st.caption("Try an example or paste your own decision below.")
+        ex_cols = st.columns(len(IMPORTER_EXAMPLES))
+        for col, ex in zip(ex_cols, IMPORTER_EXAMPLES):
+            with col:
+                st.markdown(f"**{ex['title']}**")
+                st.caption(ex["description"][:70] + ("…" if len(ex["description"]) > 70 else ""))
+                if st.button("Load example", key=f"imp_ex_{ex['id']}", use_container_width=True):
+                    _load_example(ex["id"])
+                    st.rerun()
+
+        source = st.radio(
+            "Input method",
+            ["Paste text", "Screenshot / image", "Upload CSV", "Manual entry"],
+            horizontal=True,
+            key="imp_source_radio",
+        )
     source_map = {
         "Paste text": "text",
         "Screenshot / image": "image",
@@ -86,9 +146,9 @@ def _render_import_workflow() -> None:
     raw_input = ""
     if source == "Paste text":
         raw_input = st.text_area(
-            "Paste bet / market text",
-            value=st.session_state.get("imp_paste_buffer", ""),
-            height=140,
+            "Paste your decision details",
+            value=st.session_state.get("imp_paste_buffer", st.session_state.get("imp_paste_input", "")),
+            height=160,
             placeholder=(
                 "Prediction market:\nWill the Knicks make the playoffs?\nYes: 42¢  No: 58¢\n\n"
                 "Poker hand:\nTexas Hold'em. Hero has Ah Kh. Board: Qh Jh 2c. Pot $100. "
@@ -96,6 +156,7 @@ def _render_import_workflow() -> None:
             ),
             key="imp_paste_input",
         )
+        st.session_state["imp_paste_buffer"] = raw_input
     elif source == "Screenshot / image":
         raw_input = _render_image_import()
     elif source == "Upload CSV":
@@ -123,9 +184,9 @@ def _render_import_workflow() -> None:
 
     col_a, col_b = st.columns(2)
     with col_a:
-        extract_clicked = st.button("Extract & route", type="primary", key="imp_extract_btn")
+        extract_clicked = st.button("Extract & route →", type="primary", key="imp_extract_btn", use_container_width=True)
     with col_b:
-        reset_clicked = st.button("Reset", key="imp_reset_btn")
+        reset_clicked = st.button("Reset workflow", key="imp_reset_btn", use_container_width=True)
 
     if reset_clicked:
         for k in list(st.session_state.keys()):
@@ -361,6 +422,8 @@ def _render_manual_entry(hint: str = "") -> str:
 def _enrich_fields(dtype: str, fields: dict[str, Any]) -> dict[str, Any]:
     if dtype == "poker_hand_decision":
         return enrich_poker_fields(fields)
+    if dtype == "job_offer_decision":
+        return enrich_job_fields(fields)
     return enrich_bet_fields(fields)
 
 
@@ -374,12 +437,15 @@ def _render_post_extract() -> None:
     fields = _enrich_fields(dtype, fields)
 
     st.markdown("---")
-    st.markdown("**2 · Extract**")
+    with st.container(border=True):
+        st.markdown("### 2 · Extract & Route")
     route = st.session_state.get("imp_route") or {}
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Decision type", get_decision_label(dtype))
     if dtype == "poker_hand_decision":
         c2.metric("Street", str(fields.get("street") or "—").replace("_", " "))
+    elif dtype == "job_offer_decision":
+        c2.metric("Salary delta", f"${float(fields.get('new_salary') or 0) - float(fields.get('current_salary') or 0):+,.0f}" if fields.get("new_salary") and fields.get("current_salary") else "—")
     else:
         c2.metric("Bet format", str(fields.get("bet_format") or "—").replace("_", " "))
     c3.metric("Route confidence", f"{float(route.get('confidence', 0)):.0%}")
@@ -389,10 +455,12 @@ def _render_post_extract() -> None:
 
     _render_extracted_summary(fields, dtype)
 
-    st.markdown("**3 · Review & edit parsed fields**")
+    st.markdown("### 3 · Review & Edit")
     st.caption("Correct anything OCR or parsing got wrong before analysis.")
     if dtype == "poker_hand_decision":
         fields = _render_poker_field_review_form(fields)
+    elif dtype == "job_offer_decision":
+        fields = _render_job_field_review_form(fields)
     else:
         fields = _render_field_review_form(dtype, fields)
     st.session_state["imp_fields"] = fields
@@ -400,7 +468,7 @@ def _render_post_extract() -> None:
 
     completeness = assess_completeness(dtype, fields, user_provided=user_provided)
 
-    st.markdown("**4 · Missing information & confidence**")
+    st.markdown("### 4 · Missing Information")
     _render_confidence_panel(completeness, dtype, fields)
 
     if completeness.get("missing_required"):
@@ -412,9 +480,9 @@ def _render_post_extract() -> None:
         st.success("All required fields present — ready to analyze.")
 
     st.markdown("---")
-    st.markdown("**5 · Analyze**")
+    st.markdown("### 5 · Analyze")
     can_solve = completeness.get("can_solve", False)
-    if st.button("Run decision analysis", type="primary", disabled=not can_solve, key="imp_solve_btn"):
+    if st.button("Run decision analysis →", type="primary", disabled=not can_solve, key="imp_solve_btn"):
         analysis = solve_decision(dtype, fields)
         st.session_state["imp_analysis"] = analysis
         st.session_state["imp_stage"] = "results"
@@ -423,11 +491,13 @@ def _render_post_extract() -> None:
     if analysis and analysis.get("verdict") != "incomplete":
         if dtype == "poker_hand_decision":
             _render_poker_analysis_results(fields, analysis, completeness)
+        elif dtype == "job_offer_decision":
+            _render_job_analysis_results(fields, analysis, completeness)
         else:
             _render_analysis_results(dtype, fields, analysis, completeness)
 
         st.markdown("---")
-        st.markdown("**6 · Save**")
+        st.markdown("### 6 · Save")
         notes = st.text_input("Notes (optional)", key="imp_save_notes")
         if st.button("Save to history", key="imp_save_btn"):
             entry = save_import_entry(
@@ -471,6 +541,20 @@ def _render_extracted_summary(fields: dict[str, Any], dtype: str) -> None:
             if fields.get("hero_equity") is not None:
                 eq = float(fields["hero_equity"])
                 st.metric("Equity est.", f"{eq * 100 if eq <= 1 else eq:.0f}%")
+        if dtype == "job_offer_decision":
+            jc1, jc2 = st.columns(2)
+            with jc1:
+                st.markdown("**Current job**")
+                if fields.get("current_salary") is not None:
+                    st.metric("Salary", f"${float(fields['current_salary']):,.0f}")
+                if fields.get("current_commute_minutes") is not None:
+                    st.metric("Commute (min)", f"{float(fields['current_commute_minutes']):.0f}")
+            with jc2:
+                st.markdown("**New offer**")
+                if fields.get("new_salary") is not None:
+                    st.metric("Salary", f"${float(fields['new_salary']):,.0f}")
+                if fields.get("new_bonus") is not None:
+                    st.metric("Bonus", f"${float(fields['new_bonus']):,.0f}")
         if fields.get("team_options"):
             st.markdown("**Teams / options**")
             for opt in fields["team_options"]:
@@ -731,6 +815,68 @@ def _render_poker_field_review_form(fields: dict[str, Any]) -> dict[str, Any]:
     return dict(st.session_state.get("imp_fields") or fields)
 
 
+def _collect_job_review_edits() -> dict[str, Any]:
+    return {
+        "title": str(st.session_state.get("imp_j_title") or "").strip(),
+        "current_salary": float(st.session_state.get("imp_j_cur_sal") or 0.0),
+        "current_commute_minutes": float(st.session_state.get("imp_j_cur_comm") or 0.0),
+        "current_remote_days": float(st.session_state.get("imp_j_cur_rem") or 0.0),
+        "new_salary": float(st.session_state.get("imp_j_new_sal") or 0.0),
+        "new_bonus": float(st.session_state.get("imp_j_new_bonus") or 0.0),
+        "new_commute_minutes": float(st.session_state.get("imp_j_new_comm") or 0.0),
+        "new_remote_days": float(st.session_state.get("imp_j_new_rem") or 0.0),
+        "value_per_hour": float(st.session_state.get("imp_j_vph") or 50.0),
+        "remote_day_value": float(st.session_state.get("imp_j_rdv") or 40.0),
+        "quality_notes": str(st.session_state.get("imp_j_quality") or "").strip(),
+        "decision_type": "job_offer_decision",
+    }
+
+
+def _render_job_field_review_form(fields: dict[str, Any]) -> dict[str, Any]:
+    st.session_state.setdefault("imp_j_title", str(fields.get("title") or "Job offer decision"))
+    st.session_state.setdefault("imp_j_cur_sal", float(fields.get("current_salary") or 0.0))
+    st.session_state.setdefault("imp_j_cur_comm", float(fields.get("current_commute_minutes") or 0.0))
+    st.session_state.setdefault("imp_j_cur_rem", float(fields.get("current_remote_days") or 0.0))
+    st.session_state.setdefault("imp_j_new_sal", float(fields.get("new_salary") or 0.0))
+    st.session_state.setdefault("imp_j_new_bonus", float(fields.get("new_bonus") or 0.0))
+    st.session_state.setdefault("imp_j_new_comm", float(fields.get("new_commute_minutes") or 0.0))
+    st.session_state.setdefault("imp_j_new_rem", float(fields.get("new_remote_days") or 0.0))
+    st.session_state.setdefault("imp_j_vph", float(fields.get("value_per_hour") or 50.0))
+    st.session_state.setdefault("imp_j_rdv", float(fields.get("remote_day_value") or 40.0))
+    st.session_state.setdefault("imp_j_quality", str(fields.get("quality_notes") or ""))
+
+    with st.container(border=True):
+        st.text_input("Decision title", key="imp_j_title")
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown("**Current job**")
+            st.number_input("Salary ($/year)", min_value=0.0, step=1000.0, key="imp_j_cur_sal")
+            st.number_input("Commute (min one way)", min_value=0.0, step=1.0, key="imp_j_cur_comm")
+            st.number_input("Remote days / week", min_value=0.0, max_value=5.0, step=1.0, key="imp_j_cur_rem")
+        with c2:
+            st.markdown("**New offer**")
+            st.number_input("Salary ($/year)", min_value=0.0, step=1000.0, key="imp_j_new_sal")
+            st.number_input("Bonus ($)", min_value=0.0, step=500.0, key="imp_j_new_bonus")
+            st.number_input("Commute (min one way)", min_value=0.0, step=1.0, key="imp_j_new_comm")
+            st.number_input("Remote days / week", min_value=0.0, max_value=5.0, step=1.0, key="imp_j_new_rem")
+        c3, c4 = st.columns(2)
+        with c3:
+            st.number_input("Value of your time ($/hr)", min_value=0.0, step=5.0, key="imp_j_vph")
+        with c4:
+            st.number_input("Value per WFH day ($)", min_value=0.0, step=5.0, key="imp_j_rdv")
+        st.text_area("Quality-of-life notes", key="imp_j_quality")
+
+        if st.button("Apply field corrections", type="primary", key="imp_job_review_apply"):
+            merged = apply_field_edits(fields, _collect_job_review_edits())
+            st.session_state["imp_fields"] = merged
+            provided = set(st.session_state.get("imp_user_provided") or set())
+            provided.update(_collect_job_review_edits().keys())
+            st.session_state["imp_user_provided"] = provided
+            st.rerun()
+
+    return dict(st.session_state.get("imp_fields") or fields)
+
+
 def _render_confidence_panel(completeness: dict[str, Any], dtype: str, fields: dict[str, Any]) -> None:
     conf = completeness.get("confidence", "low")
     color = {"high": "normal", "medium": "off", "low": "inverse"}.get(conf, "off")
@@ -915,6 +1061,70 @@ def _render_poker_visuals(fields: dict[str, Any], analysis: dict[str, Any]) -> N
         use_container_width=True,
         hide_index=True,
     )
+
+
+def _render_job_analysis_results(
+    fields: dict[str, Any],
+    analysis: dict[str, Any],
+    completeness: dict[str, Any],
+) -> None:
+    with st.container(border=True):
+        st.markdown("### Decision analysis")
+        st.caption(analysis.get("disclaimer", ""))
+        st.caption(f"Confidence: **{completeness.get('confidence', '—')}**")
+
+        exp = analysis.get("explanation") or {}
+        verdict = analysis.get("verdict_label", "")
+        if analysis.get("verdict", "").startswith("favorable_new"):
+            st.success(verdict)
+        elif analysis.get("verdict", "").startswith("marginal"):
+            st.info(verdict)
+        else:
+            st.warning(verdict)
+
+        if exp.get("summary"):
+            st.markdown(exp["summary"])
+        if exp.get("commute_note"):
+            st.markdown(exp["commute_note"])
+        if exp.get("remote_note"):
+            st.markdown(exp["remote_note"])
+        if exp.get("decision_rule"):
+            st.markdown(exp["decision_rule"])
+        if exp.get("uncertainty"):
+            st.info(exp["uncertainty"])
+
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Salary delta", f"${float(analysis.get('salary_delta', 0)):+,.0f}")
+        m2.metric("Year-1 cash delta", f"${float(analysis.get('year1_cash_delta', 0)):+,.0f}")
+        m3.metric("Commute cost", f"${float(analysis.get('commute_cost', 0)):,.0f}")
+        m4.metric("Net adjusted", f"${float(analysis.get('net_adjusted_advantage', 0)):+,.0f}")
+
+        rows = analysis.get("comparison_rows") or []
+        if rows:
+            st.markdown("**Comparison breakdown**")
+            st.dataframe(
+                [
+                    {
+                        "Factor": r["factor"],
+                        "Current": f"${float(r['current']):,.0f}",
+                        "New offer": f"${float(r['new']):,.0f}",
+                        "Delta": f"${float(r['delta']):+,.0f}",
+                    }
+                    for r in rows
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
+
+        with st.expander("Assumptions & what to verify"):
+            st.markdown(f"**Assumptions:** {exp.get('assumptions', '')}")
+            st.markdown(f"**Risks:** {exp.get('risks', '')}")
+            if exp.get("quality_note"):
+                st.markdown(exp["quality_note"])
+            for item in analysis.get("information_to_verify") or []:
+                st.markdown(f"- {item}")
+            for item in analysis.get("assumptions_checked") or []:
+                st.caption(f"✓ {item}")
 
 
 def _render_analysis_results(

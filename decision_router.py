@@ -18,7 +18,11 @@ _INVESTMENT_MARKERS = re.compile(
     r"\b(stock|etf|ticker|shares?|buy\s+stock|sell\s+stock|portfolio)\b",
     re.I,
 )
-_JOB_MARKERS = re.compile(r"\b(job\s+offer|salary\s+offer|compensation\s+package|remote\s+work)\b", re.I)
+_JOB_MARKERS = re.compile(
+    r"\b(job\s+offer|salary\s+offer|compensation\s+package|counteroffer|"
+    r"current\s+job|new\s+job|commute|hybrid|remote\s+work|signing\s+bonus)\b",
+    re.I,
+)
 _LOAN_MARKERS = re.compile(r"\b(car\s+loan|auto\s+loan|financing|apr|monthly\s+payment)\b", re.I)
 _APOSTROPHE = r"['\u2019]"
 
@@ -59,8 +63,17 @@ def _score_investment(text: str) -> float:
     return 0.6 if _INVESTMENT_MARKERS.search(text) else 0.0
 
 
-def _score_job(text: str) -> float:
-    return 0.6 if _JOB_MARKERS.search(text) else 0.0
+def _score_job_offer(text: str) -> float:
+    score = 0.0
+    if _JOB_MARKERS.search(text):
+        score += 0.45
+    if re.search(r"\bcurrent\s+job\b", text, re.I) and re.search(r"\bnew\s+job\b", text, re.I):
+        score += 0.25
+    if re.search(r"salary", text, re.I) and re.search(r"\$\s*[\d,]+", text):
+        score += 0.2
+    if re.search(r"commute", text, re.I):
+        score += 0.1
+    return min(score, 1.0)
 
 
 def _score_loan(text: str) -> float:
@@ -91,8 +104,9 @@ def _score_poker_hand(text: str) -> float:
 _SCORERS: dict[str, Any] = {
     "prediction_market_bet": _score_prediction_market,
     "poker_hand_decision": _score_poker_hand,
+    "job_offer_decision": _score_job_offer,
     "investment": _score_investment,
-    "job_offer": _score_job,
+    "job_offer": _score_job_offer,
     "loan_financing": _score_loan,
 }
 
@@ -143,10 +157,15 @@ def route_imported_problem(
 
     poker_score = scores.get("poker_hand_decision", 0.0)
     market_score = scores.get("prediction_market_bet", 0.0)
-    if poker_score >= 0.45 and poker_score >= market_score + 0.1:
+    job_score = scores.get("job_offer_decision", 0.0)
+    if poker_score >= 0.45 and poker_score >= market_score + 0.1 and poker_score >= job_score:
         best_type = "poker_hand_decision"
         best_score = poker_score
         notes = [f"Poker hand signals detected (score {poker_score:.2f})"]
+    elif job_score >= 0.45 and job_score >= market_score + 0.1 and job_score >= poker_score:
+        best_type = "job_offer_decision"
+        best_score = job_score
+        notes = [f"Job offer signals detected (score {job_score:.2f})"]
 
     if source_type == "csv":
         if scores.get("prediction_market_bet", 0) >= 0.2:

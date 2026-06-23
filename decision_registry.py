@@ -17,6 +17,12 @@ DECISION_TYPES: dict[str, dict[str, Any]] = {
         "phase": 1,
         "enabled": True,
     },
+    "job_offer_decision": {
+        "label": "Job offer decision",
+        "description": "Compare compensation, commute, and work-life tradeoffs",
+        "phase": 1,
+        "enabled": True,
+    },
     "investment": {
         "label": "Stock / ETF investment",
         "description": "Buy, hold, or sell an investment",
@@ -24,8 +30,8 @@ DECISION_TYPES: dict[str, dict[str, Any]] = {
         "enabled": False,
     },
     "job_offer": {
-        "label": "Job offer decision",
-        "description": "Compare compensation and lifestyle factors",
+        "label": "Job offer decision (legacy)",
+        "description": "Use job_offer_decision",
         "phase": 2,
         "enabled": False,
     },

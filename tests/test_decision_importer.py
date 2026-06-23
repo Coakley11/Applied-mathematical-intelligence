@@ -7,9 +7,11 @@ import unittest
 import unittest.mock
 from pathlib import Path
 
+from decision_examples import EXAMPLE_JOB_OFFER
 from decision_history import delete_import_entry, list_import_history, save_import_entry
 from decision_math import (
     analyze_decimal_odds_bet,
+    analyze_job_offer_decision,
     analyze_poker_hand_decision,
     analyze_prediction_market_bet,
     compute_kelly_fraction,
@@ -28,6 +30,7 @@ from decision_ocr import (
 from decision_parser import (
     apply_field_edits,
     extract_fields,
+    parse_job_offer_text,
     parse_poker_hand_text,
     parse_prediction_market_csv,
     parse_prediction_market_text,
@@ -71,6 +74,8 @@ Villain bets $50.
 Amount to call: $50.
 Estimated equity: 40%."""
 
+JOB_OFFER_EXAMPLE = EXAMPLE_JOB_OFFER["text"]
+
 
 class TestDecisionRouter(unittest.TestCase):
     def test_routes_kalshi_text_to_prediction_market(self) -> None:
@@ -95,6 +100,29 @@ class TestDecisionRouter(unittest.TestCase):
     def test_prediction_market_hint_overrides_auto_detect(self) -> None:
         route = route_imported_problem(POKER_USER_EXACT, hint="prediction_market_bet")
         self.assertEqual(route["decision_type"], "prediction_market_bet")
+
+    def test_routes_job_offer_example(self) -> None:
+        route = route_imported_problem(JOB_OFFER_EXAMPLE)
+        self.assertEqual(route["decision_type"], "job_offer_decision")
+        self.assertGreater(route["confidence"], 0.4)
+
+
+class TestDecisionParserJob(unittest.TestCase):
+    def test_parses_job_offer_example(self) -> None:
+        fields = parse_job_offer_text(JOB_OFFER_EXAMPLE)
+        self.assertAlmostEqual(fields["current_salary"], 95000.0)
+        self.assertAlmostEqual(fields["new_salary"], 115000.0)
+        self.assertAlmostEqual(fields["new_bonus"], 10000.0)
+        self.assertAlmostEqual(fields["current_commute_minutes"], 15.0)
+        self.assertAlmostEqual(fields["new_commute_minutes"], 50.0)
+        self.assertAlmostEqual(fields["new_remote_days"], 2.0)
+
+    def test_job_offer_analysis_net_positive(self) -> None:
+        fields = parse_job_offer_text(JOB_OFFER_EXAMPLE)
+        result = analyze_job_offer_decision(fields)
+        self.assertGreater(result["salary_delta"], 0)
+        self.assertGreater(result["year1_cash_delta"], 0)
+        self.assertIn(result["verdict"], ("favorable_new_offer", "marginal_new_offer", "marginal_stay"))
 
 
 class TestDecisionParserPoker(unittest.TestCase):

@@ -222,31 +222,17 @@ def render_problem_solving_lab() -> None:
         PROBLEM_SOLVING_LAB["tagline"],
     )
 
-    try:
-        from components.applied_math_context_diagnostics import applied_math_developer_mode_enabled
-
-        dev_importer = applied_math_developer_mode_enabled(st)
-    except Exception:
-        dev_importer = False
-
-    if dev_importer:
-        tab_areas, tab_importer, tab_ideas, tab_thinking = st.tabs(
-            ["Quantitative areas", "Problem importer", "Explore a math idea", "Mathematical thinking"]
-        )
-    else:
-        tab_areas, tab_ideas, tab_thinking = st.tabs(
-            ["Quantitative areas", "Explore a math idea", "Mathematical thinking"]
-        )
-        tab_importer = None
+    tab_areas, tab_importer, tab_ideas, tab_thinking = st.tabs(
+        ["Quantitative areas", "Real Problem Importer", "Explore a math idea", "Mathematical thinking"]
+    )
 
     with tab_areas:
         _render_area_hub()
 
-    if tab_importer is not None:
-        with tab_importer:
-            from components.importer_ui import render_ami_importer
+    with tab_importer:
+        from components.importer_ui import render_ami_importer
 
-            render_ami_importer()
+        render_ami_importer()
 
     with tab_ideas:
         from components.math_idea_explorer import render_math_idea_explorer_embedded

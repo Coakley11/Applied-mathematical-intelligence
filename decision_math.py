@@ -668,6 +668,9 @@ def solve_decision(decision_type: str, fields: dict[str, Any]) -> dict[str, Any]
     if decision_type == "poker_hand_decision":
         enriched = enrich_poker_fields(fields)
         return analyze_poker_hand_decision(enriched)
+    if decision_type == "job_offer_decision":
+        enriched = enrich_job_fields(fields)
+        return analyze_job_offer_decision(enriched)
     return {
         "verdict": "unsupported",
         "verdict_label": "Not yet implemented",
@@ -884,5 +887,154 @@ def analyze_poker_hand_decision(fields: dict[str, Any]) -> dict[str, Any]:
         "disclaimer": (
             "Mathematical decision analysis only — not gambling advice or a guarantee. "
             "Based on the assumptions you entered; true equity depends on opponent range."
+        ),
+    }
+
+
+def enrich_job_fields(fields: dict[str, Any]) -> dict[str, Any]:
+    """Normalize job-offer comparison inputs."""
+    out = dict(fields)
+    for key in (
+        "current_salary", "current_commute_minutes", "current_remote_days",
+        "new_salary", "new_bonus", "new_commute_minutes", "new_remote_days",
+        "value_per_hour", "remote_day_value", "work_days_per_year",
+    ):
+        if out.get(key) is not None:
+            out[key] = float(out[key])
+    out.setdefault("current_remote_days", 0.0)
+    out.setdefault("new_bonus", 0.0)
+    out.setdefault("value_per_hour", 50.0)
+    out.setdefault("remote_day_value", 40.0)
+    out.setdefault("work_days_per_year", 250.0)
+    return out
+
+
+def analyze_job_offer_decision(fields: dict[str, Any]) -> dict[str, Any]:
+    """Structured compensation + commute + remote tradeoff analysis."""
+    fields = enrich_job_fields(fields)
+    cur_sal = fields.get("current_salary")
+    new_sal = fields.get("new_salary")
+    if cur_sal is None or new_sal is None:
+        return {
+            "verdict": "incomplete",
+            "verdict_label": "Need salary information",
+            "explanation": {"summary": "Enter current and offered base salaries to compare."},
+            "disclaimer": "Complete missing fields before analysis.",
+            "decision_type": "job_offer_decision",
+        }
+
+    cur_sal_f = float(cur_sal)
+    new_sal_f = float(new_sal)
+    bonus = float(fields.get("new_bonus") or 0.0)
+    cur_commute = float(fields.get("current_commute_minutes") or 0.0)
+    new_commute = float(fields.get("new_commute_minutes") or 0.0)
+    cur_remote = float(fields.get("current_remote_days") or 0.0)
+    new_remote = float(fields.get("new_remote_days") or 0.0)
+    value_hour = float(fields.get("value_per_hour") or 50.0)
+    remote_day_val = float(fields.get("remote_day_value") or 40.0)
+    work_days = float(fields.get("work_days_per_year") or 250.0)
+    weeks = work_days / 5.0
+
+    salary_delta = new_sal_f - cur_sal_f
+    year1_cash_delta = salary_delta + bonus
+    extra_one_way = new_commute - cur_commute
+    annual_extra_commute_min = max(0.0, extra_one_way) * 2.0 * work_days
+    commute_cost = (annual_extra_commute_min / 60.0) * value_hour
+    if extra_one_way < 0:
+        commute_savings = (abs(extra_one_way) * 2.0 * work_days / 60.0) * value_hour
+    else:
+        commute_savings = 0.0
+
+    remote_delta = new_remote - cur_remote
+    remote_benefit = remote_delta * remote_day_val * weeks
+
+    net_adjusted = year1_cash_delta - commute_cost + commute_savings + remote_benefit
+
+    comparison_rows = [
+        {"factor": "Base salary", "current": cur_sal_f, "new": new_sal_f, "delta": salary_delta},
+        {"factor": "Signing / bonus (year 1)", "current": 0.0, "new": bonus, "delta": bonus},
+        {"factor": "Commute time cost", "current": 0.0, "new": commute_cost, "delta": -commute_cost},
+        {"factor": "Remote / hybrid benefit", "current": 0.0, "new": remote_benefit, "delta": remote_benefit},
+    ]
+
+    if net_adjusted > 5000:
+        verdict = "favorable_new_offer"
+        verdict_label = "New offer looks favorable on quantified factors"
+        recommendation = "lean_accept"
+    elif net_adjusted > 0:
+        verdict = "marginal_new_offer"
+        verdict_label = "New offer is slightly favorable — weigh quality-of-life"
+        recommendation = "lean_accept"
+    elif net_adjusted > -5000:
+        verdict = "marginal_stay"
+        verdict_label = "Offer is close — non-cash factors may decide"
+        recommendation = "neutral"
+    else:
+        verdict = "favorable_stay"
+        verdict_label = "Staying may be better on quantified factors"
+        recommendation = "lean_decline"
+
+    quality = str(fields.get("quality_notes") or "").strip()
+    explanation = {
+        "summary": (
+            f"Based on the assumptions you entered, year-1 cash delta is **${year1_cash_delta:+,.0f}** "
+            f"(salary **${salary_delta:+,.0f}**, bonus **${bonus:,.0f}**). "
+            f"After estimated commute cost (**${commute_cost:,.0f}**) and remote benefit "
+            f"(**${remote_benefit:+,.0f}**), net adjusted advantage ≈ **${net_adjusted:+,.0f}/year**."
+        ),
+        "commute_note": (
+            f"Commute change: **{cur_commute:.0f}** → **{new_commute:.0f}** minutes one way "
+            f"({extra_one_way:+.0f} min). Valued at **${value_hour:.0f}/hr** over **{work_days:.0f}** workdays."
+        ),
+        "remote_note": (
+            f"Remote/hybrid: **{cur_remote:.0f}** → **{new_remote:.0f}** days/week "
+            f"({remote_delta:+.0f} days), valued at **${remote_day_val:.0f}/WFH day**."
+        ),
+        "decision_rule": (
+            "This is structured comparison math, not career advice. "
+            "If net adjusted advantage is positive and quality-of-life factors align, the offer may be worth serious consideration. "
+            "If negative, extra pay may not cover time and flexibility costs."
+        ),
+        "uncertainty": (
+            "Main uncertainties: benefits, promotion path, job security, culture, and unmodeled quality-of-life factors."
+        ),
+        "quality_note": quality or "Add quality-of-life notes to capture factors not in the spreadsheet.",
+        "assumptions": (
+            "Assumptions: salaries are comparable bases; bonus applies year one; commute is round-trip daily; "
+            "remote value is your estimate of flexibility/productivity per WFH day."
+        ),
+        "risks": (
+            "Risks: offer terms change, commute varies, bonus not guaranteed, non-cash factors dominate."
+        ),
+    }
+
+    return {
+        "decision_type": "job_offer_decision",
+        "salary_delta": round(salary_delta, 2),
+        "year1_cash_delta": round(year1_cash_delta, 2),
+        "commute_cost": round(commute_cost, 2),
+        "commute_savings": round(commute_savings, 2),
+        "remote_benefit": round(remote_benefit, 2),
+        "net_adjusted_advantage": round(net_adjusted, 2),
+        "comparison_rows": comparison_rows,
+        "recommendation": recommendation,
+        "verdict": verdict,
+        "verdict_label": verdict_label,
+        "explanation": explanation,
+        "assumptions_checked": [
+            f"Current salary: ${cur_sal_f:,.0f}",
+            f"Offer salary: ${new_sal_f:,.0f} + bonus ${bonus:,.0f}",
+            f"Commute: {cur_commute:.0f} → {new_commute:.0f} min",
+            f"Remote: {cur_remote:.0f} → {new_remote:.0f} days/week",
+        ],
+        "information_to_verify": [
+            "Are benefits, 401k match, and equity comparable?",
+            "Is the bonus guaranteed or target-based?",
+            "Will commute or hybrid policy change after onboarding?",
+            "What growth, team, and role fit factors matter most?",
+        ],
+        "disclaimer": (
+            "Mathematical decision analysis only — not career advice. "
+            "Based on the assumptions you entered; verify all offer details."
         ),
     }
