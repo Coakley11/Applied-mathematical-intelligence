@@ -78,8 +78,8 @@ def main() -> int:
         from simulations.registry import SIMULATION_RUNNERS, run_simulation  # noqa: F401
         from decision_registry import DECISION_TYPES, ENABLED_DECISION_TYPES
         from decision_router import route_imported_problem
-        from decision_parser import parse_prediction_market_text
-        from decision_math import enrich_bet_fields
+        from decision_ocr import ocr_availability
+        from decision_parser import parse_prediction_market_text as _parse_bet
         from decision_templates import assess_completeness
         from components.importer_ui import render_ami_importer  # noqa: F401
     except Exception as exc:
@@ -220,7 +220,7 @@ def main() -> int:
     route = route_imported_problem(sample)
     if route.get("decision_type") != "prediction_market_bet":
         errors.append("Kalshi-style text should route to prediction_market_bet")
-    fields = parse_prediction_market_text(sample)
+    fields = _parse_bet(sample)
     if fields.get("price") != 45.0:
         errors.append(f"Expected yes price 45, got {fields.get('price')}")
     from decision_math import enrich_bet_fields
@@ -228,6 +228,16 @@ def main() -> int:
     complete_fields = enrich_bet_fields({**fields, "stake": 100, "user_probability": 0.50, "contract_side": "Yes"})
     if not assess_completeness("prediction_market_bet", complete_fields).get("can_solve"):
         errors.append("Complete bet fields should be solvable")
+
+    matchup = "Team A 50%\nTeam B 50%\nTeam A 1.95x\nVolume: 10,000"
+    mfields = _parse_bet(matchup)
+    if not mfields.get("team_options"):
+        errors.append("Matchup text should extract team_options")
+    if mfields.get("volume") != 10000.0:
+        errors.append(f"Expected volume 10000, got {mfields.get('volume')}")
+    ocr_info = ocr_availability()
+    if "available" not in ocr_info:
+        errors.append("ocr_availability should return available flag")
 
     if errors:
         print("SMOKE FAILED")

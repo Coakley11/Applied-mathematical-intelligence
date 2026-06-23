@@ -1,36 +1,44 @@
-"""AMI Problem Importer — paste, extract, clarify, analyze, save."""
+"""AMI Problem Importer — paste, screenshot, extract, review, clarify, analyze, save."""
 
 from __future__ import annotations
 
 from typing import Any
 
 import matplotlib.pyplot as plt
-import numpy as np
 import streamlit as st
 
 from decision_history import delete_import_entry, list_import_history, save_import_entry
 from decision_math import enrich_bet_fields, solve_decision
-from decision_parser import extract_fields
+from decision_ocr import extract_text_from_image, ocr_availability
+from decision_parser import apply_field_edits, extract_fields
 from decision_registry import DECISION_TYPES, ENABLED_DECISION_TYPES, get_decision_label, is_enabled
 from decision_router import route_imported_problem
-from decision_templates import assess_completeness, field_label, field_why, get_field_template
+from decision_templates import (
+    BET_FORMAT_OPTIONS,
+    assess_completeness,
+    clarification_questions,
+    field_label,
+    field_why,
+    get_field_template,
+)
 
 
 def render_ami_importer() -> None:
-    """Full importer workflow: import → extract → clarify → solve → save."""
+    """Full importer workflow."""
     st.markdown("#### AMI Problem Importer")
     st.caption(
-        "Paste a Kalshi/Calci bet, upload CSV, or enter manually. "
-        "AMI extracts what it can, asks for what's missing, then runs decision math — not gambling advice."
+        "Paste Kalshi/Calci text, upload a screenshot, or enter manually. "
+        "Review extracted fields, fill gaps, then run decision math — not gambling advice."
     )
 
     _init_importer_state()
+    ocr_info = ocr_availability()
+    if not ocr_info["available"]:
+        st.caption(f"ℹ️ {ocr_info['note']}")
 
     tab_import, tab_history = st.tabs(["Import & analyze", "History"])
-
     with tab_import:
         _render_import_workflow()
-
     with tab_history:
         _render_history_panel()
 
@@ -42,6 +50,7 @@ def _init_importer_state() -> None:
     st.session_state.setdefault("imp_decision_type", "prediction_market_bet")
     st.session_state.setdefault("imp_source_type", "text")
     st.session_state.setdefault("imp_raw_input", "")
+    st.session_state.setdefault("imp_review_confirmed", False)
 
 
 def _render_import_workflow() -> None:
@@ -50,11 +59,16 @@ def _render_import_workflow() -> None:
     st.markdown("**1 · Import**")
     source = st.radio(
         "Input method",
-        ["Paste text", "Upload CSV", "Manual entry"],
+        ["Paste text", "Screenshot / image", "Upload CSV", "Manual entry"],
         horizontal=True,
         key="imp_source_radio",
     )
-    source_map = {"Paste text": "text", "Upload CSV": "csv", "Manual entry": "manual"}
+    source_map = {
+        "Paste text": "text",
+        "Screenshot / image": "image",
+        "Upload CSV": "csv",
+        "Manual entry": "manual",
+    }
     source_type = source_map[source]
     st.session_state["imp_source_type"] = source_type
 
@@ -65,41 +79,24 @@ def _render_import_workflow() -> None:
             value=st.session_state.get("imp_paste_buffer", ""),
             height=140,
             placeholder=(
-                "Example:\n"
-                "Will the Knicks make the playoffs?\n"
-                "Yes: 42¢\n"
-                "No: 58¢\n"
-                "Expires: Dec 31, 2026"
+                "Kalshi Yes/No:\nWill the Knicks make the playoffs?\nYes: 42¢  No: 58¢\n\n"
+                "Calci matchup:\nChicago Cubs 50%\nNew York Mets 50%\nMets 1.90x\nVolume: 128,324"
             ),
             key="imp_paste_input",
         )
+    elif source == "Screenshot / image":
+        raw_input = _render_image_import()
     elif source == "Upload CSV":
         uploaded = st.file_uploader("CSV file", type=["csv"], key="imp_csv_upload")
         if uploaded is not None:
             raw_input = uploaded.read().decode("utf-8", errors="replace")
             st.code(raw_input[:500], language="csv")
         else:
-            st.caption("Expected columns: title, side, price (or yes_price/no_price), stake, user_probability")
+            st.caption("Columns: title, side, price, multiplier, stake, user_probability, volume")
     else:
-        with st.form("imp_manual_form", border=True):
-            st.markdown("**Manual bet entry**")
-            m_title = st.text_input("Market title", key="imp_m_title")
-            m_side = st.selectbox("Side", ["Yes", "No"], key="imp_m_side")
-            m_price = st.number_input("Price (¢)", min_value=1.0, max_value=99.0, value=50.0, key="imp_m_price")
-            m_stake = st.number_input("Stake ($)", min_value=1.0, value=100.0, key="imp_m_stake")
-            m_prob = st.slider("Your probability (%)", 5, 95, 50, key="imp_m_prob")
-            if st.form_submit_button("Use manual entry"):
-                raw_input = (
-                    f"{m_title}\n{m_side}: {m_price:.0f}¢\n"
-                    f"stake: ${m_stake:.0f}\nmy estimate: {m_prob}%"
-                )
-                st.session_state["imp_manual_raw"] = raw_input
+        raw_input = _render_manual_entry()
 
-        raw_input = st.session_state.get("imp_manual_raw", "")
-
-    type_options = list(ENABLED_DECISION_TYPES) + [
-        k for k in DECISION_TYPES if not is_enabled(k)
-    ]
+    type_options = list(ENABLED_DECISION_TYPES) + [k for k in DECISION_TYPES if not is_enabled(k)]
     type_labels = [f"{get_decision_label(t)}{' (coming soon)' if not is_enabled(t) else ''}" for t in type_options]
     selected_idx = st.selectbox(
         "Decision type (auto-detect or override)",
@@ -124,71 +121,145 @@ def _render_import_workflow() -> None:
 
     if extract_clicked or stage != "import":
         if extract_clicked:
-            if not raw_input.strip() and source != "Manual entry":
+            if not raw_input.strip() and source not in ("Manual entry", "Screenshot / image"):
                 st.warning("Paste or upload content first.")
                 return
             if source == "Manual entry" and not raw_input.strip():
                 st.warning("Submit the manual entry form first.")
                 return
+            if source == "Screenshot / image" and not raw_input.strip():
+                st.warning("Upload an image and provide OCR or pasted text.")
+                return
 
             route = route_imported_problem(raw_input, source_type=source_type, hint=hint)
             dtype = route["decision_type"]
             if not is_enabled(dtype):
-                st.error(f"{get_decision_label(dtype)} is not available yet — Phase 0 supports prediction market bets.")
+                st.error(f"{get_decision_label(dtype)} is not available yet.")
                 return
 
-            fields = extract_fields(raw_input, dtype, source_type=source_type)
+            fields = extract_fields(raw_input, dtype, source_type="text" if source_type == "image" else source_type)
             st.session_state["imp_raw_input"] = raw_input
             st.session_state["imp_decision_type"] = dtype
             st.session_state["imp_fields"] = fields
             st.session_state["imp_route"] = route
             st.session_state["imp_user_provided"] = set()
             st.session_state["imp_analysis"] = None
-            st.session_state["imp_stage"] = "clarify"
+            st.session_state["imp_review_confirmed"] = False
+            st.session_state["imp_stage"] = "review"
 
         _render_post_extract()
+
+
+def _render_image_import() -> str:
+    """Screenshot upload with OCR + manual fallback."""
+    uploaded = st.file_uploader(
+        "Upload screenshot or photo",
+        type=["png", "jpg", "jpeg", "webp", "gif"],
+        key="imp_image_upload",
+    )
+
+    if uploaded is not None:
+        image_bytes = uploaded.getvalue()
+        st.session_state["imp_image_bytes"] = image_bytes
+        st.session_state["imp_image_meta"] = {
+            "filename": uploaded.name,
+            "mime": uploaded.type or "",
+            "size_bytes": len(image_bytes),
+        }
+        st.image(image_bytes, caption="Uploaded market screenshot", use_container_width=True)
+
+        if st.button("Run OCR on image", key="imp_ocr_btn"):
+            ocr_result = extract_text_from_image(
+                image_bytes,
+                filename=uploaded.name,
+                mime=uploaded.type or "",
+            )
+            st.session_state["imp_ocr_result"] = ocr_result
+            if ocr_result.get("success"):
+                st.success(f"OCR extracted {len(ocr_result['text'])} characters ({ocr_result['engine']}).")
+            else:
+                st.warning(ocr_result.get("error") or "OCR could not read text — paste manually below.")
+
+    ocr_result = st.session_state.get("imp_ocr_result") or {}
+    ocr_text = str(ocr_result.get("text") or "")
+
+    manual_label = "Paste or correct visible text from screenshot"
+    if ocr_text:
+        manual_label = "Review / correct OCR text (or paste if OCR failed)"
+
+    corrected = st.text_area(
+        manual_label,
+        value=ocr_text or st.session_state.get("imp_image_manual_text", ""),
+        height=160,
+        placeholder="Paste what you see: team names, %, multipliers, volume, Yes/No prices…",
+        key="imp_image_text_area",
+    )
+    st.session_state["imp_image_manual_text"] = corrected
+    st.session_state["imp_extracted_text"] = corrected
+    return corrected.strip()
+
+
+def _render_manual_entry() -> str:
+    with st.form("imp_manual_form", border=True):
+        st.markdown("**Manual bet entry**")
+        m_format = st.selectbox("Bet format", BET_FORMAT_OPTIONS, key="imp_m_format")
+        m_title = st.text_input("Market title", key="imp_m_title")
+        m_side = st.text_input("Side / team", value="Yes", key="imp_m_side")
+        m_price = st.number_input("Price (¢) — prediction markets", min_value=0.0, max_value=99.0, value=0.0, key="imp_m_price")
+        m_mult = st.number_input("Multiplier (e.g. 1.90) — decimal odds", min_value=0.0, value=0.0, step=0.01, key="imp_m_mult")
+        m_stake = st.number_input("Stake ($)", min_value=1.0, value=100.0, key="imp_m_stake")
+        m_prob = st.slider("Your probability (%)", 5, 95, 50, key="imp_m_prob")
+        if st.form_submit_button("Use manual entry"):
+            parts = [m_title, f"side: {m_side}", f"stake: ${m_stake:.0f}", f"my estimate: {m_prob}%"]
+            if m_format == "prediction_market" and m_price > 0:
+                parts.insert(1, f"{m_side}: {m_price:.0f}¢")
+            if m_mult > 1:
+                parts.insert(2, f"{m_side} {m_mult:.2f}x")
+            raw = "\n".join(parts)
+            st.session_state["imp_manual_raw"] = raw
+    return st.session_state.get("imp_manual_raw", "")
 
 
 def _render_post_extract() -> None:
     fields = dict(st.session_state.get("imp_fields") or {})
     dtype = str(st.session_state.get("imp_decision_type") or "prediction_market_bet")
     user_provided: set[str] = set(st.session_state.get("imp_user_provided") or set())
+    stage = st.session_state.get("imp_stage", "review")
 
     if dtype == "prediction_market_bet":
         fields = enrich_bet_fields(fields)
 
-    completeness = assess_completeness(dtype, fields, user_provided=user_provided)
-
     st.markdown("---")
     st.markdown("**2 · Extract**")
     route = st.session_state.get("imp_route") or {}
-    c1, c2, c3 = st.columns(3)
+    c1, c2, c3, c4 = st.columns(4)
     c1.metric("Decision type", get_decision_label(dtype))
-    c2.metric("Route confidence", f"{float(route.get('confidence', 0)):.0%}")
-    c3.metric("Completeness", f"{completeness['completeness_pct']:.0f}%")
+    c2.metric("Bet format", str(fields.get("bet_format") or "—").replace("_", " "))
+    c3.metric("Route confidence", f"{float(route.get('confidence', 0)):.0%}")
+    c4.metric("OCR", "yes" if st.session_state.get("imp_ocr_result", {}).get("success") else "n/a")
 
-    with st.expander("Extracted fields", expanded=True):
-        if fields:
-            for k, v in fields.items():
-                if v is not None and str(v).strip() != "":
-                    st.text(f"{field_label(dtype, k)}: {v}")
-        else:
-            st.caption("No fields extracted yet.")
+    _render_extracted_summary(fields, dtype)
 
-    st.markdown("**3 · Missing information**")
-    _render_confidence_panel(completeness, dtype)
+    st.markdown("**3 · Review & edit parsed fields**")
+    st.caption("Correct anything OCR or parsing got wrong before analysis.")
+    fields = _render_field_review_form(dtype, fields)
+    st.session_state["imp_fields"] = fields
+    fields = enrich_bet_fields(fields)
 
-    if completeness["missing"]:
-        _render_clarification_form(dtype, fields, completeness["missing"], user_provided)
-        fields = dict(st.session_state.get("imp_fields") or {})
+    completeness = assess_completeness(dtype, fields, user_provided=user_provided)
+
+    st.markdown("**4 · Missing information & confidence**")
+    _render_confidence_panel(completeness, dtype, fields)
+
+    if completeness["missing"] or clarification_questions(fields):
+        _render_clarification_form(dtype, fields, completeness["missing"], user_provided, fields)
+        fields = enrich_bet_fields(dict(st.session_state.get("imp_fields") or {}))
         completeness = assess_completeness(dtype, fields, user_provided=user_provided)
-    else:
+    elif completeness.get("can_solve"):
         st.success("All required fields present — ready to analyze.")
 
     st.markdown("---")
-    st.markdown("**4 · Analyze**")
-    st.caption(completeness.get("confidence", "low").title() + " confidence — assumptions are labeled in results.")
-
+    st.markdown("**5 · Analyze**")
     can_solve = completeness.get("can_solve", False)
     if st.button("Run decision analysis", type="primary", disabled=not can_solve, key="imp_solve_btn"):
         analysis = solve_decision(dtype, fields)
@@ -196,11 +267,11 @@ def _render_post_extract() -> None:
         st.session_state["imp_stage"] = "results"
 
     analysis = st.session_state.get("imp_analysis")
-    if analysis:
+    if analysis and analysis.get("verdict") != "incomplete":
         _render_analysis_results(dtype, fields, analysis, completeness)
 
         st.markdown("---")
-        st.markdown("**5 · Save**")
+        st.markdown("**6 · Save**")
         notes = st.text_input("Notes (optional)", key="imp_save_notes")
         if st.button("Save to history", key="imp_save_btn"):
             entry = save_import_entry(
@@ -211,6 +282,9 @@ def _render_post_extract() -> None:
                 analysis=analysis,
                 completeness=completeness,
                 user_notes=notes,
+                image_meta=st.session_state.get("imp_image_meta"),
+                ocr_text=str((st.session_state.get("imp_ocr_result") or {}).get("text") or ""),
+                corrected_fields=fields if fields.get("ocr_corrected") else None,
             )
             st.success(f"Saved — {entry['id'][:8]}…")
             try:
@@ -223,34 +297,124 @@ def _render_post_extract() -> None:
                 )
             except Exception:
                 pass
+    elif analysis and analysis.get("verdict") == "incomplete":
+        st.warning(analysis.get("explanation", {}).get("summary", "Complete missing fields first."))
 
 
-def _render_confidence_panel(completeness: dict[str, Any], dtype: str) -> None:
+def _render_extracted_summary(fields: dict[str, Any], dtype: str) -> None:
+    with st.expander("Raw extraction summary", expanded=False):
+        if fields.get("team_options"):
+            st.markdown("**Teams / options**")
+            for opt in fields["team_options"]:
+                st.markdown(f"- {opt['name']}: {opt.get('implied_pct', 0):.0f}%")
+        if fields.get("multipliers"):
+            st.markdown("**Multipliers**")
+            for m in fields["multipliers"]:
+                label = m.get("name") or "(unnamed)"
+                st.markdown(f"- {label}: {m['multiplier']:.2f}x")
+        if fields.get("volume"):
+            st.metric("Volume", f"{float(fields['volume']):,.0f}")
+        if fields.get("spread_total_markets"):
+            st.caption(f"Spread/total: {fields['spread_total_markets']} related markets detected")
+        if fields.get("source_excerpt"):
+            st.text(fields["source_excerpt"][:600])
+
+
+def _render_field_review_form(dtype: str, fields: dict[str, Any]) -> dict[str, Any]:
+    team_names = [o["name"] for o in fields.get("team_options") or []]
+    side_options = team_names + ["Yes", "No"]
+    current_side = str(fields.get("contract_side") or "")
+    if current_side and current_side not in side_options:
+        side_options = [current_side] + side_options
+
+    with st.form("imp_review_form", border=True):
+        edits: dict[str, Any] = {}
+        edits["title"] = st.text_input("Market title", value=str(fields.get("title") or ""), key="imp_rev_title")
+        edits["bet_format"] = st.selectbox(
+            "Bet format",
+            BET_FORMAT_OPTIONS,
+            index=BET_FORMAT_OPTIONS.index(fields["bet_format"]) if fields.get("bet_format") in BET_FORMAT_OPTIONS else 0,
+            key="imp_rev_format",
+        )
+        edits["contract_side"] = st.selectbox(
+            "Side / team you are considering",
+            side_options if side_options else [current_side or "Yes"],
+            index=side_options.index(current_side) if current_side in side_options else 0,
+            key="imp_rev_side",
+        ) if side_options else st.text_input("Side / team", value=current_side, key="imp_rev_side_text")
+
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            price_val = float(fields.get("price") or 0)
+            edits["price"] = st.number_input("Price (¢)", min_value=0.0, max_value=99.0, value=price_val, key="imp_rev_price")
+        with col2:
+            mult_val = float(fields.get("multiplier") or fields.get("decimal_odds") or 0.0)
+            edits["multiplier"] = st.number_input("Multiplier (x)", min_value=0.0, value=mult_val, step=0.01, key="imp_rev_mult")
+        with col3:
+            vol_val = float(fields.get("volume") or 0)
+            edits["volume"] = st.number_input("Volume", min_value=0.0, value=vol_val, step=1.0, key="imp_rev_vol")
+
+        col4, col5 = st.columns(2)
+        with col4:
+            stake_val = float(fields.get("stake") or 100.0)
+            edits["stake"] = st.number_input("Stake ($)", min_value=0.0, value=stake_val, key="imp_rev_stake")
+        with col5:
+            up = fields.get("user_probability")
+            default_pct = int(float(up) * 100) if up is not None and float(up) <= 1 else int(up or 50)
+            edits["user_probability"] = st.slider("Your probability (%)", 5, 95, default_pct, key="imp_rev_prob") / 100.0
+
+        edits["expiration"] = st.text_input("Expiration", value=str(fields.get("expiration") or ""), key="imp_rev_exp")
+        edits["rules_summary"] = st.text_area("Rules", value=str(fields.get("rules_summary") or ""), key="imp_rev_rules")
+
+        if st.form_submit_button("Apply field corrections"):
+            cleaned = {k: v for k, v in edits.items() if v not in ("", None) or k in ("stake", "user_probability")}
+            if cleaned.get("price") == 0:
+                cleaned.pop("price", None)
+            if cleaned.get("multiplier") == 0:
+                cleaned.pop("multiplier", None)
+            if cleaned.get("volume") == 0:
+                cleaned.pop("volume", None)
+            merged = apply_field_edits(fields, cleaned)
+            st.session_state["imp_fields"] = merged
+            st.session_state["imp_review_confirmed"] = True
+            st.session_state["imp_user_provided"] = set(st.session_state.get("imp_user_provided") or set()) | set(cleaned.keys())
+            st.rerun()
+
+    return dict(st.session_state.get("imp_fields") or fields)
+
+
+def _render_confidence_panel(completeness: dict[str, Any], dtype: str, fields: dict[str, Any]) -> None:
     conf = completeness.get("confidence", "low")
     color = {"high": "normal", "medium": "off", "low": "inverse"}.get(conf, "off")
-    st.metric("Confidence level", conf.title(), delta=f"{completeness['completeness_pct']:.0f}% complete", delta_color=color)
+    st.metric("Confidence", conf.title(), delta=f"{completeness['completeness_pct']:.0f}% complete", delta_color=color)
 
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     with col1:
         st.markdown("**Extracted**")
-        if completeness["extracted"]:
-            for k in completeness["extracted"]:
-                st.markdown(f"- {field_label(dtype, k)}")
-        else:
+        for k in completeness.get("extracted") or []:
+            st.markdown(f"- {field_label(dtype, k)}")
+        if not completeness.get("extracted"):
             st.caption("None yet")
     with col2:
         st.markdown("**Still needed**")
-        if completeness["missing"]:
-            for k in completeness["missing"]:
-                st.markdown(f"- {field_label(dtype, k)}")
-        else:
+        for k in completeness.get("missing") or []:
+            st.markdown(f"- {field_label(dtype, k)}")
+        if not completeness.get("missing"):
             st.caption("Nothing required missing")
+    with col3:
+        st.markdown("**Uncertain**")
+        uncertain = completeness.get("uncertain") or fields.get("uncertain_fields") or []
+        for k in uncertain:
+            st.markdown(f"- {field_label(dtype, k) if k in get_field_template(dtype) else k.replace('_', ' ')}")
+        if not uncertain:
+            st.caption("None flagged")
 
     if completeness.get("assumptions"):
-        st.info(
-            "Assumptions (user estimates): "
-            + ", ".join(field_label(dtype, k) for k in completeness["assumptions"])
-        )
+        st.info("Assumptions: " + ", ".join(field_label(dtype, k) for k in completeness["assumptions"]))
+
+    for q in clarification_questions(fields):
+        if q["id"] in (completeness.get("missing") or []) or q["id"] in (fields.get("uncertain_fields") or []):
+            st.caption(f"❓ {q['question']} — _{q['why']}_")
 
 
 def _render_clarification_form(
@@ -258,7 +422,10 @@ def _render_clarification_form(
     fields: dict[str, Any],
     missing: list[str],
     user_provided: set[str],
+    all_fields: dict[str, Any],
 ) -> None:
+    if not missing:
+        return
     st.warning("AMI needs a few values before it can analyze — we won't guess these for you.")
     tpl = get_field_template(dtype)
 
@@ -272,6 +439,8 @@ def _render_clarification_form(
             itype = spec.get("input_type", "text")
             if itype == "select":
                 opts = spec.get("options", [])
+                if key == "contract_side" and all_fields.get("team_options"):
+                    opts = [o["name"] for o in all_fields["team_options"]] + opts
                 updates[key] = st.selectbox(label, opts, key=f"imp_clarify_{key}")
             elif itype == "percent":
                 default = 50
@@ -280,17 +449,13 @@ def _render_clarification_form(
                     default = int(v * 100) if v <= 1 else int(v)
                 updates[key] = st.slider(label, 5, 95, default, key=f"imp_clarify_{key}") / 100.0
             elif itype == "number":
-                default = float(fields.get(key) or 100.0)
+                default = float(fields.get(key) or (100.0 if key == "stake" else 1.9))
                 updates[key] = st.number_input(label, min_value=0.01, value=default, key=f"imp_clarify_{key}")
             else:
                 updates[key] = st.text_input(label, value=str(fields.get(key) or ""), key=f"imp_clarify_{key}")
 
-        submitted = st.form_submit_button("Apply answers")
-        if submitted:
-            merged = dict(fields)
-            merged.update(updates)
-            if dtype == "prediction_market_bet":
-                merged = enrich_bet_fields(merged)
+        if st.form_submit_button("Apply answers"):
+            merged = apply_field_edits(fields, updates)
             st.session_state["imp_fields"] = merged
             user_provided.update(missing)
             st.session_state["imp_user_provided"] = user_provided
@@ -306,6 +471,7 @@ def _render_analysis_results(
     st.markdown("---")
     st.markdown("**Decision analysis**")
     st.caption(analysis.get("disclaimer", ""))
+    st.caption(f"Bet format: **{analysis.get('bet_format', fields.get('bet_format', '—'))}** · Confidence: **{completeness.get('confidence', '—')}**")
 
     exp = analysis.get("explanation") or {}
     verdict = analysis.get("verdict_label", "")
@@ -321,10 +487,11 @@ def _render_analysis_results(
     if exp.get("worth_it_probability"):
         st.markdown(exp["worth_it_probability"])
 
+    unit = "contract" if analysis.get("bet_format") == "prediction_market" else "bet"
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Implied probability", f"{float(analysis.get('implied_probability', 0)):.1%}")
     m2.metric("Break-even P", f"{float(analysis.get('break_even_probability', 0)):.1%}")
-    m3.metric("EV (per contract)", f"${float(analysis.get('ev_per_contract', 0)):+.3f}")
+    m3.metric(f"EV (per {unit})", f"${float(analysis.get('ev_per_contract', 0)):+.3f}")
     m4.metric("Expected ROI", f"{float(analysis.get('expected_roi', 0)):+.1%}")
 
     m5, m6, m7 = st.columns(3)
@@ -332,13 +499,14 @@ def _render_analysis_results(
     m6.metric("Downside risk", f"${float(analysis.get('downside_risk', 0)):.2f}")
     m7.metric("Upside", f"${float(analysis.get('upside', 0)):.2f}")
 
-    if dtype == "prediction_market_bet":
-        _render_bet_visuals(fields, analysis)
+    if analysis.get("multiplier"):
+        st.caption(f"Multiplier used: **{float(analysis['multiplier']):.2f}x**")
+
+    _render_bet_visuals(fields, analysis)
 
     with st.expander("Assumptions & what to verify"):
         st.markdown(f"**Assumptions:** {exp.get('assumptions', '')}")
         st.markdown(f"**Risks:** {exp.get('risks', '')}")
-        st.markdown("**Check before acting:**")
         for item in analysis.get("information_to_verify") or []:
             st.markdown(f"- {item}")
         for item in analysis.get("assumptions_checked") or []:
@@ -348,7 +516,7 @@ def _render_analysis_results(
         sens = analysis.get("sensitivity") or []
         if sens:
             probs = [r["user_probability"] for r in sens]
-            evs = [r["ev_per_contract"] for r in sens]
+            evs = [r["ev_total"] for r in sens]
             fig, ax = plt.subplots(figsize=(7, 3.5))
             ax.plot(probs, evs, color="#6366f1", linewidth=2)
             ax.axhline(0, color="#94a3b8", linestyle="--", linewidth=1)
@@ -357,14 +525,13 @@ def _render_analysis_results(
                 up = float(user_p) * 100 if float(user_p) <= 1 else float(user_p)
                 ax.axvline(up, color="#059669", linestyle=":", linewidth=1.5, label="Your estimate")
             ax.set_xlabel("Your probability (%)")
-            ax.set_ylabel("EV per contract ($)")
+            ax.set_ylabel("EV ($)")
             ax.set_title("Sensitivity — EV vs your probability")
             ax.legend(fontsize=8)
             st.pyplot(fig)
             plt.close(fig)
-
             st.dataframe(
-                [{"Your P (%)": r["user_probability"], "EV/contract": r["ev_per_contract"], "EV total": r["ev_total"], "+EV?": r["favorable"]} for r in sens],
+                [{"Your P (%)": r["user_probability"], "EV": r["ev_total"], "+EV?": r["favorable"]} for r in sens],
                 use_container_width=True,
                 hide_index=True,
             )
@@ -375,21 +542,21 @@ def _render_bet_visuals(fields: dict[str, Any], analysis: dict[str, Any]) -> Non
     if p_user > 1:
         p_user /= 100.0
     profit = float(analysis.get("profit_if_win") or 0)
-    cost = float(fields.get("cost") or 0.5)
+    cost = float(fields.get("cost") or fields.get("stake") or 0.5)
+    if analysis.get("bet_format") != "prediction_market":
+        cost = float(fields.get("stake") or 100)
 
     col_v1, col_v2 = st.columns(2)
     with col_v1:
         try:
             from simulations.thinking_plots import plot_probability_tree
-
             plot_probability_tree(p_user, cost, profit)
         except Exception:
             pass
     with col_v2:
         try:
             from simulations.thinking_plots import plot_ev_bars
-
-            plot_ev_bars(p_user, profit, cost)
+            plot_ev_bars(p_user, profit, cost if analysis.get("bet_format") == "prediction_market" else float(fields.get("stake") or cost))
         except Exception:
             pass
 
@@ -405,7 +572,12 @@ def _render_history_panel() -> None:
         ts = str(entry.get("timestamp") or "")[:19]
         eid = str(entry.get("id") or "")
         with st.expander(f"{title[:60]} — {ts}", expanded=False):
-            st.caption(f"Type: {get_decision_label(str(entry.get('decision_type', '')))} · Source: {entry.get('source_type')}")
+            src = entry.get("source_type")
+            st.caption(f"Type: {get_decision_label(str(entry.get('decision_type', '')))} · Source: {src}")
+            if entry.get("image_meta"):
+                st.caption(f"Image: {entry['image_meta'].get('filename', '—')} ({entry['image_meta'].get('size_bytes', 0)} bytes)")
+            if entry.get("ocr_text"):
+                st.text(entry["ocr_text"][:200])
             if entry.get("analysis"):
                 st.markdown(f"**Verdict:** {entry['analysis'].get('verdict_label', '—')}")
             if st.button("Reload", key=f"imp_reload_{eid}"):
@@ -413,7 +585,8 @@ def _render_history_panel() -> None:
                 st.session_state["imp_decision_type"] = entry.get("decision_type")
                 st.session_state["imp_raw_input"] = entry.get("raw_input", "")
                 st.session_state["imp_analysis"] = entry.get("analysis")
-                st.session_state["imp_stage"] = "clarify"
+                st.session_state["imp_image_meta"] = entry.get("image_meta")
+                st.session_state["imp_stage"] = "review"
                 st.rerun()
             if st.button("Delete", key=f"imp_del_{eid}"):
                 delete_import_entry(eid)

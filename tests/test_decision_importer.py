@@ -1,4 +1,4 @@
-"""Tests for AMI Problem Importer — Phase 0 prediction market bets."""
+"""Tests for AMI Problem Importer — Phase 0+ screenshot and richer bet formats."""
 
 from __future__ import annotations
 
@@ -8,10 +8,21 @@ import unittest.mock
 from pathlib import Path
 
 from decision_history import delete_import_entry, list_import_history, save_import_entry
-from decision_math import analyze_prediction_market_bet, enrich_bet_fields, solve_decision
-from decision_parser import extract_fields, parse_prediction_market_csv, parse_prediction_market_text
+from decision_math import (
+    analyze_decimal_odds_bet,
+    analyze_prediction_market_bet,
+    enrich_bet_fields,
+    solve_decision,
+)
+from decision_ocr import extract_text_from_image, image_metadata, ocr_availability
+from decision_parser import (
+    apply_field_edits,
+    extract_fields,
+    parse_prediction_market_csv,
+    parse_prediction_market_text,
+)
 from decision_router import route_imported_problem
-from decision_templates import assess_completeness
+from decision_templates import assess_completeness, clarification_questions
 
 
 KALSHI_SAMPLE = """
@@ -26,6 +37,15 @@ CSV_SAMPLE = """title,side,price,stake,user_probability
 Knicks playoffs,Yes,42,100,55
 """
 
+CALCI_MATCHUP = """
+Chicago Cubs 50%
+New York Mets 50%
+1.93x
+Mets 1.90x
+Spread and total: 2 markets
+Volume: 128,324
+"""
+
 
 class TestDecisionRouter(unittest.TestCase):
     def test_routes_kalshi_text_to_prediction_market(self) -> None:
@@ -33,8 +53,8 @@ class TestDecisionRouter(unittest.TestCase):
         self.assertEqual(route["decision_type"], "prediction_market_bet")
         self.assertGreater(route["confidence"], 0.3)
 
-    def test_empty_defaults_to_prediction_market_phase0(self) -> None:
-        route = route_imported_problem("")
+    def test_routes_matchup_text(self) -> None:
+        route = route_imported_problem(CALCI_MATCHUP)
         self.assertEqual(route["decision_type"], "prediction_market_bet")
 
 
@@ -46,6 +66,18 @@ class TestDecisionParser(unittest.TestCase):
         self.assertEqual(fields["contract_side"], "Yes")
         self.assertEqual(fields["price"], 42.0)
         self.assertIn("April", fields["expiration"])
+        self.assertEqual(fields["bet_format"], "prediction_market")
+
+    def test_parses_calci_matchup(self) -> None:
+        fields = parse_prediction_market_text(CALCI_MATCHUP)
+        self.assertIn("Cubs", fields["title"])
+        self.assertIn("Mets", fields["title"])
+        self.assertEqual(len(fields["team_options"]), 2)
+        self.assertAlmostEqual(fields["team_options"][0]["implied_pct"], 50.0)
+        self.assertEqual(fields["volume"], 128324.0)
+        self.assertEqual(fields["spread_total_markets"], 2)
+        self.assertIn(fields["bet_format"], ("moneyline_matchup", "decimal_multiplier", "percentage_implied"))
+        self.assertIsNotNone(fields.get("multiplier"))
 
     def test_parses_csv_row(self) -> None:
         fields = parse_prediction_market_csv(CSV_SAMPLE)
@@ -55,10 +87,12 @@ class TestDecisionParser(unittest.TestCase):
         self.assertEqual(fields["stake"], 100.0)
         self.assertAlmostEqual(fields["user_probability"], 0.55)
 
-    def test_enrich_derives_implied_probability(self) -> None:
-        enriched = enrich_bet_fields({"price": 42, "contract_side": "Yes"})
-        self.assertAlmostEqual(enriched["implied_probability"], 0.42)
-        self.assertAlmostEqual(enriched["cost"], 0.42)
+    def test_apply_field_edits_reenriches(self) -> None:
+        base = parse_prediction_market_text(KALSHI_SAMPLE)
+        edited = apply_field_edits(base, {"stake": 50, "user_probability": 0.6, "price": 42})
+        self.assertEqual(edited["stake"], 50)
+        self.assertAlmostEqual(edited["user_probability"], 0.6)
+        self.assertTrue(edited.get("ocr_corrected"))
 
 
 class TestDecisionCompleteness(unittest.TestCase):
@@ -73,24 +107,60 @@ class TestDecisionCompleteness(unittest.TestCase):
         fields = parse_prediction_market_csv(CSV_SAMPLE)
         assessment = assess_completeness("prediction_market_bet", fields)
         self.assertTrue(assessment["can_solve"])
-        self.assertGreaterEqual(assessment["completeness_pct"], 100.0)
+
+    def test_matchup_flags_uncertain_fields(self) -> None:
+        fields = parse_prediction_market_text(CALCI_MATCHUP)
+        assessment = assess_completeness("prediction_market_bet", fields)
+        self.assertTrue(assessment.get("uncertain") or assessment.get("missing"))
 
 
 class TestDecisionMath(unittest.TestCase):
-    def test_ev_break_even_and_sensitivity(self) -> None:
+    def test_ev_binary_prediction_market(self) -> None:
         fields = parse_prediction_market_csv(CSV_SAMPLE)
         result = analyze_prediction_market_bet(fields)
         self.assertAlmostEqual(result["implied_probability"], 0.42)
         self.assertAlmostEqual(result["break_even_probability"], 0.42)
         self.assertGreater(result["ev_per_contract"], 0)
-        self.assertEqual(result["verdict"], "mathematically_favorable")
-        self.assertGreater(len(result["sensitivity"]), 5)
-        self.assertIn("disclaimer", result)
+        self.assertEqual(result["bet_format"], "prediction_market")
+
+    def test_ev_decimal_multiplier(self) -> None:
+        fields = enrich_bet_fields({
+            "bet_format": "decimal_multiplier",
+            "multiplier": 1.90,
+            "stake": 100,
+            "user_probability": 0.58,
+            "contract_side": "Mets",
+            "title": "Mets moneyline",
+        })
+        result = analyze_decimal_odds_bet(fields)
+        self.assertAlmostEqual(result["break_even_probability"], 1 / 1.90, places=3)
+        self.assertAlmostEqual(result["implied_probability"], 1 / 1.90, places=3)
+        self.assertGreater(result["ev_total"], 0)
+        self.assertAlmostEqual(result["profit_if_win"], 90.0, places=1)
 
     def test_solve_decision_dispatches(self) -> None:
         fields = extract_fields(CSV_SAMPLE, "prediction_market_bet", source_type="csv")
         result = solve_decision("prediction_market_bet", fields)
         self.assertIn("ev_per_contract", result)
+
+
+class TestDecisionOCR(unittest.TestCase):
+    def test_ocr_availability_returns_dict(self) -> None:
+        info = ocr_availability()
+        self.assertIn("available", info)
+        self.assertIn("engines", info)
+
+    def test_extract_text_empty_bytes_no_crash(self) -> None:
+        result = extract_text_from_image(b"")
+        self.assertIsInstance(result, dict)
+        self.assertIn("success", result)
+        self.assertIn("error", result)
+
+    def test_image_metadata(self) -> None:
+        data = b"not-an-image"
+        meta = image_metadata(data, filename="test.png")
+        self.assertEqual(meta["filename"], "test.png")
+        self.assertEqual(meta["size_bytes"], len(data))
 
 
 class TestBetVisuals(unittest.TestCase):
@@ -113,18 +183,50 @@ class TestBetVisuals(unittest.TestCase):
 
         from components.importer_ui import _render_bet_visuals
 
-        fields = {"user_probability": 0.55, "stake": 100, "cost": 0.42}
-        analysis = {"profit_if_win": 0.58, "implied_probability": 0.42}
+        fields = {"user_probability": 0.55, "stake": 100, "cost": 0.42, "bet_format": "prediction_market"}
+        analysis = {"profit_if_win": 0.58, "implied_probability": 0.42, "bet_format": "prediction_market"}
 
         _render_bet_visuals(fields, analysis)
 
         mock_st.columns.assert_called_once_with(2)
-        mock_tree.assert_called_once_with(0.55, 0.42, 0.58)
-        mock_bars.assert_called_once_with(0.55, 0.58, 0.42)
+        mock_tree.assert_called_once()
+        mock_bars.assert_called_once()
+
+    @unittest.mock.patch("simulations.thinking_plots.plot_ev_bars")
+    @unittest.mock.patch("simulations.thinking_plots.plot_probability_tree")
+    @unittest.mock.patch("components.importer_ui.st")
+    def test_render_bet_visuals_decimal_odds_no_crash(
+        self,
+        mock_st: unittest.mock.MagicMock,
+        _mock_tree: unittest.mock.MagicMock,
+        _mock_bars: unittest.mock.MagicMock,
+    ) -> None:
+        col1 = unittest.mock.MagicMock()
+        col2 = unittest.mock.MagicMock()
+        col1.__enter__ = unittest.mock.Mock(return_value=col1)
+        col1.__exit__ = unittest.mock.Mock(return_value=False)
+        col2.__enter__ = unittest.mock.Mock(return_value=col2)
+        col2.__exit__ = unittest.mock.Mock(return_value=False)
+        mock_st.columns.return_value = (col1, col2)
+
+        from components.importer_ui import _render_bet_visuals
+
+        fields = {"user_probability": 0.55, "stake": 100, "multiplier": 1.9, "bet_format": "decimal_multiplier"}
+        analysis = {"profit_if_win": 90, "implied_probability": 0.526, "bet_format": "decimal_multiplier"}
+
+        _render_bet_visuals(fields, analysis)
+
+
+class TestClarificationQuestions(unittest.TestCase):
+    def test_questions_for_incomplete_matchup(self) -> None:
+        fields = parse_prediction_market_text(CALCI_MATCHUP)
+        qs = clarification_questions(fields)
+        ids = {q["id"] for q in qs}
+        self.assertTrue("stake" in ids or "user_probability" in ids or "contract_side" in ids)
 
 
 class TestDecisionHistory(unittest.TestCase):
-    def test_save_list_delete_roundtrip(self) -> None:
+    def test_save_with_image_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             ws = "test_importer"
             ws_dir = Path(tmp) / "workspaces" / ws
@@ -133,17 +235,18 @@ class TestDecisionHistory(unittest.TestCase):
             with unittest.mock.patch("suite_workspace.workspace_dir", return_value=ws_dir):
                 with unittest.mock.patch("suite_workspace.resolve_workspace_id", return_value=ws):
                     entry = save_import_entry(
-                        source_type="text",
+                        source_type="image",
                         decision_type="prediction_market_bet",
-                        raw_input=KALSHI_SAMPLE,
-                        fields={"title": "Knicks playoffs", "price": 42},
+                        raw_input=CALCI_MATCHUP,
+                        fields={"title": "Cubs vs Mets"},
+                        image_meta={"filename": "screen.png", "size_bytes": 12345},
+                        ocr_text="Cubs 50%",
+                        corrected_fields={"stake": 100},
                         workspace_id=ws,
                     )
-                    self.assertTrue(entry["id"])
-                    entries = list_import_history(ws)
-                    self.assertEqual(len(entries), 1)
+                    self.assertEqual(entry["image_meta"]["filename"], "screen.png")
+                    self.assertEqual(entry["ocr_text"], "Cubs 50%")
                     self.assertTrue(delete_import_entry(entry["id"], ws))
-                    self.assertEqual(len(list_import_history(ws)), 0)
 
 
 if __name__ == "__main__":

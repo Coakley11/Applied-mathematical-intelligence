@@ -70,6 +70,9 @@ def save_import_entry(
     analysis: dict[str, Any] | None = None,
     completeness: dict[str, Any] | None = None,
     user_notes: str = "",
+    image_meta: dict[str, Any] | None = None,
+    ocr_text: str = "",
+    corrected_fields: dict[str, Any] | None = None,
     workspace_id: str | None = None,
 ) -> dict[str, Any]:
     """Append an imported problem to workspace history."""
@@ -79,7 +82,10 @@ def save_import_entry(
         "source_type": source_type,
         "decision_type": decision_type,
         "raw_input": raw_input[:4000],
+        "ocr_text": str(ocr_text or "")[:4000],
+        "image_meta": copy.deepcopy(image_meta) if image_meta else None,
         "fields": copy.deepcopy(fields),
+        "corrected_fields": copy.deepcopy(corrected_fields) if corrected_fields else None,
         "analysis": copy.deepcopy(analysis) if analysis else None,
         "completeness": copy.deepcopy(completeness) if completeness else None,
         "user_notes": str(user_notes or "").strip(),
