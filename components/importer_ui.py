@@ -311,10 +311,13 @@ def _render_manual_entry() -> str:
         m_side = st.text_input("Side / team", value="Yes", key="imp_m_side")
         m_price = st.number_input("Price (¢) — prediction markets", min_value=0.0, max_value=99.0, value=0.0, key="imp_m_price")
         m_mult = st.number_input("Multiplier (e.g. 1.90) — decimal odds", min_value=0.0, value=0.0, step=0.01, key="imp_m_mult")
-        m_stake = st.number_input("Stake ($)", min_value=1.0, value=100.0, key="imp_m_stake")
+        m_stake = st.number_input("Proposed stake ($)", min_value=1.0, value=100.0, key="imp_m_stake")
+        m_bankroll = st.number_input("Bankroll ($)", min_value=0.0, value=0.0, step=50.0, key="imp_m_bankroll")
         m_prob = st.slider("Your probability (%)", 5, 95, 50, key="imp_m_prob")
         if st.form_submit_button("Use manual entry"):
             parts = [m_title, f"side: {m_side}", f"stake: ${m_stake:.0f}", f"my estimate: {m_prob}%"]
+            if m_bankroll > 0:
+                parts.append(f"bankroll: ${m_bankroll:.0f}")
             if m_format == "prediction_market" and m_price > 0:
                 parts.insert(1, f"{m_side}: {m_price:.0f}¢")
             if m_mult > 1:
@@ -429,7 +432,10 @@ def _render_extracted_summary(fields: dict[str, Any], dtype: str) -> None:
 
 
 def _review_widget_signature(fields: dict[str, Any]) -> str:
-    keys = ("title", "bet_format", "contract_side", "price", "multiplier", "stake", "user_probability")
+    keys = (
+        "title", "bet_format", "contract_side", "price", "multiplier",
+        "stake", "bankroll", "user_probability", "risk_tolerance",
+    )
     return "|".join(f"{k}={fields.get(k)!r}" for k in keys)
 
 
@@ -446,6 +452,9 @@ def _seed_review_widgets(fields: dict[str, Any]) -> None:
     st.session_state["imp_rev_mult"] = float(fields.get("multiplier") or fields.get("decimal_odds") or 0.0)
     st.session_state["imp_rev_vol"] = float(fields.get("volume") or 0.0)
     st.session_state["imp_rev_stake"] = float(fields.get("stake") or 100.0)
+    st.session_state["imp_rev_bankroll"] = float(fields.get("bankroll") or 0.0)
+    rt = str(fields.get("risk_tolerance") or "moderate")
+    st.session_state["imp_rev_risk_tol"] = rt if rt in ("conservative", "moderate", "aggressive") else "moderate"
     up = fields.get("user_probability")
     if up is not None:
         pct = float(up) * 100 if float(up) <= 1 else float(up)
@@ -467,6 +476,8 @@ def _collect_review_edits() -> dict[str, Any]:
         "multiplier": float(st.session_state.get("imp_rev_mult") or 0.0),
         "volume": float(st.session_state.get("imp_rev_vol") or 0.0),
         "stake": float(st.session_state.get("imp_rev_stake") or 0.0),
+        "bankroll": float(st.session_state.get("imp_rev_bankroll") or 0.0),
+        "risk_tolerance": str(st.session_state.get("imp_rev_risk_tol") or "moderate"),
         "user_probability": float(st.session_state.get("imp_rev_prob") or 50) / 100.0,
         "expiration": str(st.session_state.get("imp_rev_exp") or "").strip(),
         "rules_summary": str(st.session_state.get("imp_rev_rules") or "").strip(),
@@ -477,6 +488,8 @@ def _collect_review_edits() -> dict[str, Any]:
         edits.pop("multiplier")
     if edits["volume"] == 0:
         edits.pop("volume")
+    if edits.get("bankroll", 0) == 0:
+        edits.pop("bankroll")
     return edits
 
 
@@ -511,11 +524,24 @@ def _render_field_review_form(dtype: str, fields: dict[str, Any]) -> dict[str, A
         with col3:
             st.number_input("Volume", min_value=0.0, step=1.0, key="imp_rev_vol")
 
-        col4, col5 = st.columns(2)
+        col4, col5, col6 = st.columns(3)
         with col4:
-            st.number_input("Stake ($)", min_value=0.0, step=1.0, key="imp_rev_stake")
+            st.number_input("Proposed stake ($)", min_value=0.0, step=1.0, key="imp_rev_stake")
         with col5:
+            st.number_input("Bankroll ($)", min_value=0.0, step=50.0, key="imp_rev_bankroll")
+        with col6:
             st.slider("Your probability (%)", 5, 95, key="imp_rev_prob")
+
+        col7, col8 = st.columns(2)
+        with col7:
+            st.selectbox(
+                "Risk tolerance",
+                ("conservative", "moderate", "aggressive"),
+                key="imp_rev_risk_tol",
+                help="Caps recommended stake vs Kelly (conservative ≈ quarter Kelly, moderate ≈ half, aggressive ≈ full).",
+            )
+        with col8:
+            st.caption("Bankroll + tolerance drive Kelly sizing and whether your stake is too large.")
 
         st.text_input("Expiration", key="imp_rev_exp")
         st.text_area("Rules", key="imp_rev_rules")
@@ -646,12 +672,24 @@ def _render_analysis_results(
     m1.metric("Implied probability", f"{float(analysis.get('implied_probability', 0)):.1%}")
     m2.metric("Break-even P", f"{float(analysis.get('break_even_probability', 0)):.1%}")
     m3.metric(f"EV (per {unit})", f"${float(analysis.get('ev_per_contract', 0)):+.3f}")
-    m4.metric("Expected ROI", f"{float(analysis.get('expected_roi', 0)):+.1%}")
+    m4.metric("Kelly (full)", f"{float(analysis.get('kelly_fraction', 0)):.1%}")
 
     m5, m6, m7 = st.columns(3)
     m5.metric("EV (total)", f"${float(analysis.get('ev_total', 0)):+.2f}")
-    m6.metric("Downside risk", f"${float(analysis.get('downside_risk', 0)):.2f}")
-    m7.metric("Upside", f"${float(analysis.get('upside', 0)):.2f}")
+    m6.metric("Edge", f"{float(analysis.get('edge', 0)):+.1%}")
+    m7.metric("Expected ROI", f"{float(analysis.get('expected_roi', 0)):+.1%}")
+
+    m8, m9, m10 = st.columns(3)
+    m8.metric("Downside risk", f"${float(analysis.get('downside_risk', 0)):.2f}")
+    m9.metric("Upside", f"${float(analysis.get('upside', 0)):.2f}")
+    sizing = analysis.get("stake_sizing") or {}
+    stake_pct = sizing.get("stake_pct_of_bankroll")
+    m10.metric(
+        "Stake % of bankroll",
+        f"{float(stake_pct):.1%}" if stake_pct is not None else "—",
+    )
+
+    _render_stake_sizing_panel(analysis)
 
     if analysis.get("multiplier"):
         st.caption(f"Multiplier used: **{float(analysis['multiplier']):.2f}x**")
@@ -689,6 +727,49 @@ def _render_analysis_results(
                 use_container_width=True,
                 hide_index=True,
             )
+
+
+def _render_stake_sizing_panel(analysis: dict[str, Any]) -> None:
+    sizing = analysis.get("stake_sizing") or {}
+    if not sizing:
+        return
+
+    with st.container(border=True):
+        st.markdown("**Bankroll & stake sizing**")
+        if sizing.get("stake_warning") and sizing.get("stake_warning_message"):
+            st.warning(sizing["stake_warning_message"])
+        elif sizing.get("stake_assessment") == "too_small":
+            st.info(sizing.get("stake_assessment_label", ""))
+        elif sizing.get("stake_assessment") == "reasonable":
+            st.success(sizing.get("stake_assessment_label", ""))
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Full Kelly", f"{float(sizing.get('kelly_fraction', 0)):.1%}")
+        c2.metric("Half Kelly", f"{float(sizing.get('half_kelly_fraction', 0)):.1%}")
+        c3.metric("Quarter Kelly", f"{float(sizing.get('quarter_kelly_fraction', 0)):.1%}")
+        c4.metric(
+            "Risk rating",
+            str(sizing.get("risk_rating_label") or "—"),
+        )
+
+        if sizing.get("has_bankroll"):
+            rec = sizing.get("recommended_stakes") or {}
+            d1, d2, d3 = st.columns(3)
+            d1.metric("Conservative stake", f"${float(rec.get('conservative') or 0):,.2f}")
+            d2.metric("Moderate stake", f"${float(rec.get('moderate') or 0):,.2f}")
+            d3.metric("Aggressive stake", f"${float(rec.get('aggressive') or 0):,.2f}")
+
+            k1, k2, k3 = st.columns(3)
+            k1.metric("Full Kelly $", f"${float(sizing.get('kelly_stake') or 0):,.2f}")
+            k2.metric("Half Kelly $", f"${float(sizing.get('half_kelly_stake') or 0):,.2f}")
+            k3.metric("Quarter Kelly $", f"${float(sizing.get('quarter_kelly_stake') or 0):,.2f}")
+        else:
+            st.caption(
+                "Enter **bankroll** in the review panel to see dollar stakes and whether your proposed bet is oversized."
+            )
+
+        if sizing.get("sizing_explanation"):
+            st.markdown(sizing["sizing_explanation"])
 
 
 def _render_bet_visuals(fields: dict[str, Any], analysis: dict[str, Any]) -> None:

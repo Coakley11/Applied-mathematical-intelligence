@@ -11,6 +11,8 @@ from decision_history import delete_import_entry, list_import_history, save_impo
 from decision_math import (
     analyze_decimal_odds_bet,
     analyze_prediction_market_bet,
+    compute_kelly_fraction,
+    compute_stake_sizing,
     enrich_bet_fields,
     solve_decision,
 )
@@ -213,6 +215,69 @@ class TestDecisionMath(unittest.TestCase):
         self.assertAlmostEqual(ev_low, 4.5, places=1)
         self.assertAlmostEqual(ev_high, 65.0, places=1)
         self.assertGreater(ev_high, ev_low)
+
+    def test_kelly_fraction_mets_case(self) -> None:
+        net_odds = 90.0 / 100.0
+        self.assertAlmostEqual(compute_kelly_fraction(0.55, net_odds), 0.05, places=3)
+
+    def test_bankroll_stake_sizing_flags_oversized_bet(self) -> None:
+        fields = {
+            "bet_format": "percentage_implied",
+            "contract_side": "New York Mets",
+            "multiplier": 1.90,
+            "implied_probability": 0.50,
+            "stake": 120,
+            "bankroll": 1000,
+            "user_probability": 0.55,
+            "risk_tolerance": "moderate",
+            "title": "Cubs vs Mets",
+        }
+        result = analyze_prediction_market_bet(fields)
+        sizing = result["stake_sizing"]
+        self.assertAlmostEqual(sizing["kelly_fraction"], 0.05, places=3)
+        self.assertAlmostEqual(sizing["kelly_stake"], 50.0, places=1)
+        self.assertAlmostEqual(sizing["half_kelly_stake"], 25.0, places=1)
+        self.assertAlmostEqual(sizing["quarter_kelly_stake"], 12.5, places=1)
+        self.assertAlmostEqual(sizing["stake_pct_of_bankroll"], 0.12, places=3)
+        self.assertEqual(sizing["stake_assessment"], "too_large")
+        self.assertTrue(sizing["stake_warning"])
+        self.assertIn("aggressive", sizing["stake_warning_message"].lower())
+
+    def test_bankroll_stake_sizing_reasonable_bet(self) -> None:
+        fields = {
+            "bet_format": "decimal_multiplier",
+            "multiplier": 1.90,
+            "stake": 25,
+            "bankroll": 1000,
+            "user_probability": 0.55,
+            "implied_probability": 0.50,
+            "risk_tolerance": "moderate",
+        }
+        result = analyze_decimal_odds_bet(fields)
+        sizing = result["stake_sizing"]
+        self.assertEqual(sizing["stake_assessment"], "reasonable")
+        self.assertFalse(sizing["stake_warning"])
+
+    def test_stake_sizing_without_bankroll_shows_kelly_pct_only(self) -> None:
+        sizing = compute_stake_sizing(
+            fields={"risk_tolerance": "moderate"},
+            p_user=0.55,
+            edge=0.05,
+            ev_total=4.5,
+            profit_if_win=90.0,
+            loss_if_lose=100.0,
+            stake=100.0,
+        )
+        self.assertFalse(sizing["has_bankroll"])
+        self.assertIsNone(sizing["kelly_stake"])
+        self.assertAlmostEqual(sizing["kelly_fraction"], 0.05, places=3)
+        self.assertIn("bankroll", sizing["sizing_explanation"].lower())
+
+    def test_parse_bankroll_from_text(self) -> None:
+        text = "Mets 1.90x\nstake: $100\nbankroll: $1000\nmy estimate: 55%"
+        fields = parse_prediction_market_text(text)
+        self.assertAlmostEqual(fields.get("bankroll"), 1000.0)
+        self.assertAlmostEqual(fields.get("stake"), 100.0)
 
     def test_solve_decision_dispatches(self) -> None:
         fields = extract_fields(CSV_SAMPLE, "prediction_market_bet", source_type="csv")

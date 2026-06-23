@@ -106,9 +106,17 @@ PREDICTION_MARKET_BET_FIELDS: dict[str, FieldSpec] = {
         "editable": True,
     },
     "stake": {
-        "label": "Your stake ($)",
+        "label": "Proposed stake ($)",
         "required": True,
-        "why": "Needed for expected profit/loss and position sizing.",
+        "why": "The bet size you are considering — compared to bankroll and Kelly recommendations.",
+        "input_type": "number",
+        "allow_estimate": True,
+        "editable": True,
+    },
+    "bankroll": {
+        "label": "Bankroll ($)",
+        "required": False,
+        "why": "Total funds available for betting — needed for stake % and Kelly dollar amounts.",
         "input_type": "number",
         "allow_estimate": True,
         "editable": True,
@@ -352,6 +360,12 @@ def clarification_questions(fields: dict[str, Any]) -> list[dict[str, str]]:
             "id": "user_probability",
             "question": "What is your estimated true probability?",
             "why": "Your belief vs the market drives edge and EV.",
+        })
+    if not _has_value(fields.get("bankroll")):
+        questions.append({
+            "id": "bankroll",
+            "question": "What is your total betting bankroll ($)?",
+            "why": "Converts Kelly fractions into dollar stakes and flags oversized bets.",
         })
     if fmt in ("decimal_multiplier", "moneyline_matchup") and not _has_value(fields.get("multiplier")):
         questions.append({

@@ -44,6 +44,10 @@ _STAKE_INLINE = re.compile(
     r"(?:stake|bet(?:ting)?|wager|invest(?:ing)?|amount)\s*[:\s]*\$?\s*(\d+(?:\.\d{1,2})?)",
     re.I,
 )
+_BANKROLL_INLINE = re.compile(
+    r"(?:bankroll|roll|total\s+(?:bankroll|funds|capital))\s*[:\s]*\$?\s*(\d+(?:\.\d{1,2})?)",
+    re.I,
+)
 _USER_PROB = re.compile(
     r"(?:my\s+(?:estimate|probability|chance)|i\s+think|believe|true\s+(?:prob|probability|chance))\s*[:\s]*(\d{1,3})\s*%?",
     re.I,
@@ -221,6 +225,7 @@ def parse_prediction_market_text(raw: str) -> dict[str, Any]:
         "expiration": "",
         "rules_summary": "",
         "stake": None,
+        "bankroll": None,
         "user_probability": None,
         "source_excerpt": text[:800],
         "uncertain_fields": uncertain,
@@ -325,6 +330,10 @@ def parse_prediction_market_text(raw: str) -> dict[str, Any]:
     if sm:
         fields["stake"] = float(sm.group(1))
 
+    bm = _BANKROLL_INLINE.search(text)
+    if bm:
+        fields["bankroll"] = float(bm.group(1))
+
     um = _USER_PROB.search(text)
     if um:
         fields["user_probability"] = float(um.group(1)) / 100.0
@@ -379,6 +388,7 @@ def parse_prediction_market_csv(raw: str) -> dict[str, Any]:
         "expiration": str(pick("expiration", "close_date", "date") or ""),
         "rules_summary": str(pick("rules", "rules_summary") or ""),
         "stake": None,
+        "bankroll": None,
         "user_probability": None,
         "team_options": [],
         "multipliers": [],
@@ -397,6 +407,13 @@ def parse_prediction_market_csv(raw: str) -> dict[str, Any]:
     if stake_raw is not None:
         try:
             fields["stake"] = float(str(stake_raw).replace("$", ""))
+        except ValueError:
+            pass
+
+    bankroll_raw = pick("bankroll", "roll", "total_bankroll")
+    if bankroll_raw is not None:
+        try:
+            fields["bankroll"] = float(str(bankroll_raw).replace("$", ""))
         except ValueError:
             pass
 

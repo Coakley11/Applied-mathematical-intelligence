@@ -239,6 +239,225 @@ def analyze_percentage_implied_bet(fields: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def compute_kelly_fraction(p_win: float, net_odds: float) -> float:
+    """Full-Kelly fraction of bankroll to risk (net odds = profit / amount at risk)."""
+    if net_odds <= 0:
+        return 0.0
+    return max(0.0, (p_win * net_odds - (1.0 - p_win)) / net_odds)
+
+
+def _stake_pct_risk_rating(stake_pct: float) -> str:
+    if stake_pct < 0.02:
+        return "low"
+    if stake_pct < 0.05:
+        return "moderate"
+    if stake_pct < 0.10:
+        return "high"
+    return "very_high"
+
+
+def _risk_rating_label(rating: str) -> str:
+    return {
+        "low": "Low",
+        "moderate": "Moderate",
+        "high": "High",
+        "very_high": "Very high",
+    }.get(rating, rating.replace("_", " ").title())
+
+
+def compute_stake_sizing(
+    *,
+    fields: dict[str, Any],
+    p_user: float,
+    edge: float,
+    ev_total: float,
+    profit_if_win: float,
+    loss_if_lose: float,
+    stake: float,
+) -> dict[str, Any]:
+    """Bankroll-aware Kelly sizing, risk rating, and stake-vs-edge guidance."""
+    risk_tol = str(fields.get("risk_tolerance") or "moderate").lower()
+    net_odds = profit_if_win / loss_if_lose if loss_if_lose > 0 else 0.0
+    kelly_fraction = compute_kelly_fraction(p_user, net_odds)
+    half_fraction = kelly_fraction * 0.5
+    quarter_fraction = kelly_fraction * 0.25
+
+    bankroll_raw = fields.get("bankroll")
+    has_bankroll = bankroll_raw is not None and float(bankroll_raw) > 0
+    bankroll = float(bankroll_raw) if has_bankroll else 0.0
+
+    conservative_cap = 0.04
+    moderate_cap = 0.10
+    aggressive_cap = 0.25
+
+    recommended = {
+        "conservative": round(min(quarter_fraction * bankroll, conservative_cap * bankroll), 2) if has_bankroll else None,
+        "moderate": round(min(half_fraction * bankroll, moderate_cap * bankroll), 2) if has_bankroll else None,
+        "aggressive": round(min(kelly_fraction * bankroll, aggressive_cap * bankroll), 2) if has_bankroll else None,
+    }
+    recommended_pct = {
+        "conservative": (round(min(quarter_fraction, conservative_cap), 4), round(conservative_cap, 4)),
+        "moderate": (round(min(half_fraction, moderate_cap), 4), round(moderate_cap, 4)),
+        "aggressive": (round(min(kelly_fraction, aggressive_cap), 4), round(aggressive_cap, 4)),
+    }
+
+    result: dict[str, Any] = {
+        "has_bankroll": has_bankroll,
+        "bankroll": round(bankroll, 2) if has_bankroll else None,
+        "net_odds": round(net_odds, 4),
+        "kelly_fraction": round(kelly_fraction, 4),
+        "half_kelly_fraction": round(half_fraction, 4),
+        "quarter_kelly_fraction": round(quarter_fraction, 4),
+        "kelly_stake": round(kelly_fraction * bankroll, 2) if has_bankroll else None,
+        "half_kelly_stake": round(half_fraction * bankroll, 2) if has_bankroll else None,
+        "quarter_kelly_stake": round(quarter_fraction * bankroll, 2) if has_bankroll else None,
+        "stake_pct_of_bankroll": None,
+        "risk_rating": None,
+        "risk_rating_label": None,
+        "stake_assessment": None,
+        "stake_assessment_label": None,
+        "stake_warning": False,
+        "stake_warning_message": "",
+        "recommended_stakes": recommended,
+        "recommended_stake_pct": recommended_pct,
+        "risk_tolerance": risk_tol,
+        "sizing_explanation": "",
+    }
+
+    if not has_bankroll:
+        result["sizing_explanation"] = (
+            f"Estimated edge **{edge:+.1%}**. Full Kelly suggests risking **{kelly_fraction:.1%}** of bankroll "
+            f"(half **{half_fraction:.1%}**, quarter **{quarter_fraction:.1%}**). "
+            "Enter your **bankroll** to convert these into dollar stakes and compare your proposed bet."
+        )
+        return result
+
+    stake_pct = stake / bankroll if bankroll > 0 else 0.0
+    result["stake_pct_of_bankroll"] = round(stake_pct, 4)
+    risk_rating = _stake_pct_risk_rating(stake_pct)
+    result["risk_rating"] = risk_rating
+    result["risk_rating_label"] = _risk_rating_label(risk_rating)
+
+    tol_stake = recommended.get(risk_tol) or recommended["moderate"]
+    tol_lo, tol_hi = recommended_pct.get(risk_tol) or recommended_pct["moderate"]
+
+    if ev_total <= 0 or kelly_fraction <= 0:
+        assessment = "no_positive_edge"
+        assessment_label = "No positive edge — do not size up"
+        warning = stake_pct > 0.02
+        warning_msg = (
+            f"Your proposed stake is **{stake_pct:.1%}** of bankroll, but this bet is not +EV at your estimate. "
+            "Consider passing or revisiting your probability."
+        ) if warning else ""
+    elif stake_pct > max(kelly_fraction * 1.25, aggressive_cap * 0.8) or stake > (recommended["aggressive"] or 0) * 1.25:
+        assessment = "too_large"
+        assessment_label = "Too large for estimated edge"
+        warning = True
+        warning_msg = (
+            f"Your stake is **{stake_pct:.1%}** of bankroll, which is aggressive relative to the estimated edge. "
+            f"Full Kelly suggests **${result['kelly_stake']:.2f}** ({kelly_fraction:.1%}); "
+            f"half Kelly **${result['half_kelly_stake']:.2f}**; quarter Kelly **${result['quarter_kelly_stake']:.2f}**. "
+            f"A more conservative stake for your tolerance is closer to **{tol_lo:.0%}–{tol_hi:.0%}** of bankroll "
+            f"(about **${recommended['conservative']:.2f}–${recommended['moderate']:.2f}**)."
+        )
+    elif stake_pct < quarter_fraction * 0.5 and ev_total > 0:
+        assessment = "too_small"
+        assessment_label = "Conservative vs Kelly — room to size up"
+        warning = False
+        warning_msg = ""
+    else:
+        assessment = "reasonable"
+        assessment_label = "Reasonable for estimated edge"
+        warning = stake_pct > (tol_hi if risk_tol != "aggressive" else aggressive_cap)
+        warning_msg = (
+            f"Stake is **{stake_pct:.1%}** of bankroll — on the high side for **{risk_tol}** tolerance "
+            f"(target roughly **{tol_lo:.0%}–{tol_hi:.0%}**)."
+        ) if warning else ""
+
+    result["stake_assessment"] = assessment
+    result["stake_assessment_label"] = assessment_label
+    result["stake_warning"] = warning
+    result["stake_warning_message"] = warning_msg
+
+    result["sizing_explanation"] = _build_sizing_explanation(
+        stake=stake,
+        stake_pct=stake_pct,
+        bankroll=bankroll,
+        edge=edge,
+        kelly_fraction=kelly_fraction,
+        half_fraction=half_fraction,
+        quarter_fraction=quarter_fraction,
+        kelly_stake=result["kelly_stake"],
+        half_kelly_stake=result["half_kelly_stake"],
+        quarter_kelly_stake=result["quarter_kelly_stake"],
+        recommended=recommended,
+        recommended_pct=recommended_pct,
+        risk_rating=risk_rating,
+        assessment=assessment,
+        risk_tol=risk_tol,
+        tol_stake=tol_stake,
+        tol_lo=tol_lo,
+        tol_hi=tol_hi,
+    )
+    return result
+
+
+def _build_sizing_explanation(
+    *,
+    stake: float,
+    stake_pct: float,
+    bankroll: float,
+    edge: float,
+    kelly_fraction: float,
+    half_fraction: float,
+    quarter_fraction: float,
+    kelly_stake: float | None,
+    half_kelly_stake: float | None,
+    quarter_kelly_stake: float | None,
+    recommended: dict[str, float | None],
+    recommended_pct: dict[str, tuple[float, float]],
+    risk_rating: str,
+    assessment: str,
+    risk_tol: str,
+    tol_stake: float | None,
+    tol_lo: float,
+    tol_hi: float,
+) -> str:
+    parts = [
+        f"Your stake is **{stake_pct:.1%}** of a **${bankroll:,.2f}** bankroll "
+        f"({ _risk_rating_label(risk_rating).lower() } risk by size alone). "
+        f"Estimated edge vs market: **{edge:+.1%}**.",
+        (
+            f"Full Kelly suggests **${kelly_stake:,.2f}** ({kelly_fraction:.1%} of bankroll); "
+            f"half Kelly **${half_kelly_stake:,.2f}**; quarter Kelly **${quarter_kelly_stake:,.2f}**."
+        ),
+        (
+            f"Suggested stakes — conservative **${recommended['conservative']:,.2f}**, "
+            f"moderate **${recommended['moderate']:,.2f}**, aggressive **${recommended['aggressive']:,.2f}**."
+        ),
+    ]
+    if assessment == "too_large":
+        parts.append(
+            f"At **{stake_pct:.1%}** of bankroll you are betting more than Kelly and your **{risk_tol}** "
+            f"comfort zone ({tol_lo:.0%}–{tol_hi:.0%}). A tighter stake would be closer to "
+            f"**${recommended['conservative']:,.2f}–${recommended['moderate']:,.2f}**."
+        )
+    elif assessment == "too_small":
+        parts.append(
+            f"Your **${stake:,.2f}** stake is well below quarter Kelly "
+            f"(**${quarter_kelly_stake:,.2f}**) — fine if you prefer minimal variance; "
+            f"you could consider up to **${tol_stake:,.2f}** for **{risk_tol}** tolerance."
+        )
+    elif assessment == "reasonable":
+        parts.append(
+            f"Your **${stake:,.2f}** stake is in a reasonable range for the estimated edge "
+            f"and **{risk_tol}** tolerance (about **{tol_lo:.0%}–{tol_hi:.0%}** of bankroll)."
+        )
+    else:
+        parts.append("Without a positive edge, bankroll sizing should stay minimal or zero.")
+    return " ".join(parts)
+
+
 def _unsupported_format(fields: dict[str, Any], message: str) -> dict[str, Any]:
     return {
         "verdict": "incomplete",
@@ -267,16 +486,22 @@ def _finalize_analysis(
     units: float,
     multiplier: float | None = None,
 ) -> dict[str, Any]:
-    if profit_if_win > 0:
-        kelly_raw = (p_user * profit_if_win - (1 - p_user) * loss_if_lose) / profit_if_win
-        kelly_fraction = max(0.0, min(kelly_raw, 0.25))
-    else:
-        kelly_fraction = 0.0
+    net_odds = profit_if_win / loss_if_lose if loss_if_lose > 0 else 0.0
+    kelly_fraction = compute_kelly_fraction(p_user, net_odds)
 
+    stake_sizing = compute_stake_sizing(
+        fields=fields,
+        p_user=p_user,
+        edge=edge,
+        ev_total=ev_total,
+        profit_if_win=profit_if_win,
+        loss_if_lose=loss_if_lose,
+        stake=stake,
+    )
     risk_tol = str(fields.get("risk_tolerance") or "moderate").lower()
-    sizing_cap = {"conservative": 0.05, "moderate": 0.10, "aggressive": 0.25}.get(risk_tol, 0.10)
-    suggested_fraction = min(kelly_fraction, sizing_cap)
-    suggested_stake = round(suggested_fraction * stake * 10, 2) if stake else 0.0
+    suggested_stake = stake_sizing["recommended_stakes"].get(risk_tol) or stake_sizing["recommended_stakes"].get("moderate")
+    tol_pair = stake_sizing["recommended_stake_pct"].get(risk_tol) or stake_sizing["recommended_stake_pct"]["moderate"]
+    suggested_fraction = tol_pair[1] if tol_pair else kelly_fraction
 
     sensitivity = []
     for pct in range(5, 96, 5):
@@ -315,6 +540,7 @@ def _finalize_analysis(
         edge=edge,
         verdict=verdict,
         multiplier=multiplier,
+        stake_sizing=stake_sizing,
     )
 
     return {
@@ -330,8 +556,9 @@ def _finalize_analysis(
         "contracts": round(units, 2),
         "multiplier": multiplier,
         "kelly_fraction": round(kelly_fraction, 4),
-        "suggested_stake_fraction": round(suggested_fraction, 4),
+        "suggested_stake_fraction": round(suggested_fraction, 4) if suggested_fraction is not None else None,
         "suggested_stake": suggested_stake,
+        "stake_sizing": stake_sizing,
         "downside_risk": round(loss_if_lose * units, 2) if bet_format == "prediction_market" and units else round(loss_if_lose, 2),
         "upside": round(profit_if_win * units, 2) if bet_format == "prediction_market" and units else round(profit_if_win, 2),
         "sensitivity": sensitivity,
@@ -359,6 +586,7 @@ def _build_explanation(
     edge: float,
     verdict: str,
     multiplier: float | None,
+    stake_sizing: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     title = str(fields.get("title") or "this market")
     side = str(fields.get("contract_side") or fields.get("selected_option") or "your pick")
@@ -384,10 +612,13 @@ def _build_explanation(
     vol = fields.get("volume")
     vol_note = f" Volume **{vol:,.0f}** is context for liquidity, not directly in EV." if vol else ""
 
+    sizing_note = str((stake_sizing or {}).get("sizing_explanation") or "")
+
     return {
         "summary": f"**{side}** on *{title}* — {good_bet}{vol_note}",
         "is_good_bet": is_good,
         "worth_it_probability": worth_it_prob,
+        "stake_sizing_summary": sizing_note,
         "assumptions": (
             "Key assumptions: your probability estimate is calibrated; "
             "displayed numbers are prices/probabilities as you interpreted them; "
