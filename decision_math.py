@@ -665,9 +665,224 @@ def solve_decision(decision_type: str, fields: dict[str, Any]) -> dict[str, Any]
     if decision_type == "prediction_market_bet":
         enriched = enrich_bet_fields(fields)
         return analyze_prediction_market_bet(enriched)
+    if decision_type == "poker_hand_decision":
+        enriched = enrich_poker_fields(fields)
+        return analyze_poker_hand_decision(enriched)
     return {
         "verdict": "unsupported",
         "verdict_label": "Not yet implemented",
         "explanation": {"summary": f"Analysis for {decision_type} is planned for a future phase."},
-        "disclaimer": "Phase 0 supports prediction market bets only.",
+        "disclaimer": "Mathematical decision analysis only — not gambling advice.",
+    }
+
+
+def enrich_poker_fields(fields: dict[str, Any]) -> dict[str, Any]:
+    """Normalize poker spot fields and derive pot-odds inputs."""
+    out = dict(fields)
+    out.setdefault("game_type", "texas_holdem")
+    out.setdefault("current_action", "call")
+
+    pot = out.get("pot_size")
+    call_amt = out.get("amount_to_call")
+    if call_amt is None and out.get("villain_bet_size") is not None:
+        call_amt = float(out["villain_bet_size"])
+        out["amount_to_call"] = call_amt
+
+    if pot is not None:
+        out["pot_size"] = float(pot)
+    if call_amt is not None:
+        out["amount_to_call"] = float(call_amt)
+
+    eq = out.get("hero_equity")
+    if eq is not None:
+        eq = float(eq)
+        if eq > 1:
+            eq /= 100.0
+        out["hero_equity"] = round(eq, 4)
+
+    if out.get("pot_size") is not None and out.get("amount_to_call") is not None:
+        pot_f = float(out["pot_size"])
+        call_f = float(out["amount_to_call"])
+        out["pot_after_call"] = round(pot_f + call_f, 2)
+        if pot_f > 0:
+            out["pot_odds_ratio"] = round(call_f / pot_f, 4)
+        if call_f > 0 and pot_f + call_f > 0:
+            out["break_even_equity"] = round(call_f / (pot_f + call_f), 4)
+
+    return out
+
+
+def analyze_poker_hand_decision(fields: dict[str, Any]) -> dict[str, Any]:
+    """Pot odds and call/fold EV for a poker spot."""
+    fields = enrich_poker_fields(fields)
+    pot = fields.get("pot_size")
+    call_amt = fields.get("amount_to_call")
+    equity = fields.get("hero_equity")
+
+    if pot is None or call_amt is None:
+        return {
+            "verdict": "incomplete",
+            "verdict_label": "Need more information",
+            "explanation": {"summary": "Enter pot size and amount to call before analysis."},
+            "disclaimer": "Complete missing fields before analysis.",
+            "decision_type": "poker_hand_decision",
+        }
+    if equity is None:
+        return {
+            "verdict": "incomplete",
+            "verdict_label": "Need equity estimate",
+            "explanation": {"summary": "Enter your estimated win equity (%) to compare vs break-even."},
+            "disclaimer": "Complete missing fields before analysis.",
+            "decision_type": "poker_hand_decision",
+        }
+
+    pot_f = float(pot)
+    call_f = float(call_amt)
+    equity_f = float(equity)
+    if equity_f > 1:
+        equity_f /= 100.0
+
+    if call_f <= 0:
+        return {
+            "verdict": "incomplete",
+            "verdict_label": "No bet to call",
+            "explanation": {"summary": "Amount to call must be positive for pot-odds analysis."},
+            "disclaimer": "Mathematical decision analysis only.",
+            "decision_type": "poker_hand_decision",
+        }
+
+    pot_after_call = pot_f + call_f
+    break_even = call_f / pot_after_call if pot_after_call > 0 else 1.0
+    pot_odds = call_f / pot_f if pot_f > 0 else float("inf")
+    ev_call = equity_f * pot_after_call - call_f
+    ev_fold = 0.0
+    edge_equity = equity_f - break_even
+    risk_reward = (pot_after_call - call_f) / call_f if call_f > 0 else 0.0
+
+    sensitivity: list[dict[str, Any]] = []
+    for pct in range(15, 86, 5):
+        p = pct / 100.0
+        ev_p = p * pot_after_call - call_f
+        sensitivity.append({
+            "equity_pct": pct,
+            "ev_call": round(ev_p, 2),
+            "recommendation": "call" if ev_p > 0 else ("fold" if ev_p < 0 else "indifferent"),
+            "favorable": ev_p > 0,
+        })
+
+    if ev_call > 1.0:
+        verdict = "call_favorable"
+        verdict_label = "Call favorable (+EV at your equity estimate)"
+        recommendation = "call"
+    elif ev_call > 0:
+        verdict = "marginal_call"
+        verdict_label = "Marginal call (+EV but thin)"
+        recommendation = "call"
+    elif ev_call > -0.5:
+        verdict = "marginal_fold"
+        verdict_label = "Marginal fold (near break-even)"
+        recommendation = "fold"
+    else:
+        verdict = "fold_favorable"
+        verdict_label = "Fold favorable (−EV to call)"
+        recommendation = "fold"
+
+    raise_note = ""
+    raise_scenario: dict[str, Any] | None = None
+    raise_to = fields.get("raise_amount")
+    if raise_to is not None:
+        try:
+            raise_total = float(raise_to)
+            raise_risk = raise_total  # simplified: chips put in
+            new_pot = pot_f + float(fields.get("villain_bet_size") or call_f) + raise_total
+            ev_raise_if_called = equity_f * new_pot - raise_risk
+            raise_scenario = {
+                "raise_to": raise_total,
+                "chips_at_risk": round(raise_risk, 2),
+                "pot_if_called": round(new_pot, 2),
+                "ev_if_called": round(ev_raise_if_called, 2),
+                "note": (
+                    "Rough scenario if called — fold equity and multi-street play not modeled. "
+                    "Raise only if you expect enough folds or favorable continued play."
+                ),
+            }
+            raise_note = (
+                f" Rough raise scenario (if called): risk **${raise_risk:.2f}**, "
+                f"pot **${new_pot:.2f}**, EV **${ev_raise_if_called:+.2f}**."
+            )
+        except (TypeError, ValueError):
+            pass
+
+    stack_risk_pct = None
+    if fields.get("hero_stack") and call_f > 0:
+        try:
+            stack_risk_pct = round(call_f / float(fields["hero_stack"]), 4)
+        except (TypeError, ValueError, ZeroDivisionError):
+            pass
+
+    explanation = {
+        "summary": (
+            f"Based on the assumptions you entered, **pot ${pot_f:.2f}**, **call ${call_f:.2f}**, "
+            f"**equity {equity_f:.1%}** — EV(call) = **${ev_call:+.2f}**, EV(fold) = **$0.00**."
+        ),
+        "break_even_note": (
+            f"You need at least **{break_even:.1%}** equity to break even on a call "
+            f"(call / pot-after-call = ${call_f:.2f} / ${pot_after_call:.2f})."
+        ),
+        "decision_rule": (
+            f"If your hand has **more than {break_even:.1%}** equity vs villain's range, call is +EV. "
+            f"If **below {break_even:.1%}**, fold is better."
+        ),
+        "uncertainty": (
+            "Main uncertainty is **villain range / true equity**. "
+            "Your decision depends heavily on how accurately you estimated equity."
+        ),
+        "raise_note": raise_note.strip(),
+        "assumptions": (
+            "Assumptions: pot and call amounts match what you see; equity estimate reflects villain range; "
+            "no implicit rake or side pots; single decision node (call vs fold)."
+        ),
+        "risks": (
+            "Risks: misread pot size; future streets not modeled; multiway pots; "
+            "implied odds / reverse implied odds omitted."
+        ),
+    }
+
+    return {
+        "decision_type": "poker_hand_decision",
+        "pot_size": round(pot_f, 2),
+        "amount_to_call": round(call_f, 2),
+        "pot_after_call": round(pot_after_call, 2),
+        "pot_odds_ratio": round(pot_odds, 4) if pot_f > 0 else None,
+        "pot_odds_display": f"{call_f:.0f}:{pot_f:.0f}" if pot_f > 0 else None,
+        "break_even_equity": round(break_even, 4),
+        "hero_equity": round(equity_f, 4),
+        "edge_equity": round(edge_equity, 4),
+        "ev_call": round(ev_call, 2),
+        "ev_fold": round(ev_fold, 2),
+        "risk_reward": round(risk_reward, 4),
+        "stack_risk_pct": stack_risk_pct,
+        "recommendation": recommendation,
+        "sensitivity": sensitivity,
+        "raise_scenario": raise_scenario,
+        "verdict": verdict,
+        "verdict_label": verdict_label,
+        "explanation": explanation,
+        "assumptions_checked": [
+            f"Game: {fields.get('game_type', 'texas_holdem').replace('_', ' ')}",
+            f"Street: {fields.get('street') or 'unspecified'}",
+            f"Hero: {fields.get('hero_hand') or 'not specified'}",
+            f"Board: {fields.get('board') or 'none'}",
+            f"Villain range: {fields.get('villain_range') or 'not specified'}",
+        ],
+        "information_to_verify": [
+            "Is the pot size what you think is in the middle (before your call)?",
+            "Is the call amount correct (including prior street bets)?",
+            "Does your equity estimate match the villain range you assigned?",
+            "Are there side pots, all-ins, or players left to act?",
+        ],
+        "disclaimer": (
+            "Mathematical decision analysis only — not gambling advice or a guarantee. "
+            "Based on the assumptions you entered; true equity depends on opponent range."
+        ),
     }

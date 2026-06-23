@@ -154,8 +154,165 @@ PREDICTION_MARKET_BET_FIELDS: dict[str, FieldSpec] = {
     },
 }
 
+STREET_OPTIONS = ["preflop", "flop", "turn", "river"]
+POSITION_OPTIONS = ["", "button", "small_blind", "big_blind", "early", "middle", "late", "hijack", "cutoff"]
+POKER_ACTION_OPTIONS = ["call", "fold", "raise", "all_in", "undecided"]
+
+POKER_HAND_DECISION_FIELDS: dict[str, FieldSpec] = {
+    "title": {
+        "label": "Hand label",
+        "required": False,
+        "why": "Short description of the spot (optional).",
+        "input_type": "text",
+        "editable": True,
+    },
+    "game_type": {
+        "label": "Game type",
+        "required": False,
+        "why": "Default Texas Hold'em.",
+        "input_type": "select",
+        "options": ["texas_holdem", "omaha", "other"],
+        "editable": True,
+    },
+    "street": {
+        "label": "Street",
+        "required": False,
+        "why": "Preflop, flop, turn, or river — context for range/equity.",
+        "input_type": "select",
+        "options": STREET_OPTIONS,
+        "editable": True,
+    },
+    "hero_hand": {
+        "label": "Hero hand (cards)",
+        "required": False,
+        "why": "Your hole cards — helps document the spot; equity estimate drives math.",
+        "input_type": "text",
+        "editable": True,
+    },
+    "board": {
+        "label": "Board cards",
+        "required": False,
+        "why": "Community cards visible on this street.",
+        "input_type": "text",
+        "editable": True,
+    },
+    "pot_size": {
+        "label": "Current pot ($)",
+        "required": True,
+        "why": "Pot size before you act (as you read the table).",
+        "input_type": "number",
+        "editable": True,
+    },
+    "villain_bet_size": {
+        "label": "Villain bet size ($)",
+        "required": False,
+        "why": "Opponent's bet facing you — used to infer call amount.",
+        "input_type": "number",
+        "editable": True,
+    },
+    "amount_to_call": {
+        "label": "Amount to call ($)",
+        "required": True,
+        "why": "Chips you must put in to continue.",
+        "input_type": "number",
+        "editable": True,
+    },
+    "hero_stack": {
+        "label": "Hero stack ($)",
+        "required": False,
+        "why": "Your remaining chips — stack risk context.",
+        "input_type": "number",
+        "editable": True,
+    },
+    "villain_stack": {
+        "label": "Villain stack ($)",
+        "required": False,
+        "why": "Opponent stack if visible.",
+        "input_type": "number",
+        "editable": True,
+    },
+    "position": {
+        "label": "Hero position",
+        "required": False,
+        "why": "Position affects range assumptions.",
+        "input_type": "select",
+        "options": POSITION_OPTIONS,
+        "editable": True,
+    },
+    "num_players": {
+        "label": "Players in hand",
+        "required": False,
+        "why": "Multiway vs heads-up changes equity needs.",
+        "input_type": "number",
+        "editable": True,
+    },
+    "current_action": {
+        "label": "Decision facing",
+        "required": False,
+        "why": "Call, fold, raise, or all-in decision.",
+        "input_type": "select",
+        "options": POKER_ACTION_OPTIONS,
+        "editable": True,
+    },
+    "villain_range": {
+        "label": "Villain range (estimate)",
+        "required": False,
+        "why": "Opponent holdings assumption — main equity uncertainty.",
+        "input_type": "text",
+        "allow_estimate": True,
+        "editable": True,
+    },
+    "hero_equity": {
+        "label": "Your equity estimate",
+        "required": True,
+        "why": "Win probability vs villain range — drives call EV.",
+        "input_type": "percent",
+        "allow_estimate": True,
+        "editable": True,
+    },
+    "raise_amount": {
+        "label": "Raise size to ($ total)",
+        "required": False,
+        "why": "Optional — rough raise risk vs fold scenario.",
+        "input_type": "number",
+        "editable": True,
+    },
+    "hero_bankroll": {
+        "label": "Bankroll / session stack ($)",
+        "required": False,
+        "why": "Optional — call as % of bankroll risk.",
+        "input_type": "number",
+        "allow_estimate": True,
+        "editable": True,
+    },
+    "risk_tolerance": {
+        "label": "Risk tolerance",
+        "required": False,
+        "why": "Conservative players may fold thin +EV spots.",
+        "input_type": "select",
+        "options": ["conservative", "moderate", "aggressive"],
+        "allow_estimate": True,
+        "editable": True,
+    },
+    "pot_after_call": {
+        "label": "Pot after call ($)",
+        "required": False,
+        "derived": True,
+        "why": "Pot + your call — denominator for break-even equity.",
+        "input_type": "number",
+    },
+    "break_even_equity": {
+        "label": "Break-even equity",
+        "required": False,
+        "derived": True,
+        "why": "Minimum equity needed for a break-even call.",
+        "input_type": "percent",
+    },
+}
+
 DECISION_FIELD_TEMPLATES: dict[str, dict[str, FieldSpec]] = {
     "prediction_market_bet": PREDICTION_MARKET_BET_FIELDS,
+    "poker_hand_decision": POKER_HAND_DECISION_FIELDS,
 }
 
 
@@ -257,6 +414,19 @@ def _active_uncertain(fields: dict[str, Any], decision_type: str) -> list[str]:
     return list(dict.fromkeys(still))
 
 
+def _poker_missing_required(fields: dict[str, Any]) -> list[str]:
+    """Pricing fields required for poker pot-odds analysis."""
+    missing: list[str] = []
+    if not _has_value(fields.get("pot_size")):
+        missing.append("pot_size")
+    call_amt = fields.get("amount_to_call")
+    if not _has_value(call_amt) and not _has_value(fields.get("villain_bet_size")):
+        missing.append("amount_to_call")
+    if fields.get("hero_equity") is None:
+        missing.append("hero_equity")
+    return missing
+
+
 def assess_completeness(
     decision_type: str,
     fields: dict[str, Any],
@@ -293,6 +463,13 @@ def assess_completeness(
         if key not in missing_required:
             missing_required.append(key)
 
+    if decision_type == "poker_hand_decision":
+        for key in _poker_missing_required(fields):
+            if key not in missing:
+                missing.append(key)
+            if key not in missing_required:
+                missing_required.append(key)
+
     missing = list(dict.fromkeys(missing))
     missing_required = list(dict.fromkeys(missing_required))
 
@@ -301,6 +478,7 @@ def assess_completeness(
             missing_required
             + [k for k, s in tpl.items() if _required_for_format(fields, k, s)]
             + _format_specific_missing(fields)
+            + (_poker_missing_required(fields) if decision_type == "poker_hand_decision" else [])
         )
     )
     filled_req = sum(1 for k in req_keys if _has_value(fields.get(k)))
@@ -338,9 +516,49 @@ def field_why(decision_type: str, field_key: str) -> str:
     return str(spec.get("why") or "")
 
 
-def clarification_questions(fields: dict[str, Any]) -> list[dict[str, str]]:
+def clarification_questions(fields: dict[str, Any], decision_type: str = "prediction_market_bet") -> list[dict[str, str]]:
     """Targeted follow-up questions based on what's missing or ambiguous."""
     questions: list[dict[str, str]] = []
+
+    if decision_type == "poker_hand_decision":
+        if not _has_value(fields.get("pot_size")):
+            questions.append({
+                "id": "pot_size",
+                "question": "What is the current pot size ($)?",
+                "why": "Pot odds need the pot before you call.",
+            })
+        if not _has_value(fields.get("amount_to_call")) and not _has_value(fields.get("villain_bet_size")):
+            questions.append({
+                "id": "amount_to_call",
+                "question": "How much do you need to call ($)?",
+                "why": "Break-even equity = call / (pot + call).",
+            })
+        if fields.get("hero_equity") is None:
+            questions.append({
+                "id": "hero_equity",
+                "question": "What is your estimated win equity (%)?",
+                "why": "EV of call depends on equity vs break-even.",
+            })
+        if not _has_value(fields.get("hero_hand")):
+            questions.append({
+                "id": "hero_hand",
+                "question": "What are your hole cards?",
+                "why": "Documents the spot; equity estimate is still required.",
+            })
+        if not _has_value(fields.get("board")) and str(fields.get("street") or "") in ("flop", "turn", "river"):
+            questions.append({
+                "id": "board",
+                "question": "What are the board cards?",
+                "why": "Community cards affect range and equity assumptions.",
+            })
+        if not _has_value(fields.get("villain_range")):
+            questions.append({
+                "id": "villain_range",
+                "question": "What range do you assign the villain?",
+                "why": "True equity is highly sensitive to opponent range.",
+            })
+        return questions
+
     fmt = str(fields.get("bet_format") or "")
 
     if not _has_value(fields.get("contract_side")):

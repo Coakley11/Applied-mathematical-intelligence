@@ -16,13 +16,16 @@ from components.clipboard_image_paste import (
     render_paste_button,
 )
 from decision_history import delete_import_entry, list_import_history, save_import_entry
-from decision_math import enrich_bet_fields, solve_decision
+from decision_math import enrich_bet_fields, enrich_poker_fields, solve_decision
 from decision_ocr import extract_text_from_image, ocr_availability, ocr_fallback_message
 from decision_parser import apply_field_edits, extract_fields
 from decision_registry import DECISION_TYPES, ENABLED_DECISION_TYPES, get_decision_label, is_enabled
 from decision_router import route_imported_problem
 from decision_templates import (
     BET_FORMAT_OPTIONS,
+    POKER_ACTION_OPTIONS,
+    POSITION_OPTIONS,
+    STREET_OPTIONS,
     assess_completeness,
     clarification_questions,
     field_label,
@@ -35,7 +38,7 @@ def render_ami_importer() -> None:
     """Full importer workflow."""
     st.markdown("#### AMI Problem Importer")
     st.caption(
-        "Paste Kalshi/Calci text, paste a screenshot (Ctrl+V), upload an image, or enter manually. "
+        "Paste prediction-market text, a poker hand spot, paste a screenshot (Ctrl+V), upload, or enter manually. "
         "Review extracted fields, fill gaps, then run decision math — not gambling advice."
     )
 
@@ -87,8 +90,9 @@ def _render_import_workflow() -> None:
             value=st.session_state.get("imp_paste_buffer", ""),
             height=140,
             placeholder=(
-                "Kalshi Yes/No:\nWill the Knicks make the playoffs?\nYes: 42¢  No: 58¢\n\n"
-                "Calci matchup:\nChicago Cubs 50%\nNew York Mets 50%\nMets 1.90x\nVolume: 128,324"
+                "Prediction market:\nWill the Knicks make the playoffs?\nYes: 42¢  No: 58¢\n\n"
+                "Poker hand:\nTexas Hold'em. Hero has Ah Kh. Board: Qh Jh 2c. Pot $100. "
+                "Villain bets $50. Call $50. Estimate equity 40%."
             ),
             key="imp_paste_input",
         )
@@ -102,7 +106,7 @@ def _render_import_workflow() -> None:
         else:
             st.caption("Columns: title, side, price, multiplier, stake, user_probability, volume")
     else:
-        raw_input = _render_manual_entry()
+        raw_input = _render_manual_entry(hint)
 
     type_options = list(ENABLED_DECISION_TYPES) + [k for k in DECISION_TYPES if not is_enabled(k)]
     type_labels = [f"{get_decision_label(t)}{' (coming soon)' if not is_enabled(t) else ''}" for t in type_options]
@@ -303,7 +307,31 @@ def _render_image_import() -> str:
     return corrected.strip()
 
 
-def _render_manual_entry() -> str:
+def _render_manual_entry(hint: str = "") -> str:
+    if hint == "poker_hand_decision":
+        with st.form("imp_poker_manual_form", border=True):
+            st.markdown("**Manual poker hand entry**")
+            p_game = st.selectbox("Game", ["texas_holdem", "omaha"], key="imp_p_game")
+            p_street = st.selectbox("Street", STREET_OPTIONS, index=1, key="imp_p_street")
+            p_hero = st.text_input("Hero hand", value="Ah Kh", key="imp_p_hero")
+            p_board = st.text_input("Board", value="", key="imp_p_board")
+            p_pot = st.number_input("Pot ($)", min_value=0.0, value=100.0, key="imp_p_pot")
+            p_vbet = st.number_input("Villain bet ($)", min_value=0.0, value=50.0, key="imp_p_vbet")
+            p_call = st.number_input("Amount to call ($)", min_value=0.0, value=50.0, key="imp_p_call")
+            p_eq = st.slider("Equity estimate (%)", 5, 95, 40, key="imp_p_eq")
+            if st.form_submit_button("Use manual entry"):
+                parts = [
+                    "Texas Hold'em" if p_game == "texas_holdem" else "Omaha",
+                    f"Hero has {p_hero}.",
+                ]
+                if p_board.strip():
+                    parts.append(f"Board: {p_board}.")
+                parts.append(p_street.capitalize() + ".")
+                parts.append(f"Pot ${p_pot:.0f}. Villain bets ${p_vbet:.0f}. Call ${p_call:.0f}.")
+                parts.append(f"Estimate equity {p_eq}%.")
+                st.session_state["imp_manual_raw"] = "\n".join(parts)
+        return st.session_state.get("imp_manual_raw", "")
+
     with st.form("imp_manual_form", border=True):
         st.markdown("**Manual bet entry**")
         m_format = st.selectbox("Bet format", BET_FORMAT_OPTIONS, key="imp_m_format")
@@ -327,6 +355,12 @@ def _render_manual_entry() -> str:
     return st.session_state.get("imp_manual_raw", "")
 
 
+def _enrich_fields(dtype: str, fields: dict[str, Any]) -> dict[str, Any]:
+    if dtype == "poker_hand_decision":
+        return enrich_poker_fields(fields)
+    return enrich_bet_fields(fields)
+
+
 def _render_post_extract() -> None:
     fields = dict(st.session_state.get("imp_fields") or {})
     dtype = str(st.session_state.get("imp_decision_type") or "prediction_market_bet")
@@ -334,15 +368,17 @@ def _render_post_extract() -> None:
     user_provided: set[str] = set(raw_provided) if not isinstance(raw_provided, set) else raw_provided
     stage = st.session_state.get("imp_stage", "review")
 
-    if dtype == "prediction_market_bet":
-        fields = enrich_bet_fields(fields)
+    fields = _enrich_fields(dtype, fields)
 
     st.markdown("---")
     st.markdown("**2 · Extract**")
     route = st.session_state.get("imp_route") or {}
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Decision type", get_decision_label(dtype))
-    c2.metric("Bet format", str(fields.get("bet_format") or "—").replace("_", " "))
+    if dtype == "poker_hand_decision":
+        c2.metric("Street", str(fields.get("street") or "—").replace("_", " "))
+    else:
+        c2.metric("Bet format", str(fields.get("bet_format") or "—").replace("_", " "))
     c3.metric("Route confidence", f"{float(route.get('confidence', 0)):.0%}")
     c4.metric("OCR", "yes" if st.session_state.get("imp_ocr_result", {}).get("success") else "n/a")
     if st.session_state.get("imp_image_meta", {}).get("source") == "clipboard_paste":
@@ -352,9 +388,12 @@ def _render_post_extract() -> None:
 
     st.markdown("**3 · Review & edit parsed fields**")
     st.caption("Correct anything OCR or parsing got wrong before analysis.")
-    fields = _render_field_review_form(dtype, fields)
+    if dtype == "poker_hand_decision":
+        fields = _render_poker_field_review_form(fields)
+    else:
+        fields = _render_field_review_form(dtype, fields)
     st.session_state["imp_fields"] = fields
-    fields = enrich_bet_fields(fields)
+    fields = _enrich_fields(dtype, fields)
 
     completeness = assess_completeness(dtype, fields, user_provided=user_provided)
 
@@ -363,7 +402,7 @@ def _render_post_extract() -> None:
 
     if completeness.get("missing_required"):
         _render_clarification_form(dtype, fields, completeness["missing_required"], user_provided, fields)
-        fields = enrich_bet_fields(dict(st.session_state.get("imp_fields") or {}))
+        fields = _enrich_fields(dtype, dict(st.session_state.get("imp_fields") or {}))
         user_provided = set(st.session_state.get("imp_user_provided") or set())
         completeness = assess_completeness(dtype, fields, user_provided=user_provided)
     elif completeness.get("can_solve"):
@@ -379,7 +418,10 @@ def _render_post_extract() -> None:
 
     analysis = st.session_state.get("imp_analysis")
     if analysis and analysis.get("verdict") != "incomplete":
-        _render_analysis_results(dtype, fields, analysis, completeness)
+        if dtype == "poker_hand_decision":
+            _render_poker_analysis_results(fields, analysis, completeness)
+        else:
+            _render_analysis_results(dtype, fields, analysis, completeness)
 
         st.markdown("---")
         st.markdown("**6 · Save**")
@@ -402,9 +444,9 @@ def _render_post_extract() -> None:
                 from applied_intelligence_activity import log_problem_solved
 
                 log_problem_solved(
-                    topic=str(fields.get("title") or "Imported bet"),
+                    topic=str(fields.get("title") or "Imported problem"),
                     area="importer",
-                    interactive="prediction_market_bet",
+                    interactive=dtype,
                 )
             except Exception:
                 pass
@@ -414,6 +456,18 @@ def _render_post_extract() -> None:
 
 def _render_extracted_summary(fields: dict[str, Any], dtype: str) -> None:
     with st.expander("Raw extraction summary", expanded=False):
+        if dtype == "poker_hand_decision":
+            if fields.get("hero_hand"):
+                st.markdown(f"**Hero:** {fields['hero_hand']}")
+            if fields.get("board"):
+                st.markdown(f"**Board:** {fields['board']}")
+            if fields.get("pot_size") is not None:
+                st.metric("Pot", f"${float(fields['pot_size']):,.2f}")
+            if fields.get("amount_to_call") is not None:
+                st.metric("To call", f"${float(fields['amount_to_call']):,.2f}")
+            if fields.get("hero_equity") is not None:
+                eq = float(fields["hero_equity"])
+                st.metric("Equity est.", f"{eq * 100 if eq <= 1 else eq:.0f}%")
         if fields.get("team_options"):
             st.markdown("**Teams / options**")
             for opt in fields["team_options"]:
@@ -559,6 +613,121 @@ def _render_field_review_form(dtype: str, fields: dict[str, Any]) -> dict[str, A
     return dict(st.session_state.get("imp_fields") or fields)
 
 
+def _poker_review_signature(fields: dict[str, Any]) -> str:
+    keys = ("hero_hand", "board", "pot_size", "amount_to_call", "hero_equity", "street")
+    return "|".join(f"{k}={fields.get(k)!r}" for k in keys)
+
+
+def _seed_poker_review_widgets(fields: dict[str, Any]) -> None:
+    sig = _poker_review_signature(fields)
+    if st.session_state.get("imp_poker_seed_sig") == sig:
+        return
+    st.session_state["imp_p_title"] = str(fields.get("title") or "")
+    st.session_state["imp_p_street"] = str(fields.get("street") or "flop")
+    st.session_state["imp_p_hero"] = str(fields.get("hero_hand") or "")
+    st.session_state["imp_p_board"] = str(fields.get("board") or "")
+    st.session_state["imp_p_pot"] = float(fields.get("pot_size") or 0.0)
+    st.session_state["imp_p_vbet"] = float(fields.get("villain_bet_size") or 0.0)
+    st.session_state["imp_p_call"] = float(fields.get("amount_to_call") or 0.0)
+    st.session_state["imp_p_hstack"] = float(fields.get("hero_stack") or 0.0)
+    st.session_state["imp_p_vstack"] = float(fields.get("villain_stack") or 0.0)
+    st.session_state["imp_p_vrange"] = str(fields.get("villain_range") or "")
+    eq = fields.get("hero_equity")
+    if eq is not None:
+        pct = float(eq) * 100 if float(eq) <= 1 else float(eq)
+        st.session_state["imp_p_eq"] = int(pct)
+    else:
+        st.session_state.setdefault("imp_p_eq", 40)
+    pos = str(fields.get("position") or "")
+    st.session_state["imp_p_pos"] = pos if pos in POSITION_OPTIONS else ""
+    st.session_state["imp_p_action"] = str(fields.get("current_action") or "call")
+    st.session_state["imp_poker_seed_sig"] = sig
+
+
+def _collect_poker_review_edits() -> dict[str, Any]:
+    edits: dict[str, Any] = {
+        "title": str(st.session_state.get("imp_p_title") or "").strip(),
+        "street": str(st.session_state.get("imp_p_street") or "flop"),
+        "hero_hand": str(st.session_state.get("imp_p_hero") or "").strip(),
+        "board": str(st.session_state.get("imp_p_board") or "").strip(),
+        "pot_size": float(st.session_state.get("imp_p_pot") or 0.0),
+        "villain_bet_size": float(st.session_state.get("imp_p_vbet") or 0.0),
+        "amount_to_call": float(st.session_state.get("imp_p_call") or 0.0),
+        "hero_stack": float(st.session_state.get("imp_p_hstack") or 0.0),
+        "villain_stack": float(st.session_state.get("imp_p_vstack") or 0.0),
+        "villain_range": str(st.session_state.get("imp_p_vrange") or "").strip(),
+        "hero_equity": float(st.session_state.get("imp_p_eq") or 40) / 100.0,
+        "position": str(st.session_state.get("imp_p_pos") or ""),
+        "current_action": str(st.session_state.get("imp_p_action") or "call"),
+        "decision_type": "poker_hand_decision",
+    }
+    if edits["pot_size"] == 0:
+        edits.pop("pot_size")
+    if edits["amount_to_call"] == 0 and edits.get("villain_bet_size", 0) == 0:
+        edits.pop("amount_to_call")
+    elif edits["amount_to_call"] == 0 and edits.get("villain_bet_size"):
+        edits["amount_to_call"] = edits["villain_bet_size"]
+    if edits.get("villain_bet_size") == 0:
+        edits.pop("villain_bet_size", None)
+    if edits["hero_stack"] == 0:
+        edits.pop("hero_stack")
+    if edits["villain_stack"] == 0:
+        edits.pop("villain_stack")
+    return edits
+
+
+def _render_poker_field_review_form(fields: dict[str, Any]) -> dict[str, Any]:
+    _seed_poker_review_widgets(fields)
+    if st.session_state.get("imp_p_street") not in STREET_OPTIONS:
+        st.session_state["imp_p_street"] = "flop"
+
+    with st.container(border=True):
+        st.text_input("Hand label", key="imp_p_title")
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.selectbox("Street", list(STREET_OPTIONS), key="imp_p_street")
+        with c2:
+            st.selectbox("Position", list(POSITION_OPTIONS), key="imp_p_pos")
+        with c3:
+            st.selectbox("Decision facing", list(POKER_ACTION_OPTIONS), key="imp_p_action")
+
+        c4, c5 = st.columns(2)
+        with c4:
+            st.text_input("Hero hand", key="imp_p_hero", placeholder="Ah Kh")
+        with c5:
+            st.text_input("Board", key="imp_p_board", placeholder="Qh Jh 2c")
+
+        c6, c7, c8 = st.columns(3)
+        with c6:
+            st.number_input("Pot ($)", min_value=0.0, step=1.0, key="imp_p_pot")
+        with c7:
+            st.number_input("Villain bet ($)", min_value=0.0, step=1.0, key="imp_p_vbet")
+        with c8:
+            st.number_input("Amount to call ($)", min_value=0.0, step=1.0, key="imp_p_call")
+
+        c9, c10, c11 = st.columns(3)
+        with c9:
+            st.slider("Equity estimate (%)", 5, 95, key="imp_p_eq")
+        with c10:
+            st.number_input("Hero stack ($)", min_value=0.0, step=1.0, key="imp_p_hstack")
+        with c11:
+            st.number_input("Villain stack ($)", min_value=0.0, step=1.0, key="imp_p_vstack")
+
+        st.text_area("Villain range estimate", key="imp_p_vrange", placeholder="e.g. top pair+, flush draws")
+
+        if st.button("Apply field corrections", type="primary", key="imp_poker_review_apply"):
+            merged = apply_field_edits(fields, _collect_poker_review_edits())
+            st.session_state["imp_fields"] = merged
+            st.session_state["imp_review_confirmed"] = True
+            st.session_state["imp_poker_seed_sig"] = _poker_review_signature(merged)
+            provided = set(st.session_state.get("imp_user_provided") or set())
+            provided.update(_collect_poker_review_edits().keys())
+            st.session_state["imp_user_provided"] = provided
+            st.rerun()
+
+    return dict(st.session_state.get("imp_fields") or fields)
+
+
 def _render_confidence_panel(completeness: dict[str, Any], dtype: str, fields: dict[str, Any]) -> None:
     conf = completeness.get("confidence", "low")
     color = {"high": "normal", "medium": "off", "low": "inverse"}.get(conf, "off")
@@ -588,7 +757,7 @@ def _render_confidence_panel(completeness: dict[str, Any], dtype: str, fields: d
     if completeness.get("assumptions"):
         st.info("Assumptions: " + ", ".join(field_label(dtype, k) for k in completeness["assumptions"]))
 
-    for q in clarification_questions(fields):
+    for q in clarification_questions(fields, decision_type=dtype):
         if q["id"] in (completeness.get("missing") or []) or q["id"] in (fields.get("uncertain_fields") or []):
             st.caption(f"❓ {q['question']} — _{q['why']}_")
 
@@ -635,11 +804,114 @@ def _render_clarification_form(
         if st.form_submit_button("Apply answers"):
             merged = apply_field_edits(fields, updates)
             st.session_state["imp_fields"] = merged
-            st.session_state["imp_review_seed_sig"] = _review_widget_signature(merged)
+            if dtype == "poker_hand_decision":
+                st.session_state["imp_poker_seed_sig"] = _poker_review_signature(merged)
+            else:
+                st.session_state["imp_review_seed_sig"] = _review_widget_signature(merged)
             user_provided.update(missing)
             user_provided.update(updates.keys())
             st.session_state["imp_user_provided"] = user_provided
             st.rerun()
+
+
+def _render_poker_analysis_results(
+    fields: dict[str, Any],
+    analysis: dict[str, Any],
+    completeness: dict[str, Any],
+) -> None:
+    st.markdown("---")
+    st.markdown("**Poker decision analysis**")
+    st.caption(analysis.get("disclaimer", ""))
+    st.caption(f"Street: **{fields.get('street', '—')}** · Confidence: **{completeness.get('confidence', '—')}**")
+
+    exp = analysis.get("explanation") or {}
+    verdict = analysis.get("verdict_label", "")
+    if analysis.get("verdict") in ("call_favorable", "marginal_call"):
+        st.success(verdict)
+    elif analysis.get("verdict") == "marginal_fold":
+        st.info(verdict)
+    else:
+        st.warning(verdict)
+
+    if exp.get("summary"):
+        st.markdown(exp["summary"])
+    if exp.get("break_even_note"):
+        st.markdown(exp["break_even_note"])
+    if exp.get("decision_rule"):
+        st.markdown(exp["decision_rule"])
+    if exp.get("uncertainty"):
+        st.info(exp["uncertainty"])
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Pot", f"${float(analysis.get('pot_size', 0)):.2f}")
+    m2.metric("To call", f"${float(analysis.get('amount_to_call', 0)):.2f}")
+    m3.metric("Break-even equity", f"{float(analysis.get('break_even_equity', 0)):.1%}")
+    m4.metric("Your equity", f"{float(analysis.get('hero_equity', 0)):.1%}")
+
+    m5, m6, m7, m8 = st.columns(4)
+    m5.metric("EV (call)", f"${float(analysis.get('ev_call', 0)):+.2f}")
+    m6.metric("EV (fold)", f"${float(analysis.get('ev_fold', 0)):+.2f}")
+    m7.metric("Pot odds", str(analysis.get("pot_odds_display") or "—"))
+    m8.metric("Recommendation", str(analysis.get("recommendation", "—")).upper())
+
+    if analysis.get("raise_scenario"):
+        rs = analysis["raise_scenario"]
+        st.caption(f"Raise scenario: to **${rs.get('raise_to')}**, EV if called **${rs.get('ev_if_called'):+.2f}** — {rs.get('note', '')}")
+
+    _render_poker_visuals(fields, analysis)
+
+    with st.expander("Assumptions & what to verify"):
+        st.markdown(f"**Assumptions:** {exp.get('assumptions', '')}")
+        st.markdown(f"**Risks:** {exp.get('risks', '')}")
+        for item in analysis.get("information_to_verify") or []:
+            st.markdown(f"- {item}")
+        for item in analysis.get("assumptions_checked") or []:
+            st.caption(f"✓ {item}")
+
+
+def _render_poker_visuals(fields: dict[str, Any], analysis: dict[str, Any]) -> None:
+    sens = analysis.get("sensitivity") or []
+    call_amt = float(analysis.get("amount_to_call") or 0)
+    pot_after = float(analysis.get("pot_after_call") or 0)
+    equity = float(analysis.get("hero_equity") or 0.4)
+    break_even = float(analysis.get("break_even_equity") or 0)
+
+    col_v1, col_v2 = st.columns(2)
+    with col_v1:
+        try:
+            from simulations.thinking_plots import plot_probability_tree
+            plot_probability_tree(equity, call_amt, max(pot_after - call_amt, 0))
+        except Exception:
+            pass
+    with col_v2:
+        if sens:
+            eqs = [r["equity_pct"] for r in sens]
+            evs = [r["ev_call"] for r in sens]
+            fig, ax = plt.subplots(figsize=(7, 3.5))
+            ax.plot(eqs, evs, color="#6366f1", linewidth=2)
+            ax.axhline(0, color="#94a3b8", linestyle="--", linewidth=1)
+            ax.axvline(break_even * 100, color="#dc2626", linestyle=":", linewidth=1.5, label="Break-even")
+            ax.axvline(equity * 100, color="#059669", linestyle=":", linewidth=1.5, label="Your equity")
+            ax.set_xlabel("Equity (%)")
+            ax.set_ylabel("EV of call ($)")
+            ax.set_title("Sensitivity — EV vs equity")
+            ax.legend(fontsize=8)
+            st.pyplot(fig)
+            plt.close(fig)
+
+    st.markdown("**Equity sensitivity**")
+    st.dataframe(
+        [
+            {
+                "Equity (%)": r["equity_pct"],
+                "EV (call)": r["ev_call"],
+                "Recommend": r["recommendation"],
+            }
+            for r in sens
+        ],
+        use_container_width=True,
+        hide_index=True,
+    )
 
 
 def _render_analysis_results(

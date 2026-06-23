@@ -10,6 +10,7 @@ from pathlib import Path
 from decision_history import delete_import_entry, list_import_history, save_import_entry
 from decision_math import (
     analyze_decimal_odds_bet,
+    analyze_poker_hand_decision,
     analyze_prediction_market_bet,
     compute_kelly_fraction,
     compute_stake_sizing,
@@ -27,6 +28,7 @@ from decision_ocr import (
 from decision_parser import (
     apply_field_edits,
     extract_fields,
+    parse_poker_hand_text,
     parse_prediction_market_csv,
     parse_prediction_market_text,
 )
@@ -55,6 +57,11 @@ Spread and total: 2 markets
 Volume: 128,324
 """
 
+POKER_AK_EXAMPLE = """
+Texas Hold'em. Hero has Ah Kh. Board: Qh Jh 2c. Flop.
+Pot $100. Villain bets $50. Call $50. Estimate equity 40%.
+"""
+
 
 class TestDecisionRouter(unittest.TestCase):
     def test_routes_kalshi_text_to_prediction_market(self) -> None:
@@ -65,6 +72,53 @@ class TestDecisionRouter(unittest.TestCase):
     def test_routes_matchup_text(self) -> None:
         route = route_imported_problem(CALCI_MATCHUP)
         self.assertEqual(route["decision_type"], "prediction_market_bet")
+
+    def test_routes_poker_hand_text(self) -> None:
+        route = route_imported_problem(POKER_AK_EXAMPLE)
+        self.assertEqual(route["decision_type"], "poker_hand_decision")
+        self.assertGreater(route["confidence"], 0.4)
+
+
+class TestDecisionParserPoker(unittest.TestCase):
+    def test_parses_ak_qj_example(self) -> None:
+        fields = parse_poker_hand_text(POKER_AK_EXAMPLE)
+        self.assertEqual(fields["game_type"], "texas_holdem")
+        self.assertEqual(fields["street"], "flop")
+        self.assertIn("Ah", fields["hero_hand"])
+        self.assertIn("Kh", fields["hero_hand"])
+        self.assertIn("Qh", fields["board"])
+        self.assertAlmostEqual(fields["pot_size"], 100.0)
+        self.assertAlmostEqual(fields["amount_to_call"], 50.0)
+        self.assertAlmostEqual(fields["hero_equity"], 0.40, places=2)
+
+    def test_poker_completeness_requires_equity(self) -> None:
+        fields = parse_poker_hand_text("Pot $80. Villain bets $40.")
+        assessment = assess_completeness("poker_hand_decision", fields)
+        self.assertIn("hero_equity", assessment["missing_required"])
+        self.assertFalse(assessment["can_solve"])
+
+
+class TestDecisionMathPoker(unittest.TestCase):
+    def test_poker_pot_odds_ev_call(self) -> None:
+        fields = parse_poker_hand_text(POKER_AK_EXAMPLE)
+        result = analyze_poker_hand_decision(fields)
+        self.assertAlmostEqual(result["break_even_equity"], 1 / 3, places=2)
+        self.assertAlmostEqual(result["ev_call"], 10.0, places=1)
+        self.assertEqual(result["recommendation"], "call")
+        self.assertEqual(result["verdict"], "call_favorable")
+
+    def test_poker_solve_decision_dispatch(self) -> None:
+        fields = extract_fields(POKER_AK_EXAMPLE, "poker_hand_decision")
+        result = solve_decision("poker_hand_decision", fields)
+        self.assertAlmostEqual(result["ev_call"], 10.0, places=1)
+        self.assertGreater(len(result.get("sensitivity") or []), 5)
+
+    def test_poker_fold_when_equity_low(self) -> None:
+        fields = parse_poker_hand_text(POKER_AK_EXAMPLE)
+        fields["hero_equity"] = 0.25
+        result = analyze_poker_hand_decision(fields)
+        self.assertLess(result["ev_call"], 0)
+        self.assertEqual(result["recommendation"], "fold")
 
 
 class TestDecisionParser(unittest.TestCase):

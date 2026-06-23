@@ -11,6 +11,12 @@ DECISION_TYPES: dict[str, dict[str, Any]] = {
         "phase": 0,
         "enabled": True,
     },
+    "poker_hand_decision": {
+        "label": "Poker hand decision",
+        "description": "Texas Hold'em call/fold/raise — pot odds and EV",
+        "phase": 1,
+        "enabled": True,
+    },
     "investment": {
         "label": "Stock / ETF investment",
         "description": "Buy, hold, or sell an investment",

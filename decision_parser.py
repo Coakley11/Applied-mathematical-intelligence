@@ -446,9 +446,223 @@ def extract_fields(
     """Dispatch extraction by decision type and source format."""
     if decision_type == "prediction_market_bet":
         if source_type == "csv":
-            return parse_prediction_market_csv(raw_input)
-        return parse_prediction_market_text(raw_input)
-    return {"title": raw_input[:120], "source_excerpt": raw_input[:500]}
+            fields = parse_prediction_market_csv(raw_input)
+        else:
+            fields = parse_prediction_market_text(raw_input)
+    elif decision_type == "poker_hand_decision":
+        fields = parse_poker_hand_text(raw_input)
+    else:
+        fields = {"title": raw_input[:120], "source_excerpt": raw_input[:500]}
+    fields["decision_type"] = decision_type
+    return fields
+
+
+# --- Poker hand parsing ---
+
+_SUIT_MAP = {
+    "s": "s", "h": "h", "d": "d", "c": "c",
+    "♠": "s", "♥": "h", "♦": "d", "♣": "c",
+    "spades": "s", "hearts": "h", "diamonds": "d", "clubs": "c",
+}
+
+_CARD_TOKEN = re.compile(
+    r"(?P<rank>[AKQJT2-9])(?P<suit>[shdc♠♥♦♣])",
+    re.I,
+)
+_STREET_INLINE = re.compile(r"\b(preflop|pre-flop|flop|turn|river)\b", re.I)
+_GAME_TYPE = re.compile(r"\b(texas\s+hold'?em|hold'?em|omaha)\b", re.I)
+_POT_INLINE = re.compile(
+    r"(?:pot|main\s+pot)\s*(?:size|is|=|:)?\s*\$?\s*(\d+(?:\.\d{1,2})?)",
+    re.I,
+)
+_CALL_INLINE = re.compile(
+    r"(?:amount\s+to\s+)?call\s*(?:amount|size|is|=|:)?\s*\$?\s*(\d+(?:\.\d{1,2})?)",
+    re.I,
+)
+_VILLAIN_BET = re.compile(
+    r"(?:villain|opponent|villain'?s?)\s+(?:bets?|raises?|opened|donk)\s*\$?\s*(\d+(?:\.\d{1,2})?)",
+    re.I,
+)
+_BET_INLINE = re.compile(
+    r"(?:bet|raise|to)\s*(?:size|is|=|:)?\s*\$?\s*(\d+(?:\.\d{1,2})?)",
+    re.I,
+)
+_EQUITY_INLINE = re.compile(
+    r"(?:estimate\s+)?(?:equity|win\s+(?:prob(?:ability)?|rate)|my\s+equity)\s*(?:is|=|:)?\s*(\d{1,3})\s*%?",
+    re.I,
+)
+_HERO_HAND = re.compile(
+    r"hero\s+(?:has|holds|:)\s*([AKQJT2-9shdc♠♥♦♣\s,]+?)(?:\.|,|\n|board|pot|villain|call|fold|$)",
+    re.I,
+)
+_BOARD = re.compile(
+    r"board\s*(?:is|:)?\s*([AKQJT2-9shdc♠♥♦♣\s,]+?)(?:\.|,|\n|pot|villain|call|hero|fold|$)",
+    re.I,
+)
+_STACK_HERO = re.compile(r"hero\s+stack\s*(?:is|=|:)?\s*\$?\s*(\d+(?:\.\d{1,2})?)", re.I)
+_STACK_VILLAIN = re.compile(r"villain\s+stack\s*(?:is|=|:)?\s*\$?\s*(\d+(?:\.\d{1,2})?)", re.I)
+_POSITION = re.compile(r"\b(button|btn|sb|bb|small\s+blind|big\s+blind|cutoff|co|hijack|hj|utg|early|middle|late)\b", re.I)
+_NUM_PLAYERS = re.compile(r"(\d+)\s*(?:players?|way|handed)", re.I)
+_VILLAIN_RANGE = re.compile(
+    r"(?:villain|opponent)\s+range\s*(?:is|=|:)?\s*(.+?)(?:\.|,|\n|equity|pot|call|$)",
+    re.I,
+)
+_RAISE_TO = re.compile(r"raise\s+(?:to\s+)?\$?\s*(\d+(?:\.\d{1,2})?)", re.I)
+
+
+def _normalize_card_tokens(fragment: str) -> str:
+    cards: list[str] = []
+    for m in _CARD_TOKEN.finditer(fragment):
+        rank = m.group("rank").upper()
+        if rank == "10":
+            rank = "T"
+        suit = _SUIT_MAP.get(m.group("suit").lower(), m.group("suit").lower())
+        cards.append(f"{rank}{suit}")
+    return " ".join(cards)
+
+
+def _parse_money(text: str, pattern: re.Pattern[str]) -> float | None:
+    m = pattern.search(text)
+    if not m:
+        return None
+    try:
+        return float(m.group(1))
+    except (TypeError, ValueError):
+        return None
+
+
+def parse_poker_hand_text(raw: str) -> dict[str, Any]:
+    """Parse a pasted or OCR'd poker hand decision spot."""
+    text = str(raw or "").strip()
+    uncertain: list[str] = []
+
+    fields: dict[str, Any] = {
+        "title": "",
+        "game_type": "texas_holdem",
+        "street": "",
+        "hero_hand": "",
+        "board": "",
+        "pot_size": None,
+        "villain_bet_size": None,
+        "amount_to_call": None,
+        "hero_stack": None,
+        "villain_stack": None,
+        "position": "",
+        "num_players": None,
+        "current_action": "call",
+        "villain_range": "",
+        "hero_equity": None,
+        "raise_amount": None,
+        "hero_bankroll": None,
+        "risk_tolerance": "moderate",
+        "source_excerpt": text[:800],
+        "uncertain_fields": uncertain,
+        "ocr_corrected": False,
+    }
+
+    if not text:
+        return fields
+
+    gm = _GAME_TYPE.search(text)
+    if gm:
+        gt = gm.group(1).lower()
+        fields["game_type"] = "omaha" if "omaha" in gt else "texas_holdem"
+
+    sm = _STREET_INLINE.search(text)
+    if sm:
+        street = sm.group(1).lower().replace("-", "")
+        if street == "preflop":
+            fields["street"] = "preflop"
+        else:
+            fields["street"] = street
+
+    hm = _HERO_HAND.search(text)
+    if hm:
+        fields["hero_hand"] = _normalize_card_tokens(hm.group(1))
+    elif _CARD_TOKEN.search(text) and re.search(r"\bhero\b", text, re.I):
+        uncertain.append("hero_hand")
+
+    bm = _BOARD.search(text)
+    if bm:
+        fields["board"] = _normalize_card_tokens(bm.group(1))
+
+    fields["pot_size"] = _parse_money(text, _POT_INLINE)
+    fields["amount_to_call"] = _parse_money(text, _CALL_INLINE)
+    fields["villain_bet_size"] = _parse_money(text, _VILLAIN_BET)
+    if fields["amount_to_call"] is None and fields["villain_bet_size"] is not None:
+        fields["amount_to_call"] = fields["villain_bet_size"]
+
+    if fields["amount_to_call"] is None:
+        bet_m = _BET_INLINE.search(text)
+        if bet_m and re.search(r"\b(villain|opponent|bet|raise)\b", text, re.I):
+            try:
+                fields["villain_bet_size"] = float(bet_m.group(1))
+                fields["amount_to_call"] = fields["villain_bet_size"]
+            except ValueError:
+                pass
+
+    em = _EQUITY_INLINE.search(text)
+    if em:
+        fields["hero_equity"] = float(em.group(1)) / 100.0
+
+    fields["hero_stack"] = _parse_money(text, _STACK_HERO)
+    fields["villain_stack"] = _parse_money(text, _STACK_VILLAIN)
+
+    pm = _POSITION.search(text)
+    if pm:
+        pos = pm.group(1).lower().replace(" ", "_")
+        pos_map = {
+            "btn": "button", "button": "button", "sb": "small_blind", "small_blind": "small_blind",
+            "bb": "big_blind", "big_blind": "big_blind", "co": "cutoff", "cutoff": "cutoff",
+            "hj": "hijack", "hijack": "hijack", "utg": "early", "early": "early",
+            "middle": "middle", "late": "late",
+        }
+        fields["position"] = pos_map.get(pos, pos)
+
+    npm = _NUM_PLAYERS.search(text)
+    if npm:
+        try:
+            fields["num_players"] = int(npm.group(1))
+        except ValueError:
+            pass
+
+    if re.search(r"\ball[- ]?in\b", text, re.I):
+        fields["current_action"] = "all_in"
+    elif re.search(r"\braise\b", text, re.I):
+        fields["current_action"] = "raise"
+    elif re.search(r"\bfold\b", text, re.I):
+        fields["current_action"] = "fold"
+
+    rm = _VILLAIN_RANGE.search(text)
+    if rm:
+        fields["villain_range"] = rm.group(1).strip()[:200]
+
+    rtm = _RAISE_TO.search(text)
+    if rtm:
+        try:
+            fields["raise_amount"] = float(rtm.group(1))
+        except ValueError:
+            pass
+
+    # Title from hero + street
+    if fields["hero_hand"]:
+        street_lbl = fields["street"] or "hand"
+        fields["title"] = f"Hero {fields['hero_hand']} ({street_lbl})"
+    else:
+        fields["title"] = text.split("\n")[0][:80] or "Poker hand decision"
+
+    if fields["hero_equity"] is None:
+        uncertain.append("hero_equity")
+    if fields["pot_size"] is None:
+        uncertain.append("pot_size")
+    if fields["amount_to_call"] is None:
+        uncertain.append("amount_to_call")
+
+    fields["uncertain_fields"] = list(dict.fromkeys(uncertain))
+
+    from decision_math import enrich_poker_fields
+
+    return enrich_poker_fields(fields)
 
 
 def apply_field_edits(fields: dict[str, Any], edits: dict[str, Any]) -> dict[str, Any]:
@@ -477,6 +691,23 @@ def apply_field_edits(fields: dict[str, Any], edits: dict[str, Any]) -> dict[str
         resolved_keys.add("stake")
     if edits.get("user_probability") is not None:
         resolved_keys.add("user_probability")
+    if edits.get("hero_equity") is not None:
+        resolved_keys.add("hero_equity")
+    if edits.get("pot_size") is not None:
+        resolved_keys.add("pot_size")
+    if edits.get("amount_to_call") is not None:
+        resolved_keys.add("amount_to_call")
+    if edits.get("hero_hand"):
+        resolved_keys.add("hero_hand")
+    if edits.get("board"):
+        resolved_keys.add("board")
+    if edits.get("villain_range"):
+        resolved_keys.add("villain_range")
     merged["uncertain_fields"] = [k for k in uncertain if k not in resolved_keys]
 
+    dtype = str(merged.get("decision_type") or "prediction_market_bet")
+    if dtype == "poker_hand_decision":
+        from decision_math import enrich_poker_fields
+
+        return enrich_poker_fields(merged)
     return enrich_bet_fields(merged)
