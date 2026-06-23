@@ -144,6 +144,44 @@ class TestDecisionMath(unittest.TestCase):
         self.assertIn("ev_per_contract", result)
 
 
+class TestImporterHistoryPanel(unittest.TestCase):
+    @unittest.mock.patch("components.importer_ui.st")
+    @unittest.mock.patch("components.importer_ui.list_import_history", return_value=[])
+    def test_render_history_panel_empty_no_crash(
+        self,
+        _list_mock: unittest.mock.MagicMock,
+        mock_st: unittest.mock.MagicMock,
+    ) -> None:
+        from components.importer_ui import _render_history_panel
+
+        _render_history_panel()
+        mock_st.info.assert_called_once()
+        _list_mock.assert_called_once()
+
+    @unittest.mock.patch("components.importer_ui.st")
+    @unittest.mock.patch("components.importer_ui.list_import_history")
+    def test_render_history_panel_with_entries(
+        self,
+        list_mock: unittest.mock.MagicMock,
+        mock_st: unittest.mock.MagicMock,
+    ) -> None:
+        from components.importer_ui import _render_history_panel
+
+        list_mock.return_value = [
+            {
+                "id": "abc-123",
+                "timestamp": "2026-06-23T12:00:00+00:00",
+                "decision_type": "prediction_market_bet",
+                "source_type": "text",
+                "fields": {"title": "Knicks playoffs"},
+                "analysis": {"verdict_label": "Favorable"},
+            }
+        ]
+        _render_history_panel()
+        list_mock.assert_called_once()
+        mock_st.expander.assert_called()
+
+
 class TestDecisionOCR(unittest.TestCase):
     def test_ocr_availability_returns_dict(self) -> None:
         info = ocr_availability()

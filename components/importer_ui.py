@@ -15,6 +15,7 @@ from components.clipboard_image_paste import (
     render_clipboard_paste_zone,
     render_paste_button,
 )
+from decision_history import delete_import_entry, list_import_history, save_import_entry
 from decision_math import enrich_bet_fields, solve_decision
 from decision_ocr import extract_text_from_image, ocr_availability
 from decision_parser import apply_field_edits, extract_fields
