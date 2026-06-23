@@ -375,9 +375,9 @@ def _render_bet_visuals(fields: dict[str, Any], analysis: dict[str, Any]) -> Non
     if p_user > 1:
         p_user /= 100.0
     profit = float(analysis.get("profit_if_win") or 0)
-    stake = float(fields.get("stake") or 100)
     cost = float(fields.get("cost") or 0.5)
 
+    col_v1, col_v2 = st.columns(2)
     with col_v1:
         try:
             from simulations.thinking_plots import plot_probability_tree

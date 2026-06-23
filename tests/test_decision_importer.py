@@ -93,6 +93,36 @@ class TestDecisionMath(unittest.TestCase):
         self.assertIn("ev_per_contract", result)
 
 
+class TestBetVisuals(unittest.TestCase):
+    @unittest.mock.patch("simulations.thinking_plots.plot_ev_bars")
+    @unittest.mock.patch("simulations.thinking_plots.plot_probability_tree")
+    @unittest.mock.patch("components.importer_ui.st")
+    def test_render_bet_visuals_defines_columns_before_use(
+        self,
+        mock_st: unittest.mock.MagicMock,
+        mock_tree: unittest.mock.MagicMock,
+        mock_bars: unittest.mock.MagicMock,
+    ) -> None:
+        col1 = unittest.mock.MagicMock()
+        col2 = unittest.mock.MagicMock()
+        col1.__enter__ = unittest.mock.Mock(return_value=col1)
+        col1.__exit__ = unittest.mock.Mock(return_value=False)
+        col2.__enter__ = unittest.mock.Mock(return_value=col2)
+        col2.__exit__ = unittest.mock.Mock(return_value=False)
+        mock_st.columns.return_value = (col1, col2)
+
+        from components.importer_ui import _render_bet_visuals
+
+        fields = {"user_probability": 0.55, "stake": 100, "cost": 0.42}
+        analysis = {"profit_if_win": 0.58, "implied_probability": 0.42}
+
+        _render_bet_visuals(fields, analysis)
+
+        mock_st.columns.assert_called_once_with(2)
+        mock_tree.assert_called_once_with(0.55, 0.42, 0.58)
+        mock_bars.assert_called_once_with(0.55, 0.58, 0.42)
+
+
 class TestDecisionHistory(unittest.TestCase):
     def test_save_list_delete_roundtrip(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
