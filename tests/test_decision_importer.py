@@ -166,6 +166,54 @@ class TestDecisionMath(unittest.TestCase):
         self.assertGreater(result["ev_total"], 0)
         self.assertAlmostEqual(result["profit_if_win"], 90.0, places=1)
 
+    def test_mets_190_multiplier_with_team_percent_implied(self) -> None:
+        """Cubs/Mets case: team % + decimal multiplier must use multiplier payout math."""
+        fields = {
+            "bet_format": "percentage_implied",
+            "contract_side": "New York Mets",
+            "multiplier": 1.90,
+            "implied_probability": 0.50,
+            "stake": 100,
+            "user_probability": 0.55,
+            "title": "Cubs vs Mets",
+        }
+        result = analyze_prediction_market_bet(fields)
+        self.assertAlmostEqual(result["profit_if_win"], 90.0)
+        self.assertAlmostEqual(result["ev_total"], 4.5, places=1)
+        self.assertAlmostEqual(result["expected_roi"], 0.045, places=3)
+        self.assertAlmostEqual(result["implied_probability"], 0.50)
+        self.assertAlmostEqual(result["break_even_probability"], 1 / 1.90, places=3)
+        self.assertAlmostEqual(result["loss_if_lose"], 100.0)
+
+    def test_mets_case_through_solve_decision(self) -> None:
+        fields = enrich_bet_fields({
+            "bet_format": "percentage_implied",
+            "contract_side": "New York Mets",
+            "multiplier": 1.90,
+            "implied_probability": 0.50,
+            "stake": 100,
+            "user_probability": 0.55,
+            "title": "Cubs vs Mets",
+        })
+        result = solve_decision("prediction_market_bet", fields)
+        self.assertAlmostEqual(result["profit_if_win"], 90.0)
+        self.assertAlmostEqual(result["ev_total"], 4.5, places=1)
+        self.assertAlmostEqual(result["expected_roi"], 0.045, places=3)
+
+    def test_multiplier_materially_changes_ev(self) -> None:
+        base = {
+            "bet_format": "percentage_implied",
+            "contract_side": "New York Mets",
+            "implied_probability": 0.50,
+            "stake": 100,
+            "user_probability": 0.55,
+        }
+        ev_low = analyze_prediction_market_bet({**base, "multiplier": 1.90})["ev_total"]
+        ev_high = analyze_prediction_market_bet({**base, "multiplier": 3.00})["ev_total"]
+        self.assertAlmostEqual(ev_low, 4.5, places=1)
+        self.assertAlmostEqual(ev_high, 65.0, places=1)
+        self.assertGreater(ev_high, ev_low)
+
     def test_solve_decision_dispatches(self) -> None:
         fields = extract_fields(CSV_SAMPLE, "prediction_market_bet", source_type="csv")
         result = solve_decision("prediction_market_bet", fields)

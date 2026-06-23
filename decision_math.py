@@ -20,6 +20,27 @@ def multiplier_to_implied_probability(multiplier: float) -> float:
     return 1.0 / multiplier
 
 
+def _effective_multiplier(fields: dict[str, Any]) -> float:
+    try:
+        raw = fields.get("multiplier") if fields.get("multiplier") is not None else fields.get("decimal_odds")
+        if raw is None:
+            return 0.0
+        return float(raw)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _market_implied_probability(fields: dict[str, Any], *, fallback_multiplier: float = 0.0) -> float:
+    """Prefer displayed market/team %; fall back to multiplier-implied odds."""
+    raw = fields.get("implied_probability")
+    if raw is not None:
+        p = float(raw)
+        return p / 100.0 if p > 1 else p
+    if fallback_multiplier > 1:
+        return multiplier_to_implied_probability(fallback_multiplier)
+    return 0.0
+
+
 def enrich_bet_fields(fields: dict[str, Any]) -> dict[str, Any]:
     """Fill derived bet fields based on detected bet_format."""
     out = dict(fields)
@@ -43,22 +64,22 @@ def enrich_bet_fields(fields: dict[str, Any]) -> dict[str, Any]:
             except (TypeError, ValueError):
                 pass
 
-    elif bet_format in ("decimal_multiplier", "moneyline_matchup", "spread_total"):
-        mult = out.get("multiplier") or out.get("decimal_odds")
-        if mult is not None:
-            try:
-                m = float(mult)
-                out["multiplier"] = m
-                out["decimal_odds"] = m
-                out["implied_probability"] = round(multiplier_to_implied_probability(m), 4)
-                out["bet_format"] = bet_format
-            except (TypeError, ValueError):
-                pass
+    elif bet_format in ("decimal_multiplier", "moneyline_matchup", "spread_total", "percentage_implied"):
+        mult = _effective_multiplier(out)
+        if mult > 1:
+            out["multiplier"] = mult
+            out["decimal_odds"] = mult
+            if bet_format == "percentage_implied":
+                out["bet_format"] = "moneyline_matchup"
+            # Keep team/display implied % when present; do not overwrite with 1/multiplier.
+            if out.get("implied_probability") is None:
+                out["implied_probability"] = round(multiplier_to_implied_probability(mult), 4)
         elif out.get("team_options") and out.get("contract_side"):
             for opt in out.get("team_options") or []:
                 if str(opt.get("name", "")).lower() == str(out["contract_side"]).lower():
                     out["implied_probability"] = round(float(opt.get("implied_probability", 0)), 4)
-                    out["bet_format"] = "percentage_implied"
+                    if bet_format not in ("decimal_multiplier", "moneyline_matchup", "spread_total"):
+                        out["bet_format"] = "percentage_implied"
                     break
 
     elif bet_format == "percentage_implied":
@@ -88,7 +109,13 @@ def _normalize_user_probability(fields: dict[str, Any], implied: float) -> float
 
 def analyze_prediction_market_bet(fields: dict[str, Any]) -> dict[str, Any]:
     """Binary prediction market — price in cents, payout $1 per contract."""
+    mult = _effective_multiplier(fields)
     bet_format = str(fields.get("bet_format") or "prediction_market")
+
+    # Explicit decimal multiplier always wins for payout math (even with team % displayed).
+    if mult > 1.0:
+        return analyze_decimal_odds_bet(fields)
+
     if bet_format in ("decimal_multiplier", "moneyline_matchup", "spread_total"):
         return analyze_decimal_odds_bet(fields)
     if bet_format == "percentage_implied" and not fields.get("price"):
@@ -131,14 +158,14 @@ def analyze_prediction_market_bet(fields: dict[str, Any]) -> dict[str, Any]:
 
 def analyze_decimal_odds_bet(fields: dict[str, Any]) -> dict[str, Any]:
     """Decimal/multiplier odds — profit = stake * (multiplier - 1)."""
-    mult = float(fields.get("multiplier") or fields.get("decimal_odds") or 0)
+    mult = _effective_multiplier(fields)
     if mult <= 1:
         return _unsupported_format(fields, "Multiplier must be greater than 1.0")
 
     stake = float(fields.get("stake") or 100.0)
     profit_if_win = stake * (mult - 1)
     loss_if_lose = stake
-    implied = float(fields.get("implied_probability") or multiplier_to_implied_probability(mult))
+    implied = _market_implied_probability(fields, fallback_multiplier=mult)
     break_even = 1.0 / mult
     p_user = _normalize_user_probability(fields, implied)
 
@@ -176,7 +203,7 @@ def analyze_percentage_implied_bet(fields: dict[str, Any]) -> dict[str, Any]:
         implied /= 100.0
 
     mult = fields.get("multiplier") or fields.get("decimal_odds")
-    if mult:
+    if mult and _effective_multiplier(fields) > 1:
         return analyze_decimal_odds_bet({**fields, "implied_probability": implied})
 
     stake = float(fields.get("stake") or 100.0)
