@@ -215,6 +215,14 @@ def main() -> int:
     if len(list_sources()) < 6:
         errors.append("Expected at least 6 data source modules")
 
+    req_text = (ROOT / "requirements.txt").read_text(encoding="utf-8")
+    if "supabase>=" not in req_text:
+        errors.append("requirements.txt must include supabase>=2.0.0 for Streamlit Cloud auth")
+    try:
+        import supabase  # noqa: F401
+    except ImportError:
+        errors.append("supabase package not installed in this environment (required for deploy)")
+
     if "prediction_market_bet" not in ENABLED_DECISION_TYPES:
         errors.append("prediction_market_bet should be enabled in Phase 0")
     sample = "Will team X win?\nYes: 45¢\nNo: 55¢"
