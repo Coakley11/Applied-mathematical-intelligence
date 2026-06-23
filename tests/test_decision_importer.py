@@ -101,6 +101,27 @@ class TestDecisionParser(unittest.TestCase):
         self.assertAlmostEqual(edited["user_probability"], 0.6)
         self.assertTrue(edited.get("ocr_corrected"))
 
+    def test_apply_field_edits_clears_uncertain_flags(self) -> None:
+        base = parse_prediction_market_text(CALCI_MATCHUP)
+        self.assertIn("contract_side", base.get("uncertain_fields", []))
+        edited = apply_field_edits(
+            base,
+            {
+                "contract_side": "New York Mets",
+                "multiplier": 1.90,
+                "stake": 100,
+                "user_probability": 0.55,
+                "bet_format": "moneyline_matchup",
+            },
+        )
+        self.assertEqual(edited["contract_side"], "New York Mets")
+        self.assertAlmostEqual(edited["multiplier"], 1.90)
+        self.assertNotIn("contract_side", edited.get("uncertain_fields", []))
+        assessment = assess_completeness("prediction_market_bet", edited)
+        self.assertTrue(assessment["can_solve"])
+        self.assertNotIn("contract_side", assessment["missing_required"])
+        self.assertNotIn("multiplier", assessment["missing_required"])
+
 
 class TestDecisionCompleteness(unittest.TestCase):
     def test_missing_stake_and_user_prob_blocks_solve(self) -> None:

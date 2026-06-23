@@ -447,4 +447,19 @@ def apply_field_edits(fields: dict[str, Any], edits: dict[str, Any]) -> dict[str
     if edits.get("multiplier"):
         merged["decimal_odds"] = float(edits["multiplier"])
     merged["ocr_corrected"] = True
+
+    uncertain = list(merged.get("uncertain_fields") or [])
+    resolved_keys = set(edits.keys())
+    if edits.get("contract_side"):
+        resolved_keys.add("contract_side")
+        resolved_keys.add("which_team")
+    if edits.get("multiplier"):
+        resolved_keys.add("multiplier")
+        resolved_keys.add("which_multiplier")
+    if edits.get("stake"):
+        resolved_keys.add("stake")
+    if edits.get("user_probability") is not None:
+        resolved_keys.add("user_probability")
+    merged["uncertain_fields"] = [k for k in uncertain if k not in resolved_keys]
+
     return enrich_bet_fields(merged)

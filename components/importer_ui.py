@@ -327,7 +327,8 @@ def _render_manual_entry() -> str:
 def _render_post_extract() -> None:
     fields = dict(st.session_state.get("imp_fields") or {})
     dtype = str(st.session_state.get("imp_decision_type") or "prediction_market_bet")
-    user_provided: set[str] = set(st.session_state.get("imp_user_provided") or set())
+    raw_provided = st.session_state.get("imp_user_provided") or set()
+    user_provided: set[str] = set(raw_provided) if not isinstance(raw_provided, set) else raw_provided
     stage = st.session_state.get("imp_stage", "review")
 
     if dtype == "prediction_market_bet":
@@ -357,9 +358,10 @@ def _render_post_extract() -> None:
     st.markdown("**4 · Missing information & confidence**")
     _render_confidence_panel(completeness, dtype, fields)
 
-    if completeness["missing"] or clarification_questions(fields):
-        _render_clarification_form(dtype, fields, completeness["missing"], user_provided, fields)
+    if completeness.get("missing_required"):
+        _render_clarification_form(dtype, fields, completeness["missing_required"], user_provided, fields)
         fields = enrich_bet_fields(dict(st.session_state.get("imp_fields") or {}))
+        user_provided = set(st.session_state.get("imp_user_provided") or set())
         completeness = assess_completeness(dtype, fields, user_provided=user_provided)
     elif completeness.get("can_solve"):
         st.success("All required fields present — ready to analyze.")
@@ -426,6 +428,58 @@ def _render_extracted_summary(fields: dict[str, Any], dtype: str) -> None:
             st.text(fields["source_excerpt"][:600])
 
 
+def _review_widget_signature(fields: dict[str, Any]) -> str:
+    keys = ("title", "bet_format", "contract_side", "price", "multiplier", "stake", "user_probability")
+    return "|".join(f"{k}={fields.get(k)!r}" for k in keys)
+
+
+def _seed_review_widgets(fields: dict[str, Any]) -> None:
+    """Keep review widgets aligned with saved imp_fields after Apply."""
+    sig = _review_widget_signature(fields)
+    if st.session_state.get("imp_review_seed_sig") == sig:
+        return
+    st.session_state["imp_rev_title"] = str(fields.get("title") or "")
+    fmt = str(fields.get("bet_format") or BET_FORMAT_OPTIONS[0])
+    st.session_state["imp_rev_format"] = fmt if fmt in BET_FORMAT_OPTIONS else BET_FORMAT_OPTIONS[0]
+    st.session_state["imp_rev_side"] = str(fields.get("contract_side") or "")
+    st.session_state["imp_rev_price"] = float(fields.get("price") or 0.0)
+    st.session_state["imp_rev_mult"] = float(fields.get("multiplier") or fields.get("decimal_odds") or 0.0)
+    st.session_state["imp_rev_vol"] = float(fields.get("volume") or 0.0)
+    st.session_state["imp_rev_stake"] = float(fields.get("stake") or 100.0)
+    up = fields.get("user_probability")
+    if up is not None:
+        pct = float(up) * 100 if float(up) <= 1 else float(up)
+        st.session_state["imp_rev_prob"] = int(pct)
+    else:
+        st.session_state.setdefault("imp_rev_prob", 50)
+    st.session_state["imp_rev_exp"] = str(fields.get("expiration") or "")
+    st.session_state["imp_rev_rules"] = str(fields.get("rules_summary") or "")
+    st.session_state["imp_review_seed_sig"] = sig
+
+
+def _collect_review_edits() -> dict[str, Any]:
+    """Read review panel widget values from session state."""
+    edits: dict[str, Any] = {
+        "title": str(st.session_state.get("imp_rev_title") or "").strip(),
+        "bet_format": str(st.session_state.get("imp_rev_format") or BET_FORMAT_OPTIONS[0]),
+        "contract_side": str(st.session_state.get("imp_rev_side") or "").strip(),
+        "price": float(st.session_state.get("imp_rev_price") or 0.0),
+        "multiplier": float(st.session_state.get("imp_rev_mult") or 0.0),
+        "volume": float(st.session_state.get("imp_rev_vol") or 0.0),
+        "stake": float(st.session_state.get("imp_rev_stake") or 0.0),
+        "user_probability": float(st.session_state.get("imp_rev_prob") or 50) / 100.0,
+        "expiration": str(st.session_state.get("imp_rev_exp") or "").strip(),
+        "rules_summary": str(st.session_state.get("imp_rev_rules") or "").strip(),
+    }
+    if edits["price"] == 0:
+        edits.pop("price")
+    if edits["multiplier"] == 0:
+        edits.pop("multiplier")
+    if edits["volume"] == 0:
+        edits.pop("volume")
+    return edits
+
+
 def _render_field_review_form(dtype: str, fields: dict[str, Any]) -> dict[str, Any]:
     team_names = [o["name"] for o in fields.get("team_options") or []]
     side_options = team_names + ["Yes", "No"]
@@ -433,57 +487,47 @@ def _render_field_review_form(dtype: str, fields: dict[str, Any]) -> dict[str, A
     if current_side and current_side not in side_options:
         side_options = [current_side] + side_options
 
-    with st.form("imp_review_form", border=True):
-        edits: dict[str, Any] = {}
-        edits["title"] = st.text_input("Market title", value=str(fields.get("title") or ""), key="imp_rev_title")
-        edits["bet_format"] = st.selectbox(
-            "Bet format",
-            BET_FORMAT_OPTIONS,
-            index=BET_FORMAT_OPTIONS.index(fields["bet_format"]) if fields.get("bet_format") in BET_FORMAT_OPTIONS else 0,
-            key="imp_rev_format",
-        )
-        edits["contract_side"] = st.selectbox(
-            "Side / team you are considering",
-            side_options if side_options else [current_side or "Yes"],
-            index=side_options.index(current_side) if current_side in side_options else 0,
-            key="imp_rev_side",
-        ) if side_options else st.text_input("Side / team", value=current_side, key="imp_rev_side_text")
+    _seed_review_widgets(fields)
+
+    with st.container(border=True):
+        st.text_input("Market title", key="imp_rev_title")
+        st.selectbox("Bet format", BET_FORMAT_OPTIONS, key="imp_rev_format")
+        if side_options:
+            if current_side in side_options and "imp_rev_side" not in st.session_state:
+                st.session_state["imp_rev_side"] = current_side
+            st.selectbox(
+                "Side / team you are considering",
+                side_options,
+                key="imp_rev_side",
+            )
+        else:
+            st.text_input("Side / team", key="imp_rev_side")
 
         col1, col2, col3 = st.columns(3)
         with col1:
-            price_val = float(fields.get("price") or 0)
-            edits["price"] = st.number_input("Price (¢)", min_value=0.0, max_value=99.0, value=price_val, key="imp_rev_price")
+            st.number_input("Price (¢)", min_value=0.0, max_value=99.0, step=1.0, key="imp_rev_price")
         with col2:
-            mult_val = float(fields.get("multiplier") or fields.get("decimal_odds") or 0.0)
-            edits["multiplier"] = st.number_input("Multiplier (x)", min_value=0.0, value=mult_val, step=0.01, key="imp_rev_mult")
+            st.number_input("Multiplier (x)", min_value=0.0, step=0.01, key="imp_rev_mult")
         with col3:
-            vol_val = float(fields.get("volume") or 0)
-            edits["volume"] = st.number_input("Volume", min_value=0.0, value=vol_val, step=1.0, key="imp_rev_vol")
+            st.number_input("Volume", min_value=0.0, step=1.0, key="imp_rev_vol")
 
         col4, col5 = st.columns(2)
         with col4:
-            stake_val = float(fields.get("stake") or 100.0)
-            edits["stake"] = st.number_input("Stake ($)", min_value=0.0, value=stake_val, key="imp_rev_stake")
+            st.number_input("Stake ($)", min_value=0.0, step=1.0, key="imp_rev_stake")
         with col5:
-            up = fields.get("user_probability")
-            default_pct = int(float(up) * 100) if up is not None and float(up) <= 1 else int(up or 50)
-            edits["user_probability"] = st.slider("Your probability (%)", 5, 95, default_pct, key="imp_rev_prob") / 100.0
+            st.slider("Your probability (%)", 5, 95, key="imp_rev_prob")
 
-        edits["expiration"] = st.text_input("Expiration", value=str(fields.get("expiration") or ""), key="imp_rev_exp")
-        edits["rules_summary"] = st.text_area("Rules", value=str(fields.get("rules_summary") or ""), key="imp_rev_rules")
+        st.text_input("Expiration", key="imp_rev_exp")
+        st.text_area("Rules", key="imp_rev_rules")
 
-        if st.form_submit_button("Apply field corrections"):
-            cleaned = {k: v for k, v in edits.items() if v not in ("", None) or k in ("stake", "user_probability")}
-            if cleaned.get("price") == 0:
-                cleaned.pop("price", None)
-            if cleaned.get("multiplier") == 0:
-                cleaned.pop("multiplier", None)
-            if cleaned.get("volume") == 0:
-                cleaned.pop("volume", None)
-            merged = apply_field_edits(fields, cleaned)
+        if st.button("Apply field corrections", type="primary", key="imp_review_apply"):
+            merged = apply_field_edits(fields, _collect_review_edits())
             st.session_state["imp_fields"] = merged
             st.session_state["imp_review_confirmed"] = True
-            st.session_state["imp_user_provided"] = set(st.session_state.get("imp_user_provided") or set()) | set(cleaned.keys())
+            st.session_state["imp_review_seed_sig"] = _review_widget_signature(merged)
+            provided = set(st.session_state.get("imp_user_provided") or set())
+            provided.update(_collect_review_edits().keys())
+            st.session_state["imp_user_provided"] = provided
             st.rerun()
 
     return dict(st.session_state.get("imp_fields") or fields)
@@ -532,7 +576,7 @@ def _render_clarification_form(
 ) -> None:
     if not missing:
         return
-    st.warning("AMI needs a few values before it can analyze — we won't guess these for you.")
+    st.warning("AMI still needs a few values — fill any that are blank below, or use **Apply field corrections** above.")
     tpl = get_field_template(dtype)
 
     with st.form("imp_clarify_form", border=True):
@@ -543,27 +587,31 @@ def _render_clarification_form(
             why = field_why(dtype, key)
             st.markdown(f"**{label}** — _{why}_")
             itype = spec.get("input_type", "text")
+            existing = fields.get(key)
             if itype == "select":
-                opts = spec.get("options", [])
+                opts = list(spec.get("options", []))
                 if key == "contract_side" and all_fields.get("team_options"):
                     opts = [o["name"] for o in all_fields["team_options"]] + opts
-                updates[key] = st.selectbox(label, opts, key=f"imp_clarify_{key}")
+                default_idx = opts.index(existing) if existing in opts else 0
+                updates[key] = st.selectbox(label, opts, index=default_idx, key=f"imp_clarify_{key}")
             elif itype == "percent":
                 default = 50
-                if fields.get(key) is not None:
-                    v = float(fields[key])
+                if existing is not None:
+                    v = float(existing)
                     default = int(v * 100) if v <= 1 else int(v)
                 updates[key] = st.slider(label, 5, 95, default, key=f"imp_clarify_{key}") / 100.0
             elif itype == "number":
-                default = float(fields.get(key) or (100.0 if key == "stake" else 1.9))
+                default = float(existing) if existing is not None else (100.0 if key == "stake" else 1.9)
                 updates[key] = st.number_input(label, min_value=0.01, value=default, key=f"imp_clarify_{key}")
             else:
-                updates[key] = st.text_input(label, value=str(fields.get(key) or ""), key=f"imp_clarify_{key}")
+                updates[key] = st.text_input(label, value=str(existing or ""), key=f"imp_clarify_{key}")
 
         if st.form_submit_button("Apply answers"):
             merged = apply_field_edits(fields, updates)
             st.session_state["imp_fields"] = merged
+            st.session_state["imp_review_seed_sig"] = _review_widget_signature(merged)
             user_provided.update(missing)
+            user_provided.update(updates.keys())
             st.session_state["imp_user_provided"] = user_provided
             st.rerun()
 

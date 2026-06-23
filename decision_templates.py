@@ -208,6 +208,47 @@ def _required_for_format(fields: dict[str, Any], key: str, spec: FieldSpec) -> b
     return bool(spec.get("required"))
 
 
+def _format_specific_missing(fields: dict[str, Any]) -> list[str]:
+    """Required pricing fields that depend on bet_format."""
+    bet_format = str(fields.get("bet_format") or "unknown")
+    extra: list[str] = []
+    if bet_format == "prediction_market" and not _has_value(fields.get("price")):
+        extra.append("price")
+    elif bet_format in ("decimal_multiplier", "moneyline_matchup", "spread_total"):
+        if not _has_value(fields.get("multiplier")) and not _has_value(fields.get("implied_probability")):
+            extra.append("multiplier")
+    elif bet_format == "percentage_implied":
+        if not _has_value(fields.get("implied_probability")):
+            if not _has_value(fields.get("contract_side")):
+                extra.append("contract_side")
+            else:
+                extra.append("implied_probability")
+    return extra
+
+
+def _active_uncertain(fields: dict[str, Any], decision_type: str) -> list[str]:
+    """Drop stale uncertain flags once the user has supplied a value."""
+    tpl = get_field_template(decision_type)
+    raw = list(fields.get("uncertain_fields") or [])
+    still: list[str] = []
+    for key in raw:
+        if key == "which_multiplier":
+            if not _has_value(fields.get("multiplier")):
+                still.append(key)
+                still.append("multiplier")
+            continue
+        if key == "which_team":
+            if not _has_value(fields.get("contract_side")):
+                still.append(key)
+                still.append("contract_side")
+            continue
+        if key in tpl and not _has_value(fields.get(key)):
+            still.append(key)
+        elif key not in tpl and not _has_value(fields.get(key)):
+            still.append(key)
+    return list(dict.fromkeys(still))
+
+
 def assess_completeness(
     decision_type: str,
     fields: dict[str, Any],
@@ -217,7 +258,7 @@ def assess_completeness(
     """Return extracted/missing/uncertain lists, completeness %, and confidence."""
     tpl = get_field_template(decision_type)
     user_provided = user_provided or set()
-    uncertain = list(fields.get("uncertain_fields") or [])
+    uncertain = _active_uncertain(fields, decision_type)
 
     extracted: list[str] = []
     missing: list[str] = []
@@ -238,22 +279,22 @@ def assess_completeness(
             missing.append(key)
             missing_required.append(key)
 
-    if bet_format == "prediction_market" and not _has_value(fields.get("price")):
-        if "price" not in missing:
-            missing.append("price")
-            missing_required.append("price")
-    elif bet_format in ("decimal_multiplier", "moneyline_matchup", "spread_total"):
-        if not _has_value(fields.get("multiplier")) and not _has_value(fields.get("implied_probability")):
-            if "multiplier" not in missing:
-                missing.append("multiplier")
-                missing_required.append("multiplier")
-    elif bet_format == "percentage_implied":
-        if not _has_value(fields.get("implied_probability")) and not _has_value(fields.get("contract_side")):
-            if "contract_side" not in missing:
-                missing.append("contract_side")
-                missing_required.append("contract_side")
+    for key in _format_specific_missing(fields):
+        if key not in missing:
+            missing.append(key)
+        if key not in missing_required:
+            missing_required.append(key)
 
-    req_keys = list(dict.fromkeys(missing_required + [k for k, s in tpl.items() if _required_for_format(fields, k, s)]))
+    missing = list(dict.fromkeys(missing))
+    missing_required = list(dict.fromkeys(missing_required))
+
+    req_keys = list(
+        dict.fromkeys(
+            missing_required
+            + [k for k, s in tpl.items() if _required_for_format(fields, k, s)]
+            + _format_specific_missing(fields)
+        )
+    )
     filled_req = sum(1 for k in req_keys if _has_value(fields.get(k)))
     completeness_pct = round(100 * filled_req / len(req_keys), 1) if req_keys else 100.0
 
