@@ -7,7 +7,14 @@ from typing import Any
 import matplotlib.pyplot as plt
 import streamlit as st
 
-from decision_history import delete_import_entry, list_import_history, save_import_entry
+from components.clipboard_image_paste import (
+    clipboard_paste_available,
+    data_url_to_bytes,
+    extension_for_mime,
+    image_bytes_meta,
+    render_clipboard_paste_zone,
+    render_paste_button,
+)
 from decision_math import enrich_bet_fields, solve_decision
 from decision_ocr import extract_text_from_image, ocr_availability
 from decision_parser import apply_field_edits, extract_fields
@@ -27,7 +34,7 @@ def render_ami_importer() -> None:
     """Full importer workflow."""
     st.markdown("#### AMI Problem Importer")
     st.caption(
-        "Paste Kalshi/Calci text, upload a screenshot, or enter manually. "
+        "Paste Kalshi/Calci text, paste a screenshot (Ctrl+V), upload an image, or enter manually. "
         "Review extracted fields, fill gaps, then run decision math — not gambling advice."
     )
 
@@ -127,8 +134,8 @@ def _render_import_workflow() -> None:
             if source == "Manual entry" and not raw_input.strip():
                 st.warning("Submit the manual entry form first.")
                 return
-            if source == "Screenshot / image" and not raw_input.strip():
-                st.warning("Upload an image and provide OCR or pasted text.")
+            if source == "Screenshot / image" and not raw_input.strip() and not st.session_state.get("imp_image_bytes"):
+                st.warning("Paste a screenshot (Ctrl+V), upload an image, or provide OCR/pasted text.")
                 return
 
             route = route_imported_problem(raw_input, source_type=source_type, hint=hint)
@@ -150,35 +157,127 @@ def _render_import_workflow() -> None:
         _render_post_extract()
 
 
+def _apply_import_image(
+    image_bytes: bytes,
+    *,
+    filename: str,
+    mime: str,
+    source: str,
+    auto_ocr: bool = True,
+) -> None:
+    """Store image in session and optionally run OCR immediately."""
+    if not image_bytes:
+        return
+    meta = image_bytes_meta(image_bytes, filename=filename, mime=mime, source=source)
+    img_hash = meta.get("sha256") or str(hash(image_bytes))
+    try:
+        from decision_ocr import image_metadata
+
+        meta = {**meta, **image_metadata(image_bytes, filename=filename, mime=mime)}
+        img_hash = meta.get("sha256", img_hash)
+    except Exception:
+        pass
+
+    prev_hash = str(st.session_state.get("imp_image_hash") or "")
+    st.session_state["imp_image_bytes"] = image_bytes
+    st.session_state["imp_image_meta"] = meta
+    st.session_state["imp_image_hash"] = img_hash
+    st.session_state["imp_image_source"] = source
+
+    if auto_ocr and img_hash != prev_hash:
+        ocr_result = extract_text_from_image(image_bytes, filename=filename, mime=mime)
+        st.session_state["imp_ocr_result"] = ocr_result
+        if ocr_result.get("success"):
+            st.session_state["imp_image_manual_text"] = ocr_result.get("text", "")
+        st.session_state["imp_ocr_auto_ran"] = True
+
+
 def _render_image_import() -> str:
-    """Screenshot upload with OCR + manual fallback."""
-    uploaded = st.file_uploader(
-        "Upload screenshot or photo",
-        type=["png", "jpg", "jpeg", "webp", "gif"],
-        key="imp_image_upload",
-    )
+    """Screenshot clipboard paste, optional paste button, file upload, OCR + text fallback."""
+    clip_info = clipboard_paste_available()
+    tab_clipboard, tab_upload = st.tabs(["Clipboard paste", "File upload"])
 
-    if uploaded is not None:
-        image_bytes = uploaded.getvalue()
-        st.session_state["imp_image_bytes"] = image_bytes
-        st.session_state["imp_image_meta"] = {
-            "filename": uploaded.name,
-            "mime": uploaded.type or "",
-            "size_bytes": len(image_bytes),
-        }
-        st.image(image_bytes, caption="Uploaded market screenshot", use_container_width=True)
+    with tab_clipboard:
+        st.caption(clip_info["note"])
+        st.markdown("**Snipping Tool workflow:** capture → Copy → click box below → **Ctrl+V**")
+        data_url = render_clipboard_paste_zone(
+            label="Click here, then Ctrl+V to paste screenshot",
+            key="imp_clipboard_paste_zone",
+        )
+        if data_url:
+            image_bytes, mime = data_url_to_bytes(data_url)
+            if image_bytes:
+                ext = extension_for_mime(mime)
+                _apply_import_image(
+                    image_bytes,
+                    filename=f"clipboard-paste.{ext}",
+                    mime=mime,
+                    source="clipboard_paste",
+                    auto_ocr=True,
+                )
 
-        if st.button("Run OCR on image", key="imp_ocr_btn"):
-            ocr_result = extract_text_from_image(
+        paste_btn = render_paste_button(key="imp_paste_button")
+        if paste_btn:
+            image_bytes, mime, filename = paste_btn
+            _apply_import_image(
                 image_bytes,
-                filename=uploaded.name,
-                mime=uploaded.type or "",
+                filename=filename,
+                mime=mime,
+                source="clipboard_button",
+                auto_ocr=True,
             )
-            st.session_state["imp_ocr_result"] = ocr_result
-            if ocr_result.get("success"):
-                st.success(f"OCR extracted {len(ocr_result['text'])} characters ({ocr_result['engine']}).")
-            else:
-                st.warning(ocr_result.get("error") or "OCR could not read text — paste manually below.")
+        elif not clip_info["paste_button"]:
+            st.caption("Optional: `pip install streamlit-paste-button` adds a clipboard button fallback.")
+
+    with tab_upload:
+        uploaded = st.file_uploader(
+            "Upload screenshot or photo",
+            type=["png", "jpg", "jpeg", "webp", "gif"],
+            key="imp_image_upload",
+        )
+        if uploaded is not None:
+            upload_bytes = uploaded.getvalue()
+            upload_hash = str(hash(upload_bytes))
+            if upload_hash != str(st.session_state.get("imp_upload_hash") or ""):
+                st.session_state["imp_upload_hash"] = upload_hash
+                _apply_import_image(
+                    upload_bytes,
+                    filename=uploaded.name,
+                    mime=uploaded.type or "image/png",
+                    source="file_upload",
+                    auto_ocr=False,
+                )
+
+    image_bytes = st.session_state.get("imp_image_bytes")
+    image_meta = st.session_state.get("imp_image_meta") or {}
+    if image_bytes:
+        src = image_meta.get("source", "image")
+        st.image(image_bytes, caption=f"Market screenshot ({src})", use_container_width=True)
+        col_ocr, col_clear = st.columns(2)
+        with col_ocr:
+            if st.button("Run OCR on image", key="imp_ocr_btn"):
+                ocr_result = extract_text_from_image(
+                    image_bytes,
+                    filename=str(image_meta.get("filename") or "screenshot.png"),
+                    mime=str(image_meta.get("mime") or "image/png"),
+                )
+                st.session_state["imp_ocr_result"] = ocr_result
+                if ocr_result.get("success"):
+                    st.session_state["imp_image_manual_text"] = ocr_result.get("text", "")
+                    st.success(f"OCR extracted {len(ocr_result['text'])} characters.")
+                else:
+                    st.warning(ocr_result.get("error") or "OCR failed — paste text manually below.")
+        with col_clear:
+            if st.button("Clear image", key="imp_clear_image_btn"):
+                for k in (
+                    "imp_image_bytes", "imp_image_meta", "imp_image_hash", "imp_image_source",
+                    "imp_ocr_result", "imp_upload_hash", "imp_ocr_auto_ran",
+                ):
+                    st.session_state.pop(k, None)
+                st.rerun()
+
+        if st.session_state.get("imp_ocr_auto_ran") and st.session_state.get("imp_ocr_result", {}).get("success"):
+            st.caption("OCR ran automatically on paste/upload.")
 
     ocr_result = st.session_state.get("imp_ocr_result") or {}
     ocr_text = str(ocr_result.get("text") or "")
@@ -237,6 +336,8 @@ def _render_post_extract() -> None:
     c2.metric("Bet format", str(fields.get("bet_format") or "—").replace("_", " "))
     c3.metric("Route confidence", f"{float(route.get('confidence', 0)):.0%}")
     c4.metric("OCR", "yes" if st.session_state.get("imp_ocr_result", {}).get("success") else "n/a")
+    if st.session_state.get("imp_image_meta", {}).get("source") == "clipboard_paste":
+        st.caption("Image source: clipboard paste (Ctrl+V)")
 
     _render_extracted_summary(fields, dtype)
 

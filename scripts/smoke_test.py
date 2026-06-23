@@ -81,6 +81,7 @@ def main() -> int:
         from decision_ocr import ocr_availability
         from decision_parser import parse_prediction_market_text as _parse_bet
         from decision_templates import assess_completeness
+        from components.clipboard_image_paste import clipboard_paste_available, data_url_to_bytes
         from components.importer_ui import render_ami_importer  # noqa: F401
     except Exception as exc:
         errors.append(f"import: {exc}")
@@ -238,6 +239,12 @@ def main() -> int:
     ocr_info = ocr_availability()
     if "available" not in ocr_info:
         errors.append("ocr_availability should return available flag")
+    clip_info = clipboard_paste_available()
+    if not clip_info.get("paste_zone"):
+        errors.append("clipboard paste zone should be available")
+    sample_png = "data:image/png;base64,iVBORw0KGgo="
+    if not data_url_to_bytes(sample_png)[1]:
+        errors.append("data_url_to_bytes should parse mime")
 
     if errors:
         print("SMOKE FAILED")

@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Source Sans Pro", sans-serif;
+      color: #1e293b;
+    }
+    #paste-zone {
+      border: 2px dashed #6366f1;
+      border-radius: 10px;
+      padding: 18px 14px;
+      text-align: center;
+      background: #f8fafc;
+      cursor: pointer;
+      outline: none;
+      min-height: 88px;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    #paste-zone:focus, #paste-zone.dragover {
+      border-color: #4f46e5;
+      background: #eef2ff;
+    }
+    #paste-zone .title {
+      font-weight: 600;
+      font-size: 0.95rem;
+      margin-bottom: 4px;
+    }
+    #paste-zone .hint {
+      font-size: 0.82rem;
+      color: #64748b;
+      line-height: 1.35;
+    }
+    #preview {
+      margin-top: 10px;
+      max-width: 100%;
+      border-radius: 8px;
+      display: none;
+    }
+    #status {
+      margin-top: 8px;
+      font-size: 0.8rem;
+      color: #059669;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="paste-zone" tabindex="0" role="textbox" aria-label="Paste image from clipboard">
+    <div class="title" id="label">Paste screenshot here</div>
+    <div class="hint">Click this box, then <b>Ctrl+V</b> (Windows) or <b>⌘V</b> (Mac).<br/>Or drag and drop an image file.</div>
+  </div>
+  <img id="preview" alt="Pasted preview" />
+  <div id="status">Image captured — processing…</div>
+
+  <script>
+    const zone = document.getElementById("paste-zone");
+    const preview = document.getElementById("preview");
+    const status = document.getElementById("status");
+    const labelEl = document.getElementById("label");
+
+    function sendValue(dataUrl) {
+      if (!dataUrl) return;
+      preview.src = dataUrl;
+      preview.style.display = "block";
+      status.style.display = "block";
+      status.textContent = "Image captured — processing…";
+      window.parent.postMessage(
+        { type: "streamlit:setComponentValue", value: dataUrl },
+        "*"
+      );
+    }
+
+    function readImageFile(file) {
+      if (!file || !file.type || !file.type.startsWith("image/")) return;
+      const reader = new FileReader();
+      reader.onloadend = () => sendValue(reader.result);
+      reader.readAsDataURL(file);
+    }
+
+    zone.addEventListener("click", () => zone.focus());
+
+    zone.addEventListener("paste", (e) => {
+      const items = e.clipboardData && e.clipboardData.items;
+      if (!items) return;
+      for (const item of items) {
+        if (item.type && item.type.startsWith("image/")) {
+          e.preventDefault();
+          readImageFile(item.getAsFile());
+          return;
+        }
+      }
+    });
+
+    zone.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      zone.classList.add("dragover");
+    });
+    zone.addEventListener("dragleave", () => zone.classList.remove("dragover"));
+    zone.addEventListener("drop", (e) => {
+      e.preventDefault();
+      zone.classList.remove("dragover");
+      const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+      readImageFile(file);
+    });
+
+    // Streamlit sets args via component iframe query string / Streamlit API
+    function onRender(event) {
+      const args = (event && event.detail && event.detail.args) || {};
+      if (args.label) {
+        labelEl.textContent = args.label;
+      }
+    }
+    window.addEventListener("message", (event) => {
+      if (event.data.type === "streamlit:render") onRender(event);
+    });
+  </script>
+</body>
+</html>
