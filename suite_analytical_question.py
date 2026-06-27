@@ -541,6 +541,70 @@ def load_analytical_question_source_state(question_id: str) -> dict[str, Any]:
     return dict(ss) if isinstance(ss, dict) else {}
 
 
+def _enrich_hof_packet_for_full_memo(
+    packet: dict[str, Any],
+    verdict: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Ensure staged HOF packet carries memo analysis from blob verdict when available."""
+    out = copy.deepcopy(packet) if isinstance(packet, dict) else {}
+    if not out:
+        return out
+    verdict_dict = verdict if isinstance(verdict, dict) else {}
+    existing = out.get("hof_case_analysis") if isinstance(out.get("hof_case_analysis"), dict) else {}
+    if isinstance(existing, dict) and existing.get("case_memo"):
+        return out
+    if verdict_dict.get("case_memo"):
+        merged = dict(verdict_dict)
+        merged.setdefault("thesis", verdict_dict.get("thesis") or verdict_dict.get("recommendation"))
+        out["hof_case_analysis"] = merged
+        return out
+    try:
+        from hof_case_analysis import compose_hof_statistical_case
+
+        composed = compose_hof_statistical_case(out)
+        if composed.get("case_memo"):
+            out["hof_case_analysis"] = composed
+    except Exception:
+        pass
+    return out
+
+
+def _hof_handoff_analysis_present(
+    packet: dict[str, Any] | None,
+    verdict: dict[str, Any] | None,
+) -> bool:
+    verdict_dict = verdict if isinstance(verdict, dict) else {}
+    if verdict_dict.get("case_memo"):
+        return True
+    packet_dict = packet if isinstance(packet, dict) else {}
+    analysis = packet_dict.get("hof_case_analysis") if isinstance(packet_dict.get("hof_case_analysis"), dict) else {}
+    return bool(analysis.get("case_memo"))
+
+
+def should_prefer_hof_full_memo_renderer(st: Any) -> bool:
+    """True when AMI should render the full HOF memo instead of a compact insight card."""
+    ss = st.session_state
+    if ss.get("_suite_hof_case"):
+        return True
+    packet = ss.get("_hof_case_packet")
+    if not isinstance(packet, dict) or not packet:
+        return False
+    if str(ss.get("_suite_ai_area") or "").strip() == "hall_of_fame_case":
+        return True
+    try:
+        raw_ctx = ss.get("_suite_ai_context")
+        ctx = json.loads(raw_ctx) if isinstance(raw_ctx, str) and raw_ctx.strip().startswith("{") else {}
+    except json.JSONDecodeError:
+        ctx = {}
+    if not isinstance(ctx, dict):
+        ctx = {}
+    return bool(
+        str(ctx.get("routing_hint") or "") == "hof_case_analysis"
+        or str(ctx.get("intent") or "") == "hof_case_analysis"
+        or isinstance(ctx.get("hof_case_packet"), dict)
+    )
+
+
 def hydrate_applied_intelligence_session(st: Any, *, metrics: dict[str, Any] | None = None) -> None:
     """Map URL params / resume metrics into Applied Intelligence session keys."""
     ss = st.session_state
@@ -660,49 +724,53 @@ def hydrate_applied_intelligence_session(st: Any, *, metrics: dict[str, Any] | N
     fallback_reason = ""
     packet_staged = False
     insight_staged = False
+    verdict_staged = False
+    analysis_present = False
+    target = ""
 
     if is_hof:
         ss["_suite_hof_case"] = True
         ss["_suite_ai_area"] = "hall_of_fame_case"
         ss["view_mode"] = "Solve a Problem"
         ss["_suite_ai_page"] = "Solve a Problem"
-        selected_renderer = "hof_case_analysis"
+        selected_renderer = "render_hof_case_full_analysis"
+        ss.pop("_ami_force_insight_render", None)
+        ss.pop("_ami_submit_render_insight_this_run", None)
         packet = blob_payload.get("hof_case_packet")
         if not isinstance(packet, dict):
             packet = ctx.get("hof_case_packet")
-        if isinstance(packet, dict) and packet:
-            ss["_hof_case_packet"] = copy.deepcopy(packet)
-            packet_staged = True
-        insight_blob = blob_payload.get("insight")
-        if not isinstance(insight_blob, dict):
-            insight_blob = ss.get("_hof_case_insight") if isinstance(ss.get("_hof_case_insight"), dict) else {}
-        if isinstance(blob_payload.get("insight"), dict) and blob_payload.get("insight"):
-            ss["_hof_case_insight"] = copy.deepcopy(blob_payload["insight"])
-            insight_blob = blob_payload["insight"]
         verdict = blob_payload.get("verdict_context")
         if isinstance(verdict, dict) and verdict:
             ss["_hof_case_verdict"] = copy.deepcopy(verdict)
+            verdict_staged = True
+        if isinstance(packet, dict) and packet:
+            enriched = _enrich_hof_packet_for_full_memo(
+                packet,
+                verdict if isinstance(verdict, dict) else ss.get("_hof_case_verdict"),
+            )
+            ss["_hof_case_packet"] = enriched
+            packet = enriched
+            packet_staged = True
+            analysis_present = _hof_handoff_analysis_present(packet, verdict if isinstance(verdict, dict) else None)
+        insight_blob = blob_payload.get("insight")
+        if isinstance(insight_blob, dict) and insight_blob:
+            ss["_hof_case_insight"] = copy.deepcopy(insight_blob)
+            insight_staged = True
         target = str(
             blob_payload.get("target_player")
             or blob_payload.get("player")
             or (ctx or {}).get("player")
             or _qp("suite_hof_target")
+            or (packet or {}).get("target_player")
             or ""
         ).strip()
         if target:
             ss["_suite_hof_target"] = target
-        if isinstance(insight_blob, dict) and insight_blob.get("conclusion"):
-            ss["_ami_pending_insight"] = copy.deepcopy(insight_blob)
-            ss["_ami_force_insight_render"] = True
-            ss["_ami_hydrated_insight_id"] = str(insight_blob.get("insight_id") or qid or "")
-            insight_staged = True
-        elif packet_staged:
-            ss["_ami_force_insight_render"] = True
         if not packet_staged:
             fallback_reason = "hof_case_packet_missing_after_hydrate"
             selected_renderer = "hof_case_fallback_error"
-        elif not insight_staged:
-            fallback_reason = "hof_insight_missing_using_packet_only"
+        elif not analysis_present:
+            fallback_reason = "hof_case_analysis_missing_compose_on_render"
     elif qid and not (blob_payload.get("context") or blob_payload.get("hof_case_packet")):
         fallback_reason = "question_id_blob_not_found"
     elif not ctx:
@@ -729,14 +797,21 @@ def hydrate_applied_intelligence_session(st: Any, *, metrics: dict[str, Any] | N
         "hof_insight_staged": insight_staged,
         "routing_hint": str((ctx or {}).get("routing_hint") or ""),
         "app_context_type": str(blob_payload.get("app_context_type") or (ctx or {}).get("app_context_type") or ""),
-        "player": str((ctx or {}).get("player") or blob_payload.get("player") or ss.get("_suite_hof_target") or ""),
+        "player": str((ctx or {}).get("player") or blob_payload.get("player") or ss.get("_suite_hof_target") or target or ""),
         "is_hof": bool(is_hof),
         "selected_renderer": selected_renderer,
-        "ami_full_memo_renderer_selected": selected_renderer == "hof_case_analysis",
+        "ami_full_memo_renderer_selected": selected_renderer == "render_hof_case_full_analysis",
         "fallback_reason": fallback_reason,
-        "verdict_context_present": isinstance(blob_payload.get("verdict_context"), dict)
-        and bool(blob_payload.get("verdict_context")),
+        "verdict_context_present": verdict_staged
+        or (
+            isinstance(blob_payload.get("verdict_context"), dict)
+            and bool(blob_payload.get("verdict_context"))
+        ),
         "insight_in_blob": isinstance(blob_payload.get("insight"), dict) and bool(blob_payload.get("insight")),
+        "insight_present": insight_staged,
+        "target_player_present": bool(target),
+        "hof_case_analysis_present": analysis_present,
+        "ami_handoff_fix_marker": "hof_full_memo_renderer_v1",
     }
     try:
         from suite_deploy_marker import format_build_label, resolve_git_commit_short, resolve_git_branch
@@ -794,6 +869,7 @@ def render_applied_intelligence_landing_diagnostics(
                 "hof_case_packet_staged": bool(diag.get("hof_case_packet_staged")),
                 "ami_blob_load_success": bool(diag.get("blob_found")),
                 "ami_full_memo_renderer_selected": bool(diag.get("ami_full_memo_renderer_selected")),
+                "hof_case_analysis_present": bool(diag.get("hof_case_analysis_present")),
                 "verdict_context_in_blob": bool(diag.get("verdict_context_present")),
                 "insight_in_blob": bool(diag.get("insight_in_blob")),
             }
@@ -814,9 +890,10 @@ def render_applied_intelligence_landing_diagnostics(
 def render_hof_case_solve_problem_handoff(st: Any) -> bool:
     """Render Hall of Fame case analysis when hydrated from Baseball. Returns True if content shown."""
     ss = st.session_state
-    if not ss.get("_suite_hof_case"):
-        return False
     packet = ss.get("_hof_case_packet")
+    if not ss.get("_suite_hof_case"):
+        if not (isinstance(packet, dict) and packet):
+            return False
     verdict = ss.get("_hof_case_verdict")
     dev_mode = _developer_tools_enabled(st)
 
@@ -830,6 +907,13 @@ def render_hof_case_solve_problem_handoff(st: Any) -> bool:
         )
         return False
 
+    packet = _enrich_hof_packet_for_full_memo(
+        packet,
+        verdict if isinstance(verdict, dict) else None,
+    )
+    ss["_hof_case_packet"] = packet
+    ss["_suite_ai_selected_renderer"] = "render_hof_case_full_analysis"
+
     try:
         from hof_case_analysis import render_hof_case_full_analysis
 
@@ -842,6 +926,11 @@ def render_hof_case_solve_problem_handoff(st: Any) -> bool:
             st.markdown(summary)
             return True
         return False
+
+
+def render_applied_intelligence_solve_problem_content(st: Any) -> bool:
+    """Primary AMI Solve-a-Problem renderer — prefers full HOF memo over compact insight cards."""
+    return render_applied_intelligence_handoff_page(st)
 
 
 def render_applied_intelligence_handoff_page(st: Any) -> bool:
@@ -871,7 +960,7 @@ def render_applied_intelligence_handoff_page(st: Any) -> bool:
         except Exception:
             pass
 
-    if ss.get("_suite_hof_case") or (isinstance(ss.get("_hof_case_packet"), dict) and ss.get("_hof_case_packet")):
+    if should_prefer_hof_full_memo_renderer(st):
         return render_hof_case_solve_problem_handoff(st)
 
     dev_mode = _developer_tools_enabled(st)
@@ -1674,6 +1763,9 @@ def render_suite_applied_math_insight(
 ) -> bool:
     """Source apps: show pending Applied Math insight card on eligible pages."""
     try:
+        app = str(source_app or "").strip().lower()
+        if app != "baseball" and should_prefer_hof_full_memo_renderer(st):
+            return render_applied_intelligence_solve_problem_content(st)
         from applied_math_return_insight import render_suite_applied_math_insight_for_page
 
         return render_suite_applied_math_insight_for_page(

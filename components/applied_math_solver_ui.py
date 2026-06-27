@@ -1095,6 +1095,10 @@ def _render_hof_full_case_from_context(
     verdict = _hof_verdict_from_context(context, st)
     try:
         from hof_case_analysis import format_hof_case_memo_markdown, render_hof_case_full_analysis, resolve_hof_case_analysis
+        from suite_analytical_question import _enrich_hof_packet_for_full_memo
+
+        packet = _enrich_hof_packet_for_full_memo(packet, verdict or None)
+        st.session_state["_hof_case_packet"] = packet
 
         if not render_hof_case_full_analysis(st, packet, verdict=verdict or None):
             return None
