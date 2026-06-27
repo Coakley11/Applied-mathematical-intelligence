@@ -6793,41 +6793,57 @@ def solve_baseball_hof_case(ctx: dict[str, Any], question: str) -> SolverResult:
         or verdict.get("target_player")
         or ""
     ).strip()
-    conclusion = str(
-        verdict.get("recommendation")
-        or verdict.get("hof_case_summary")
-        or packet.get("hof_case_summary")
-        or ctx.get("hof_case_summary")
-        or (f"Hall of Fame statistical case for {target}." if target else "")
-    ).strip()
-    method = str(
-        verdict.get("score_label")
-        or packet.get("score_label")
-        or "Hall of Fame statistical case score"
-    ).strip()
-    bullets = verdict.get("supporting_points") or packet.get("supporting_points") or []
-    if not isinstance(bullets, list):
-        bullets = []
+    analysis: dict[str, Any] = {}
+    memo_md = ""
+    try:
+        from hof_case_analysis import compose_hof_statistical_case, format_hof_case_memo_markdown, resolve_hof_case_analysis
+
+        analysis = resolve_hof_case_analysis(packet, verdict or None)
+        memo_md = format_hof_case_memo_markdown(analysis)
+        if not memo_md or "### Verdict:" not in memo_md:
+            analysis = compose_hof_statistical_case(packet)
+            memo_md = format_hof_case_memo_markdown(analysis)
+        conclusion = memo_md
+        method = f"{analysis.get('score_label', 'Hall of Fame statistical case score')} — {analysis.get('verdict_bucket', '—')}"
+        bullets = list(analysis.get("supporting_points") or [])
+        confidence = str(analysis.get("confidence") or verdict.get("confidence") or "medium")
+        score = analysis.get("score")
+    except ImportError:
+        conclusion = str(
+            verdict.get("recommendation")
+            or verdict.get("hof_case_summary")
+            or packet.get("hof_case_summary")
+            or ctx.get("hof_case_summary")
+            or (f"Hall of Fame statistical case for {target}." if target else "")
+        ).strip()
+        method = str(
+            verdict.get("score_label")
+            or packet.get("score_label")
+            or "Hall of Fame statistical case score"
+        ).strip()
+        bullets = verdict.get("supporting_points") or packet.get("supporting_points") or []
+        if not isinstance(bullets, list):
+            bullets = []
+        confidence = str(verdict.get("confidence") or "medium")
+        score = verdict.get("score")
+        memo_md = conclusion
+    memo = analysis.get("case_memo") if isinstance(analysis.get("case_memo"), dict) else {}
     coach = {
         "direct_answer": conclusion,
-        "key_variables": str(packet.get("hof_case_summary") or "").strip(),
+        "key_variables": str(analysis.get("thesis") or conclusion)[:500],
         "recommended_actions": "\n".join(f"- {b}" for b in bullets[:6] if str(b).strip()),
+        "analyst_framing": str(memo.get("final_takeaway") or ""),
     }
-    rate = packet.get("hall_of_fame_rate_pct")
-    hof_n = packet.get("hall_of_famers_returned")
-    total = packet.get("total_players_returned")
-    if rate is not None and total is not None:
-        coach["analyst_framing"] = f"Cohort: {hof_n}/{total} Hall of Famers ({rate}%)."
     return SolverResult(
         problem_type_id=BASEBALL_HOF_CASE,
         problem_type="Hall of Fame statistical case",
         conclusion=conclusion,
         result=conclusion,
         method=method,
-        confidence=str(verdict.get("confidence") or "medium"),
-        confidence_pct=verdict.get("score"),
+        confidence=confidence,
+        confidence_pct=score,
         reasons=[str(b) for b in bullets[:8] if str(b).strip()],
-        computed={"coach_sections": coach, "hof_case_packet": packet},
+        computed={"coach_sections": coach, "hof_case_packet": packet, "hof_case_memo": memo_md},
     )
 
 

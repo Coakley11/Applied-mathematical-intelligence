@@ -737,19 +737,41 @@ def hydrate_applied_intelligence_session(st: Any, *, metrics: dict[str, Any] | N
     ss["_suite_ai_show_landing_diag"] = True
 
 
-def render_applied_intelligence_landing_diagnostics(st: Any, *, expanded: bool | None = None) -> None:
-    """Visible AMI landing diagnostics — URL params, blob lookup, renderer selection."""
+def _developer_tools_enabled(st: Any) -> bool:
+    try:
+        from components.applied_math_context_diagnostics import applied_math_developer_mode_enabled
+
+        return applied_math_developer_mode_enabled(st)
+    except ImportError:
+        try:
+            from suite_workspace import (
+                DEVELOPER_MODE_WIDGET_KEY,
+                developer_tools_workspace_eligible,
+                sync_developer_mode_widget,
+            )
+
+            sync_developer_mode_widget(st.session_state, source="hof_handoff_gate")
+            if not developer_tools_workspace_eligible(st=st):
+                return False
+            return bool(st.session_state.get(DEVELOPER_MODE_WIDGET_KEY, False))
+        except ImportError:
+            return False
+
+
+def render_applied_intelligence_landing_diagnostics(
+    st: Any,
+    *,
+    expanded: bool | None = None,
+    developer_mode: bool = False,
+) -> None:
+    """AMI landing diagnostics — developer mode only."""
+    if not developer_mode:
+        return
     ss = st.session_state
     diag = dict(ss.get("_suite_ai_hydrate_diag") or {})
     if not diag and not ss.get("_suite_ai_show_landing_diag"):
         return
-    auto_expand = expanded
-    if auto_expand is None:
-        auto_expand = bool(
-            diag.get("is_hof")
-            and (not diag.get("hof_case_packet_staged") or diag.get("fallback_reason"))
-        )
-    with st.expander("AMI landing diagnostics", expanded=bool(auto_expand)):
+    with st.expander("AMI landing diagnostics", expanded=False if expanded is None else bool(expanded)):
         st.caption("Handoff hydration status for Baseball → AMI deep links.")
         st.json(diag)
         if diag.get("fallback_reason"):
@@ -768,62 +790,31 @@ def render_hof_case_solve_problem_handoff(st: Any) -> bool:
     if not ss.get("_suite_hof_case"):
         return False
     packet = ss.get("_hof_case_packet")
-    insight = ss.get("_hof_case_insight") or ss.get("_ami_pending_insight")
     verdict = ss.get("_hof_case_verdict")
-    target = str(ss.get("_suite_hof_target") or (packet or {}).get("target_player") or "").strip()
+    dev_mode = _developer_tools_enabled(st)
 
-    render_applied_intelligence_landing_diagnostics(st)
+    if dev_mode:
+        render_applied_intelligence_landing_diagnostics(st, developer_mode=True)
 
     if not isinstance(packet, dict) or not packet:
         st.error(
-            "Hall of Fame case handoff failed: no `hof_case_packet` in session. "
-            "See AMI landing diagnostics above for blob lookup status."
+            "Hall of Fame case handoff failed: no `hof_case_packet` in session."
+            + (" Enable Developer Mode for hydration diagnostics." if not dev_mode else "")
         )
         return False
 
-    title = f"Hall of Fame Case — {target}" if target else "Hall of Fame Case Analysis"
-    st.markdown(f"## {title}")
-    summary = str(packet.get("hof_case_summary") or "").strip()
-    if summary:
-        st.markdown(summary)
-    score_label = str(packet.get("score_label") or "").strip()
-    if score_label:
-        st.caption(score_label)
+    try:
+        from hof_case_analysis import render_hof_case_full_analysis
 
-    if isinstance(insight, dict) and insight.get("conclusion"):
-        try:
-            from applied_math_return_insight import render_applied_math_insight_panel
-
-            if render_applied_math_insight_panel(st, source_app="baseball", insight=insight):
-                return True
-        except ImportError:
-            st.markdown(f"**Conclusion:** {insight.get('conclusion')}")
-            bullets = insight.get("supporting_points") or insight.get("bullets") or []
-            if isinstance(bullets, list):
-                for point in bullets[:8]:
-                    st.markdown(f"- {point}")
+        return render_hof_case_full_analysis(st, packet, verdict=verdict if isinstance(verdict, dict) else None)
+    except ImportError:
+        target = str(ss.get("_suite_hof_target") or packet.get("target_player") or "").strip()
+        st.markdown(f"## Hall of Fame Case — {target}" if target else "## Hall of Fame Case Analysis")
+        summary = str(packet.get("hof_case_summary") or "").strip()
+        if summary:
+            st.markdown(summary)
             return True
-
-    if isinstance(verdict, dict) and verdict:
-        rec = str(verdict.get("recommendation") or "").strip()
-        if rec:
-            st.markdown(f"**Recommendation:** {rec}")
-        points = verdict.get("supporting_points") or []
-        if isinstance(points, list):
-            for point in points[:8]:
-                st.markdown(f"- {point}")
-        return True
-
-    cohort = packet.get("cohort_selectivity")
-    if isinstance(cohort, dict) and cohort.get("threshold_notes"):
-        st.markdown("**Cohort notes**")
-        for note in cohort.get("threshold_notes")[:6]:
-            st.markdown(f"- {note}")
-    sample = packet.get("sample_rows") or packet.get("top_sample") or []
-    if isinstance(sample, list) and sample:
-        st.markdown("**Cohort sample**")
-        st.dataframe(sample[:12], use_container_width=True, hide_index=True)
-    return True
+        return False
 
 
 def render_applied_intelligence_handoff_page(st: Any) -> bool:
@@ -853,12 +844,12 @@ def render_applied_intelligence_handoff_page(st: Any) -> bool:
         except Exception:
             pass
 
-    if ss.get("_suite_hof_case"):
+    if ss.get("_suite_hof_case") or (isinstance(ss.get("_hof_case_packet"), dict) and ss.get("_hof_case_packet")):
         return render_hof_case_solve_problem_handoff(st)
 
-    deep_link = bool(url_qid or ss.get("_suite_ai_question_id"))
-    if deep_link or ss.get("_suite_ai_show_landing_diag") or ss.get("_suite_ai_hydrate_diag"):
-        render_applied_intelligence_landing_diagnostics(st, expanded=deep_link)
+    dev_mode = _developer_tools_enabled(st)
+    if dev_mode and (ss.get("_suite_ai_show_landing_diag") or ss.get("_suite_ai_hydrate_diag")):
+        render_applied_intelligence_landing_diagnostics(st, developer_mode=True)
     if ss.get("_suite_ai_hydrate_error"):
         st.error(f"AMI URL hydrate error: {ss['_suite_ai_hydrate_error']}")
     return False

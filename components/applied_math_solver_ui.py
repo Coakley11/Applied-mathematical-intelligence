@@ -1037,6 +1037,8 @@ def _is_hof_case_context(context: dict[str, Any], st: Any) -> bool:
     ctx = dict(context or {})
     if str(ctx.get("routing_hint") or ctx.get("intent") or "") == "hof_case_analysis":
         return True
+    if str(ctx.get("app_context_type") or "") == "baseball_hof_case":
+        return True
     packet = ctx.get("hof_case_packet")
     if isinstance(packet, dict) and packet.get("mode") == "hall_of_fame_case":
         return True
@@ -1049,6 +1051,79 @@ def _is_hof_case_context(context: dict[str, Any], st: Any) -> bool:
     except Exception:
         pass
     return False
+
+
+def _hof_packet_from_context(context: dict[str, Any], st: Any) -> dict[str, Any]:
+    ctx = dict(context or {})
+    packet = ctx.get("hof_case_packet") if isinstance(ctx.get("hof_case_packet"), dict) else {}
+    if packet:
+        return packet
+    try:
+        stored = st.session_state.get("_hof_case_packet")
+        if isinstance(stored, dict) and stored:
+            return stored
+    except Exception:
+        pass
+    return {}
+
+
+def _hof_verdict_from_context(context: dict[str, Any], st: Any) -> dict[str, Any]:
+    ctx = dict(context or {})
+    verdict = ctx.get("verdict_context") if isinstance(ctx.get("verdict_context"), dict) else {}
+    if verdict:
+        return verdict
+    try:
+        stored = st.session_state.get("_hof_case_verdict")
+        if isinstance(stored, dict) and stored:
+            return stored
+    except Exception:
+        pass
+    return {}
+
+
+def _render_hof_full_case_from_context(
+    st: Any,
+    *,
+    question: str,
+    source_app: str,
+    source_page: str,
+    context: dict[str, Any],
+) -> SolverRunTrace | None:
+    packet = _hof_packet_from_context(context, st)
+    if not packet:
+        return None
+    verdict = _hof_verdict_from_context(context, st)
+    try:
+        from hof_case_analysis import format_hof_case_memo_markdown, render_hof_case_full_analysis, resolve_hof_case_analysis
+
+        if not render_hof_case_full_analysis(st, packet, verdict=verdict or None):
+            return None
+        analysis = resolve_hof_case_analysis(packet, verdict or None)
+        conclusion = format_hof_case_memo_markdown(analysis)
+    except ImportError:
+        return None
+    trace = SolverRunTrace(
+        renderer_path="hof_case_full_memo",
+        used_fallback=False,
+        fallback_error="",
+        generic_flow_rendered=False,
+        source_app=source_app,
+        source_page=source_page,
+        question=question,
+        problem_type_id="baseball_hof_case",
+        problem_type="Hall of Fame statistical case",
+        router_confidence=1.0,
+        solver_id="baseball_hof_case",
+        fields_available=[],
+        fields_missing=[],
+        context_keys=sorted(dict(context or {}).keys()),
+        conclusion=conclusion,
+        confidence_pct=analysis.get("score") if isinstance(analysis, dict) else None,
+        reasons_count=len(analysis.get("supporting_points") or []) if isinstance(analysis, dict) else 0,
+        partial=False,
+    )
+    st.session_state["_ami_last_solver_trace"] = trace.to_dict()
+    return trace
 
 
 def _load_canonical_hof_insight(st: Any, context: dict[str, Any]) -> dict[str, Any]:
@@ -1081,9 +1156,34 @@ def _load_canonical_hof_insight(st: Any, context: dict[str, Any]) -> dict[str, A
             pass
     packet = ctx.get("hof_case_packet") if isinstance(ctx.get("hof_case_packet"), dict) else {}
     verdict = ctx.get("verdict_context") if isinstance(ctx.get("verdict_context"), dict) else {}
+    try:
+        stored_packet = st.session_state.get("_hof_case_packet")
+        if isinstance(stored_packet, dict) and stored_packet:
+            packet = stored_packet
+            ctx["hof_case_packet"] = packet
+    except Exception:
+        pass
+    try:
+        stored_verdict = st.session_state.get("_hof_case_verdict")
+        if isinstance(stored_verdict, dict) and stored_verdict:
+            verdict = stored_verdict
+            ctx["verdict_context"] = verdict
+    except Exception:
+        pass
+    if isinstance(packet, dict) and packet:
+        try:
+            from hof_case_analysis import format_hof_case_memo_markdown, resolve_hof_case_analysis
+
+            analysis = resolve_hof_case_analysis(packet, verdict or None)
+            memo = format_hof_case_memo_markdown(analysis)
+            if memo:
+                insight["conclusion"] = memo
+        except ImportError:
+            pass
     if not str(insight.get("conclusion") or "").strip():
         insight["conclusion"] = str(
             verdict.get("recommendation")
+            or verdict.get("thesis")
             or verdict.get("hof_case_summary")
             or packet.get("hof_case_summary")
             or ctx.get("hof_case_summary")
@@ -1107,6 +1207,15 @@ def _render_canonical_hof_answer(
     context: dict[str, Any],
     canonical: dict[str, Any],
 ) -> SolverRunTrace:
+    trace = _render_hof_full_case_from_context(
+        st,
+        question=question,
+        source_app=source_app,
+        source_page=source_page,
+        context=context,
+    )
+    if trace is not None:
+        return trace
     return _render_canonical_instant_answer(
         st,
         question=question,
@@ -1393,6 +1502,15 @@ def render_suite_solver_answer(
                 canonical=canonical,
             )
     if app_key == "baseball" and _is_hof_case_context(ctx, st):
+        trace = _render_hof_full_case_from_context(
+            st,
+            question=question,
+            source_app=source_app,
+            source_page=source_page,
+            context=ctx,
+        )
+        if trace is not None:
+            return trace
         hof_insight = _load_canonical_hof_insight(st, ctx)
         if hof_insight and str(hof_insight.get("conclusion") or "").strip():
             return _render_canonical_hof_answer(

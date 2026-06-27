@@ -14,9 +14,9 @@ from applied_math_quality_validation import (
 
 def applied_math_developer_mode_enabled(st: Any) -> bool:
     try:
-        from suite_workspace import can_show_developer_tools
+        from suite_workspace import developer_mode_checkbox_enabled
 
-        return can_show_developer_tools(st=st)
+        return developer_mode_checkbox_enabled(st=st)
     except ImportError:
         return bool(st.session_state.get("app_developer_mode", False))
 
