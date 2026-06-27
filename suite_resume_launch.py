@@ -64,18 +64,23 @@ def apply_suite_resume_launch(st: Any, app_key: str) -> bool:
         pass
 
     flag = f"_suite_resume_launch_{app_key}"
-    if st.session_state.get(flag):
+    key = str(app_key or "").strip()
+    if key == "math":
+        key = "applied_intelligence"
+    if st.session_state.get(flag) and key != "applied_intelligence":
         return False
 
     resume = _qp_get(st, "suite_resume")
     page = _qp_get(st, "suite_page")
     ami_insight = _qp_get(st, "suite_ami_insight")
+    ai_qid = resolve_url_suite_ai_question_id(st) if key == "applied_intelligence" else ""
+    ai_question = _qp_get(st, "suite_ai_question") if key == "applied_intelligence" else ""
     if not resume and not page and not ami_insight:
-        return False
+        if key != "applied_intelligence" or not (ai_qid or ai_question):
+            return False
 
-    key = str(app_key or "").strip()
-    if key == "math":
-        key = "applied_intelligence"
+    if st.session_state.get(flag):
+        return False
 
     if key == "music":
         _apply_music(st, resume, page)
@@ -350,3 +355,60 @@ def _apply_applied_intelligence(st: Any, page: str) -> None:
             val = _qp_get(st, qp)
             if val:
                 st.session_state[key] = val
+
+
+def resolve_url_suite_ai_question_id(st: Any) -> str:
+    """Resolve question_id from suite_ai_question_id param or ai:question: resume key."""
+    qid = _qp_get(st, "suite_ai_question_id")
+    if qid:
+        return qid
+    resume = _qp_get(st, "suite_resume")
+    if resume.startswith("ai:question:"):
+        return resume.split(":", 2)[-1].strip()
+    return ""
+
+
+def _applied_intelligence_url_hydrate_active(st: Any) -> bool:
+    if resolve_url_suite_ai_question_id(st):
+        return True
+    if _qp_get(st, "suite_ai_question"):
+        return True
+    if _qp_get(st, "suite_hof_case") == "1":
+        return True
+    if _qp_get(st, "suite_ai_context"):
+        return True
+    if _qp_get(st, "suite_ai_source_app"):
+        return True
+    resume = _qp_get(st, "suite_resume")
+    return resume.startswith("ai:question:")
+
+
+def hydrate_applied_intelligence_from_url(st: Any) -> bool:
+    """Early URL hydrate for Baseball → AMI deep links (runs before cloud restore)."""
+    if not _applied_intelligence_url_hydrate_active(st):
+        return False
+    qid = resolve_url_suite_ai_question_id(st)
+    if qid:
+        st.session_state["_suite_ai_question_id"] = qid
+    try:
+        from suite_analytical_question import hydrate_applied_intelligence_session
+
+        hydrate_applied_intelligence_session(st)
+    except Exception as exc:
+        st.session_state["_suite_ai_hydrate_error"] = str(exc)
+        q = _qp_get(st, "suite_ai_question")
+        if q:
+            st.session_state["_suite_ai_question"] = q
+            st.session_state["ps_library_problem"] = q
+        ctx_raw = _qp_get(st, "suite_ai_context")
+        if ctx_raw:
+            st.session_state["_suite_ai_context"] = ctx_raw
+        for qp, key in (
+            ("suite_ai_source_app", "_suite_ai_source_app"),
+            ("suite_ai_source_page", "_suite_ai_source_page"),
+            ("suite_ai_area", "_suite_ai_area"),
+        ):
+            val = _qp_get(st, qp)
+            if val:
+                st.session_state[key] = val
+    return True

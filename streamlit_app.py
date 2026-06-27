@@ -100,6 +100,9 @@ try:
 except Exception as _ami_startup_exc:
     st.session_state["_suite_ai_startup_error"] = str(_ami_startup_exc)
 
+if st.session_state.get("_suite_ai_startup_error"):
+    st.error(f"AMI startup blocked: {st.session_state['_suite_ai_startup_error']}")
+
 try:
     from applied_intelligence_persistent_state import (
         autosave_applied_intelligence_state,

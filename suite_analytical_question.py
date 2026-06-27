@@ -722,10 +722,38 @@ def render_hof_case_solve_problem_handoff(st: Any) -> bool:
 def render_applied_intelligence_handoff_page(st: Any) -> bool:
     """AMI Solve a Problem preamble — diagnostics + HOF case when present."""
     ss = st.session_state
+    try:
+        from suite_resume_launch import resolve_url_suite_ai_question_id
+
+        url_qid = resolve_url_suite_ai_question_id(st)
+    except Exception:
+        url_qid = ""
+
+    def _qp(name: str) -> str:
+        try:
+            raw = st.query_params.get(name)
+        except Exception:
+            return ""
+        if raw is None:
+            return ""
+        if isinstance(raw, list):
+            return str(raw[0] or "").strip()
+        return str(raw).strip()
+
+    if url_qid and _qp("suite_hof_case") == "1" and not ss.get("_suite_hof_case"):
+        try:
+            hydrate_applied_intelligence_session(st)
+        except Exception:
+            pass
+
     if ss.get("_suite_hof_case"):
         return render_hof_case_solve_problem_handoff(st)
-    if ss.get("_suite_ai_show_landing_diag") or ss.get("_suite_ai_hydrate_diag"):
-        render_applied_intelligence_landing_diagnostics(st, expanded=False)
+
+    deep_link = bool(url_qid or ss.get("_suite_ai_question_id"))
+    if deep_link or ss.get("_suite_ai_show_landing_diag") or ss.get("_suite_ai_hydrate_diag"):
+        render_applied_intelligence_landing_diagnostics(st, expanded=deep_link)
+    if ss.get("_suite_ai_hydrate_error"):
+        st.error(f"AMI URL hydrate error: {ss['_suite_ai_hydrate_error']}")
     return False
 
 
