@@ -689,7 +689,8 @@ def render_hof_case_solve_problem_handoff(st: Any) -> bool:
 
             if render_applied_math_insight_panel(st, source_app="baseball", insight=insight):
                 return True
-        except ImportError:
+        except Exception as exc:
+            st.warning(f"Insight panel unavailable ({exc}). Showing summary below.")
             st.markdown(f"**Conclusion:** {insight.get('conclusion')}")
             bullets = insight.get("supporting_points") or insight.get("bullets") or []
             if isinstance(bullets, list):
