@@ -223,6 +223,14 @@ def _render_suite_question_view() -> None:
 
 
 def render_problem_solving_lab() -> None:
+    try:
+        from suite_analytical_question import render_applied_intelligence_handoff_page
+
+        if render_applied_intelligence_handoff_page(st):
+            return
+    except Exception:
+        pass
+
     if st.session_state.get("_suite_ai_question") or st.session_state.get("_suite_ai_question_id"):
         _render_suite_question_view()
         return
