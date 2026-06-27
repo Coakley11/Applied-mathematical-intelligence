@@ -16,6 +16,7 @@ from content.practical_labs import (
     NAV_HELP,
     PRIMARY_ACTIONS,
 )
+from components.nav import sidebar_nav_label
 from content.platform_meta import VERSION
 from simulations.registry import run_simulation
 from suite_branding import PAGE_ICON
@@ -211,6 +212,7 @@ view_mode = st.sidebar.radio(
     "Choose",
     PRIMARY_NAV,
     index=nav_index,
+    format_func=sidebar_nav_label,
     label_visibility="collapsed",
 )
 

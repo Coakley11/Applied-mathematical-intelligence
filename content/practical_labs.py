@@ -237,6 +237,13 @@ PRIMARY_ACTION_ICONS = {
     "Analyze an Idea": "💡",
 }
 
+# Sidebar + home cards — same icons everywhere.
+SIDEBAR_NAV_ICONS: dict[str, str] = {
+    "Home": "🏠",
+    **PRIMARY_ACTION_ICONS,
+    "Advanced reference": "📚",
+}
+
 PRIMARY_ACTION_LABELS = {
     "Solve a Problem": "Mathematical Problem Solving Lab",
     "Explore a Math Idea": "Mathematical Idea Explorer",

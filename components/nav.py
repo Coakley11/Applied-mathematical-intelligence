@@ -8,7 +8,14 @@ from content.practical_labs import (
     PRIMARY_ACTION_ICONS,
     PRIMARY_ACTION_TAGLINES,
     PRIMARY_ACTIONS,
+    SIDEBAR_NAV_ICONS,
 )
+
+
+def sidebar_nav_label(page: str) -> str:
+    """Icon + label for sidebar radio — matches home action cards."""
+    icon = SIDEBAR_NAV_ICONS.get(page, "")
+    return f"{icon} {page}" if icon else page
 
 
 def navigate_to(action: str) -> None:
