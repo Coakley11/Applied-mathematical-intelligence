@@ -88,6 +88,17 @@ def _load_suite_context() -> tuple[str, str, str, dict]:
                 hydrate_source = "resume_subtitle" if load_source == "resume_subtitle" else "question_id_blob"
                 st.session_state["_suite_ai_context"] = json.dumps(ctx_dict, ensure_ascii=False)
                 st.session_state["_suite_ai_hydrate_source"] = hydrate_source
+                packet = payload.get("hof_case_packet")
+                if isinstance(packet, dict) and packet:
+                    ctx_dict["hof_case_packet"] = packet
+                verdict = payload.get("verdict_context")
+                if isinstance(verdict, dict) and verdict:
+                    ctx_dict["verdict_context"] = verdict
+                if str(payload.get("quant_area") or "") == "hall_of_fame_case":
+                    st.session_state["_suite_ai_area"] = "hall_of_fame_case"
+                    st.session_state["_suite_hof_case"] = True
+                if isinstance(payload.get("insight"), dict):
+                    st.session_state["_hof_case_insight"] = payload["insight"]
                 try:
                     from suite_analytical_question import _context_payload_hash
 

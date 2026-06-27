@@ -463,6 +463,7 @@ def hydrate_applied_intelligence_session(st: Any, *, metrics: dict[str, Any] | N
     ctx: dict[str, Any] = {}
     source_state: dict[str, Any] = {}
     hydrate_source = "none"
+    blob_payload: dict[str, Any] = {}
 
     # Blob-first: full context by question_id before metrics/URL (avoids truncated deep links).
     if qid:
@@ -474,6 +475,14 @@ def hydrate_applied_intelligence_session(st: Any, *, metrics: dict[str, Any] | N
         blob_ss = blob_payload.get("source_state") if isinstance(blob_payload.get("source_state"), dict) else {}
         if blob_ss:
             source_state = copy.deepcopy(blob_ss)
+        if not area:
+            area = str(blob_payload.get("quant_area") or "").strip()
+        if not question:
+            question = str(blob_payload.get("question") or "").strip()
+        if not source_app:
+            source_app = str(blob_payload.get("source_app") or "").strip()
+        if not source_page:
+            source_page = str(blob_payload.get("source_page") or "").strip()
 
     metrics_ctx: dict[str, Any] = {}
     if isinstance(m.get("context"), dict):
@@ -523,6 +532,40 @@ def hydrate_applied_intelligence_session(st: Any, *, metrics: dict[str, Any] | N
     if source_state:
         ss["_suite_ai_source_state"] = copy.deepcopy(source_state)
     ss["_suite_ai_hydrate_source"] = hydrate_source
+
+    is_hof = (
+        area == "hall_of_fame_case"
+        or str(blob_payload.get("app_context_type") or "").strip() == "baseball_hof_case"
+        or str((ctx or {}).get("app_context_type") or "").strip() == "baseball_hof_case"
+        or _qp("suite_hof_case") == "1"
+        or str((ctx or {}).get("routing_hint") or "") == "hof_case_analysis"
+        or str((ctx or {}).get("intent") or "") == "hof_case_analysis"
+    )
+    if is_hof:
+        ss["_suite_hof_case"] = True
+        ss["_suite_ai_area"] = "hall_of_fame_case"
+        ss["view_mode"] = "Solve a Problem"
+        ss["_suite_ai_page"] = "Solve a Problem"
+        packet = blob_payload.get("hof_case_packet")
+        if not isinstance(packet, dict):
+            packet = ctx.get("hof_case_packet")
+        if isinstance(packet, dict) and packet:
+            ss["_hof_case_packet"] = copy.deepcopy(packet)
+        insight_blob = blob_payload.get("insight")
+        if isinstance(insight_blob, dict) and insight_blob:
+            ss["_hof_case_insight"] = copy.deepcopy(insight_blob)
+        verdict = blob_payload.get("verdict_context")
+        if isinstance(verdict, dict) and verdict:
+            ss["_hof_case_verdict"] = copy.deepcopy(verdict)
+        target = str(
+            blob_payload.get("target_player")
+            or blob_payload.get("player")
+            or (ctx or {}).get("player")
+            or _qp("suite_hof_target")
+            or ""
+        ).strip()
+        if target:
+            ss["_suite_hof_target"] = target
 
 
 def _format_context_value(key: str, val: Any) -> str:

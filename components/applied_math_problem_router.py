@@ -47,6 +47,7 @@ BASEBALL_HISTORICAL = "baseball_historical_comparison"
 BASEBALL_DRAFT = "baseball_draft_decision"
 BASEBALL_PROJECTION = "baseball_projection_realism"
 BASEBALL_VALUATION = "baseball_valuation"
+BASEBALL_HOF_CASE = "baseball_hof_case"
 BASEBALL_GENERIC = "baseball_generic"
 
 INVESTMENT_REBALANCE = "investment_rebalance"
@@ -108,6 +109,7 @@ MODEL_ID_TO_ROUTE: dict[str, tuple[str, str, tuple[str, ...]]] = {
     BASEBALL_DRAFT: ("Draft decision", "baseball", ("draft_snapshot", "player", "draft_projection")),
     BASEBALL_PROJECTION: ("Projection realism", "baseball", ("player", "projection")),
     BASEBALL_VALUATION: ("Player valuation", "baseball", ("valuation_snapshot", "player")),
+    BASEBALL_HOF_CASE: ("Hall of Fame statistical case", "baseball", ("hof_case_packet", "player")),
     BASEBALL_GENERIC: ("Baseball decision analysis", "baseball", ("player", "metrics")),
     NBA_STAT_CHASE: ("NBA stat chase / rate needed", "nba", FIELD_SPECS[NBA_STAT_CHASE]),
     NBA_INVERSE_STAT_CHASE: ("NBA inverse stat chase (games needed)", "nba", FIELD_SPECS[NBA_STAT_CHASE]),
@@ -463,6 +465,25 @@ def _route_baseball(
 ) -> ProblemRoute:
     low = question.lower()
     low_page = (source_page or page).lower()
+    routing_hint = str(ctx.get("routing_hint") or ctx.get("intent") or "").lower()
+    packet = ctx.get("hof_case_packet") if isinstance(ctx.get("hof_case_packet"), dict) else {}
+    if routing_hint == "hof_case_analysis" or (
+        isinstance(packet, dict) and packet.get("mode") == "hall_of_fame_case"
+    ):
+        req = ("hof_case_packet", "player")
+        avail, miss = _audit_fields(ctx, req)
+        if "hof_case_packet" not in avail and packet:
+            avail = list(avail) + ["hof_case_packet"]
+            miss = [m for m in miss if m != "hof_case_packet"]
+        return ProblemRoute(
+            problem_type_id=BASEBALL_HOF_CASE,
+            problem_type="Hall of Fame statistical case",
+            confidence=0.96 if "hof_case_packet" in avail else 0.82,
+            source_app="baseball",
+            required_fields=list(req),
+            available_fields=avail,
+            missing_fields=miss,
+        )
     is_trend_page = "trend" in low_page
     trend_q = any(
         w in low

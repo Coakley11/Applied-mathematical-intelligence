@@ -1033,6 +1033,96 @@ def _load_canonical_music_insight(st: Any, context: dict[str, Any]) -> dict[str,
     return _load_canonical_instant_insight(st, context, source_app="music")
 
 
+def _is_hof_case_context(context: dict[str, Any], st: Any) -> bool:
+    ctx = dict(context or {})
+    if str(ctx.get("routing_hint") or ctx.get("intent") or "") == "hof_case_analysis":
+        return True
+    packet = ctx.get("hof_case_packet")
+    if isinstance(packet, dict) and packet.get("mode") == "hall_of_fame_case":
+        return True
+    try:
+        if st.session_state.get("_suite_hof_case"):
+            return True
+        area = str(st.session_state.get("_suite_ai_area") or "").strip()
+        if area == "hall_of_fame_case":
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _load_canonical_hof_insight(st: Any, context: dict[str, Any]) -> dict[str, Any]:
+    ctx = dict(context or {})
+    insight: dict[str, Any] = {}
+    try:
+        stored = st.session_state.get("_hof_case_insight")
+        if isinstance(stored, dict):
+            insight = dict(stored)
+    except Exception:
+        pass
+    qid = str(st.session_state.get("_suite_ai_question_id") or "").strip()
+    if qid:
+        try:
+            from suite_analytical_question import load_analytical_question_payload
+
+            payload = load_analytical_question_payload(qid)
+            if isinstance(payload.get("insight"), dict):
+                insight = {**insight, **payload["insight"]}
+            blob_ctx = payload.get("context") if isinstance(payload.get("context"), dict) else {}
+            packet = payload.get("hof_case_packet") or blob_ctx.get("hof_case_packet")
+            if isinstance(packet, dict):
+                ctx["hof_case_packet"] = packet
+            verdict = payload.get("verdict_context")
+            if isinstance(verdict, dict):
+                ctx["verdict_context"] = verdict
+            if not insight.get("question"):
+                insight["question"] = str(payload.get("question") or "").strip()
+        except Exception:
+            pass
+    packet = ctx.get("hof_case_packet") if isinstance(ctx.get("hof_case_packet"), dict) else {}
+    verdict = ctx.get("verdict_context") if isinstance(ctx.get("verdict_context"), dict) else {}
+    if not str(insight.get("conclusion") or "").strip():
+        insight["conclusion"] = str(
+            verdict.get("recommendation")
+            or verdict.get("hof_case_summary")
+            or packet.get("hof_case_summary")
+            or ctx.get("hof_case_summary")
+            or ""
+        ).strip()
+    if not str(insight.get("method") or "").strip():
+        insight["method"] = str(
+            verdict.get("score_label") or packet.get("score_label") or "Hall of Fame statistical case score"
+        ).strip()
+    if qid:
+        insight.setdefault("question_id", qid)
+    return insight
+
+
+def _render_canonical_hof_answer(
+    st: Any,
+    *,
+    question: str,
+    source_app: str,
+    source_page: str,
+    context: dict[str, Any],
+    canonical: dict[str, Any],
+) -> SolverRunTrace:
+    return _render_canonical_instant_answer(
+        st,
+        question=question,
+        source_app=source_app,
+        source_page=source_page,
+        context=context,
+        canonical=canonical,
+        caption="Hall of Fame statistical case — full analysis from your Career Totals cohort.",
+        guidance_label="Method",
+        build_label="Analysis build",
+        renderer_path="hof_case_blob",
+        solver_id="baseball_hof_case",
+        problem_type="Hall of Fame statistical case",
+    )
+
+
 def _render_canonical_instant_answer(
     st: Any,
     *,
@@ -1301,6 +1391,17 @@ def render_suite_solver_answer(
                 source_page=source_page,
                 context=ctx,
                 canonical=canonical,
+            )
+    if app_key == "baseball" and _is_hof_case_context(ctx, st):
+        hof_insight = _load_canonical_hof_insight(st, ctx)
+        if hof_insight and str(hof_insight.get("conclusion") or "").strip():
+            return _render_canonical_hof_answer(
+                st,
+                question=question,
+                source_app=source_app,
+                source_page=source_page,
+                context=ctx,
+                canonical=hof_insight,
             )
 
     used_fallback = False

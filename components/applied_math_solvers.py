@@ -11,6 +11,7 @@ from components.applied_math_problem_router import (
     BASEBALL_DRAFT,
     BASEBALL_FUTURE_ACCUMULATION,
     BASEBALL_GENERIC,
+    BASEBALL_HOF_CASE,
     BASEBALL_HISTORICAL,
     BASEBALL_PLAYER_COMPARE,
     BASEBALL_PROJECTION,
@@ -6782,6 +6783,54 @@ def _generic_solver(route: ProblemRoute, question: str, ctx: dict[str, Any], par
     )
 
 
+def solve_baseball_hof_case(ctx: dict[str, Any], question: str) -> SolverResult:
+    """Render persisted Hall of Fame statistical case packet (not generic baseball Q&A)."""
+    packet = ctx.get("hof_case_packet") if isinstance(ctx.get("hof_case_packet"), dict) else {}
+    verdict = ctx.get("verdict_context") if isinstance(ctx.get("verdict_context"), dict) else {}
+    target = str(
+        packet.get("target_player")
+        or ctx.get("player")
+        or verdict.get("target_player")
+        or ""
+    ).strip()
+    conclusion = str(
+        verdict.get("recommendation")
+        or verdict.get("hof_case_summary")
+        or packet.get("hof_case_summary")
+        or ctx.get("hof_case_summary")
+        or (f"Hall of Fame statistical case for {target}." if target else "")
+    ).strip()
+    method = str(
+        verdict.get("score_label")
+        or packet.get("score_label")
+        or "Hall of Fame statistical case score"
+    ).strip()
+    bullets = verdict.get("supporting_points") or packet.get("supporting_points") or []
+    if not isinstance(bullets, list):
+        bullets = []
+    coach = {
+        "direct_answer": conclusion,
+        "key_variables": str(packet.get("hof_case_summary") or "").strip(),
+        "recommended_actions": "\n".join(f"- {b}" for b in bullets[:6] if str(b).strip()),
+    }
+    rate = packet.get("hall_of_fame_rate_pct")
+    hof_n = packet.get("hall_of_famers_returned")
+    total = packet.get("total_players_returned")
+    if rate is not None and total is not None:
+        coach["analyst_framing"] = f"Cohort: {hof_n}/{total} Hall of Famers ({rate}%)."
+    return SolverResult(
+        problem_type_id=BASEBALL_HOF_CASE,
+        problem_type="Hall of Fame statistical case",
+        conclusion=conclusion,
+        result=conclusion,
+        method=method,
+        confidence=str(verdict.get("confidence") or "medium"),
+        confidence_pct=verdict.get("score"),
+        reasons=[str(b) for b in bullets[:8] if str(b).strip()],
+        computed={"coach_sections": coach, "hof_case_packet": packet},
+    )
+
+
 def dispatch_solver(
     route: ProblemRoute,
     question: str,
@@ -6870,6 +6919,9 @@ def dispatch_solver(
             max_above_recent_pct=float(p.get("max_above_recent_pct", 25.0)),
             max_above_career_pct=float(p.get("max_above_career_pct", 35.0)),
         )
+
+    if pid == BASEBALL_HOF_CASE:
+        return solve_baseball_hof_case(ctx, question)
 
     if pid == BASEBALL_DRAFT:
         return solve_baseball_draft(
