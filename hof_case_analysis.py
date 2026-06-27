@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import re
+from datetime import datetime
 from typing import Any
 
 CASE_SCORE_LABEL = "Hall of Fame Statistical Case Score"
@@ -74,10 +76,25 @@ _POSITION_HOF_CONTEXT: dict[str, str] = {
 _COMPARABLE_PROFILE_GROUPS: tuple[tuple[tuple[str, ...], str], ...] = (
     (("HR", "SLG"), "similar power production"),
     (("OBP", "BB"), "similar on-base and walk profile"),
-    (("H", "2B"), "similar hit volume"),
+    (("H", "2B"), "similar hit volume and doubles profile"),
     (("OPS",), "similar overall offensive value"),
     (("RBI",), "similar run production"),
     (("SB",), "similar speed value"),
+)
+
+_POSITION_STAT_PRIORITY: dict[str, tuple[str, ...]] = {
+    "1B": ("2B", "H", "BA", "RBI", "OBP", "OPS", "HR", "SLG", "R", "BB"),
+    "DH": ("HR", "SLG", "OPS", "OBP", "RBI", "H", "BA", "2B"),
+    "OF": ("HR", "OPS", "SLG", "SB", "RBI", "H", "OBP", "2B"),
+    "C": ("OPS", "OBP", "HR", "RBI", "H", "2B", "BA"),
+    "SS": ("OPS", "OBP", "HR", "RBI", "SB", "H", "2B"),
+    "2B": ("OPS", "OBP", "2B", "H", "RBI", "HR", "SB"),
+    "3B": ("HR", "OPS", "SLG", "RBI", "OBP", "H", "2B"),
+}
+_DEFAULT_STAT_PRIORITY = ("OBP", "OPS", "2B", "H", "BA", "RBI", "HR", "SLG", "BB", "R", "SB")
+
+_HOF_DISCLAIMER = (
+    "Statistical case score only — not Hall of Fame induction odds or election probability."
 )
 
 
@@ -294,12 +311,58 @@ def _interpret_filters(filters: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _build_notable_profile_lines(packet: dict[str, Any]) -> list[str]:
-    """What actually makes this player notable — awards, milestones, elite ranks."""
+def _normalize_bullet_key(text: str) -> str:
+    return re.sub(r"\s+", " ", str(text or "").lower()).strip().rstrip(".")
+
+
+def _exclude_duplicate_bullets(candidates: list[str], existing: list[str]) -> list[str]:
+    """Drop supporting bullets that repeat strongest-evidence lines."""
+    seen = {_normalize_bullet_key(x) for x in existing if str(x or "").strip()}
+    out: list[str] = []
+    for line in candidates:
+        text = str(line or "").strip()
+        if not text:
+            continue
+        key = _normalize_bullet_key(text)
+        if key in seen:
+            continue
+        if any((len(s) > 24 and (key in s or s in key)) for s in seen):
+            continue
+        seen.add(key)
+        out.append(text)
+    return out
+
+
+def _comparable_primary_position(row: dict[str, Any]) -> str:
+    for key in ("careerPrimaryPos", "primary_position", "Primary Position", "displayPosition", "POS", "primaryPos"):
+        val = str(row.get(key) or "").strip()
+        if val:
+            return _normalize_position(val)
+    return "Unknown"
+
+
+def _filter_position_peers(rows: list[Any], target_pos: str) -> list[dict[str, Any]]:
+    pos = _normalize_position(target_pos)
+    if pos == "Unknown":
+        return []
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        if isinstance(row, dict) and _comparable_primary_position(row) == pos:
+            out.append(row)
+    return out
+
+
+def _stat_priority_for_position(primary_pos: str) -> tuple[str, ...]:
+    return _POSITION_STAT_PRIORITY.get(_normalize_position(primary_pos), _DEFAULT_STAT_PRIORITY)
+
+
+def _build_strongest_evidence(packet: dict[str, Any], *, limit: int = 5) -> list[str]:
+    """Top player-specific signals — awards, milestones, and best cohort/position ranks."""
     lines: list[str] = []
     target_stats = _target_stats(packet)
     ranks = packet.get("target_cohort_ranks") if isinstance(packet.get("target_cohort_ranks"), dict) else {}
     strengths = list(packet.get("cohort_strength_stats") or [])
+    primary_pos = _normalize_position(str(packet.get("primary_position") or "Unknown"))
 
     awards = packet.get("target_awards_summary") if isinstance(packet.get("target_awards_summary"), dict) else {}
     major = _safe_int(awards.get("major_awards") or awards.get("mvp_count"))
@@ -308,28 +371,35 @@ def _build_notable_profile_lines(packet: dict[str, Any]) -> list[str]:
         line = f"{major} major award(s) at MVP/Cy Young level"
         if detail:
             line += f" ({detail})"
-        lines.append(line + " — peak-value evidence, not cohort context.")
+        lines.append(line + " — peak-value support for the case.")
 
     for ms in packet.get("career_milestones") or []:
         if isinstance(ms, dict) and ms.get("label"):
             lines.append(str(ms["label"]) + ".")
 
-    priority_stats = ("OBP", "OPS", "BB", "HR", "SLG", "H", "RBI", "R", "SB", "BA")
+    priority_stats = _stat_priority_for_position(primary_pos)
     ordered = [s for s in priority_stats if s in strengths]
     ordered += [s for s in strengths if s not in ordered]
-    for stat in ordered[:5]:
+    for stat in ordered:
         info = ranks.get(stat)
         if isinstance(info, dict) and _safe_float(info.get("percentile_top")) >= 70:
             line = _fmt_player_strength(stat, info, target_stats)
             if line:
                 lines.append(line)
+        if len(lines) >= limit + 2:
+            break
 
     for note in packet.get("position_rarity_findings") or []:
         text = str(note).strip()
         if text:
             lines.append(text if text.endswith(".") else text + ".")
 
-    return _dedupe_lines(lines)[:8]
+    return _dedupe_lines(lines)[:limit]
+
+
+def _build_notable_profile_lines(packet: dict[str, Any]) -> list[str]:
+    """Backward-compatible alias — strongest-evidence builder."""
+    return _build_strongest_evidence(packet, limit=8)
 
 
 def _build_position_analysis(packet: dict[str, Any], bucket: str) -> list[str]:
@@ -390,11 +460,12 @@ def _build_position_analysis(packet: dict[str, Any], bucket: str) -> list[str]:
         )
 
     comparables = packet.get("comparable_players") if isinstance(packet.get("comparable_players"), dict) else {}
-    hof_names = _player_names(comparables.get("hall_of_famers") or [], limit=2)
+    hof_peers = _filter_position_peers(comparables.get("hall_of_famers") or [], pos)
+    hof_names = _player_names(hof_peers, limit=2)
     if hof_names and elite:
         lines.append(
-            f"Inducted {pos} peers in this cohort (e.g. {', '.join(hof_names)}) show a comparable or stronger "
-            "offensive tier — the target must be weighed against that bar."
+            f"Inducted {pos} peers in this dataset (e.g. {', '.join(hof_names)}) show a comparable or stronger "
+            "offensive tier — the target must be weighed against that positional bar."
         )
     elif hof_names and bucket in ("Strong", "Very Strong", "Solid"):
         lines.append(
@@ -433,15 +504,16 @@ def _comparable_shared_reason(target_stats: dict[str, Any], comp: dict[str, Any]
 
 
 def _build_comparable_notes(packet: dict[str, Any]) -> list[str]:
-    """Explain why comparables matter — not just a name list."""
+    """Explain why comparables matter — broader statistical comps, not position peers by default."""
     comparables = packet.get("comparable_players") if isinstance(packet.get("comparable_players"), dict) else {}
     target_stats = _target_stats(packet)
     sort_stat = str(packet.get("sort_stat") or "HR")
+    target_pos = _normalize_position(str(packet.get("primary_position") or "Unknown"))
     notes: list[str] = []
 
     hof_rows = comparables.get("hall_of_famers") or []
     if hof_rows:
-        notes.append("**Closest Hall of Fame statistical peers**")
+        notes.append("**Broader Hall of Fame statistical comps**")
         for comp in hof_rows[:3]:
             if not isinstance(comp, dict):
                 continue
@@ -450,11 +522,18 @@ def _build_comparable_notes(packet: dict[str, Any]) -> list[str]:
             if not name:
                 continue
             reason = _comparable_shared_reason(target_stats, comp)
-            notes.append(f"- **{name}** — {reason}; inducted in this cohort.")
+            comp_pos = _comparable_primary_position(comp)
+            pos_note = ""
+            if target_pos != "Unknown" and comp_pos != "Unknown":
+                if comp_pos == target_pos:
+                    pos_note = f"; same primary position ({comp_pos})"
+                else:
+                    pos_note = f"; broader comp at {comp_pos}, not a {target_pos} positional peer"
+            notes.append(f"- **{name}** — {reason}{pos_note}; inducted in this cohort.")
 
     non_rows = comparables.get("non_hall_of_famers") or []
     if non_rows:
-        notes.append("**Closest non-inducted comparables**")
+        notes.append("**Broader non-inducted statistical comps**")
         for comp in non_rows[:3]:
             if not isinstance(comp, dict):
                 continue
@@ -463,19 +542,21 @@ def _build_comparable_notes(packet: dict[str, Any]) -> list[str]:
             if not name:
                 continue
             reason = _comparable_shared_reason(target_stats, comp)
+            comp_pos = _comparable_primary_position(comp)
+            pos_note = ""
+            if target_pos != "Unknown" and comp_pos != "Unknown" and comp_pos != target_pos:
+                pos_note = f"; {comp_pos} profile — broader comp, not a {target_pos} peer"
             notes.append(
-                f"- **{name}** — {reason}; similar production without induction — a cautionary comp."
+                f"- **{name}** — {reason}{pos_note}; similar production without induction — a cautionary comp."
             )
 
     return notes
 
 
 def _build_signal_vs_context(packet: dict[str, Any], filter_interp: dict[str, Any]) -> dict[str, list[str]]:
-    """Separate evidence that strengthens the case from context that defines the cohort."""
+    """Separate supporting case context from strongest player-specific signals."""
     case_evidence: list[str] = []
     cohort_context: list[str] = list(filter_interp.get("cohort_context") or [])
-
-    case_evidence.extend(_build_notable_profile_lines(packet))
 
     hof_n = packet.get("hall_of_famers_returned")
     total = packet.get("total_players_returned")
@@ -542,15 +623,84 @@ def _era_note(identity: dict[str, Any]) -> str:
     seasons = span.get("seasons")
     if not debut or not final:
         return ""
-    note = f"Career span {debut}–{final}"
+    note = f"Career span in this dataset: {debut}–{final}"
     if seasons:
         note += f" ({seasons} seasons)"
     note += ". "
-    if _safe_int(debut) < 1970:
-        note += "Earlier-era counting totals can look stronger in raw numbers; compare within cohort and position."
-    elif _safe_int(final) >= 2010:
-        note += "Modern-era offense and roster usage can depress raw counting totals relative to older peers."
+    current_year = datetime.now().year
+    final_year = _safe_int(final)
+    debut_year = _safe_int(debut)
+    if final_year >= current_year - 1:
+        note += (
+            "Compare counting totals with care — the player is still active and modern roster usage "
+            "differs from older retired peers."
+        )
+    elif debut_year >= 2000:
+        note += (
+            "Compare counting totals with care — modern-era usage and bullpen patterns differ from "
+            "older players in this cohort."
+        )
+    elif debut_year < 1970:
+        note += (
+            "Earlier-era counting totals can read higher in raw numbers; weight cohort rank and "
+            "position-relative production."
+        )
     return note
+
+
+def _summarize_strength_themes(strengths: list[str], primary_pos: str) -> str:
+    labels = [_STAT_LABELS.get(s, s) for s in strengths[:4]]
+    if labels:
+        return ", ".join(labels)
+    if primary_pos != "Unknown":
+        return f"sustained {primary_pos} offensive value"
+    return "sustained offensive production within this cohort"
+
+
+def _build_final_takeaway(
+    *,
+    target: str,
+    bucket: str,
+    primary_pos: str,
+    sort_stat: str,
+    strengths: list[str],
+    weaknesses: list[str],
+    strongest: list[str],
+    weakest: list[str],
+) -> str:
+    """Explain why the verdict follows from the evidence."""
+    strength_theme = _summarize_strength_themes(strengths, primary_pos)
+    pos_clause = f" at {primary_pos}" if primary_pos != "Unknown" else ""
+
+    if bucket in ("Very Strong", "Strong"):
+        lead = f"**{bucket}** because {target} combines elite {strength_theme}{pos_clause}"
+    elif bucket == "Solid":
+        lead = f"**{bucket}** because {target} shows clear {strength_theme}{pos_clause}"
+    elif bucket == "Borderline":
+        lead = f"**{bucket}** because {target} has real value in {strength_theme}{pos_clause}, but the case is mixed"
+    else:
+        lead = f"**{bucket}** because {target} does not separate clearly on {strength_theme or 'core categories'}{pos_clause}"
+
+    extras: list[str] = []
+    if strongest:
+        extras.append(strongest[0].rstrip("."))
+    if sort_stat and sort_stat in weaknesses and strengths:
+        alt = [s for s in strengths if s != sort_stat][:3]
+        if alt:
+            alt_text = ", ".join(_STAT_LABELS.get(s, s) for s in alt)
+            extras.append(
+                f"the caution is that {_STAT_LABELS.get(sort_stat, sort_stat)} rank is not elite in this "
+                f"{_STAT_LABELS.get(sort_stat, sort_stat)}-sorted cohort, so the case rests more on "
+                f"{alt_text} and complete offensive profile than pure power"
+            )
+    elif weakest:
+        extras.append(weakest[0].rstrip("."))
+
+    body = lead + "."
+    if extras:
+        body += f" {'; '.join(extras)}."
+    body += f" Verdict reflects the {CASE_SCORE_LABEL} — not induction odds."
+    return body
 
 
 def _score_case(packet: dict[str, Any]) -> tuple[int, str]:
@@ -652,8 +802,8 @@ def compose_hof_statistical_case(packet: dict[str, Any]) -> dict[str, Any]:
     target_stats = _target_stats(packet)
     score, bucket = _score_case(packet)
 
-    profile_lines = _build_notable_profile_lines(packet)
-    strongest: list[str] = list(profile_lines[:6])
+    profile_lines = _build_strongest_evidence(packet, limit=5)
+    strongest: list[str] = list(profile_lines)
     if not strongest:
         for stat in strengths[:4]:
             info = ranks.get(stat)
@@ -661,6 +811,7 @@ def compose_hof_statistical_case(packet: dict[str, Any]) -> dict[str, Any]:
                 line = _fmt_player_strength(stat, info, target_stats)
                 if line:
                     strongest.append(line)
+    strongest = _dedupe_lines(strongest)[:5]
 
     weakest: list[str] = []
     for stat in weaknesses[:3]:
@@ -702,35 +853,34 @@ def compose_hof_statistical_case(packet: dict[str, Any]) -> dict[str, Any]:
     hof_names = _player_names(comparables.get("hall_of_famers") or [])
     non_hof_names = _player_names(comparables.get("non_hall_of_famers") or [])
 
-    strength_labels = [_STAT_LABELS.get(s, s) for s in strengths[:3]]
+    strength_labels = [_STAT_LABELS.get(s, s) for s in strengths[:4]]
     thesis_parts = [f"{target}'s statistical Hall of Fame case is **{bucket}**"]
     if strengths and sort_stat in weaknesses:
         thesis_parts.append(
-            f"with the real signal in {', '.join(strength_labels)} rather than {_STAT_LABELS.get(sort_stat, sort_stat)} rank"
+            f"with the clearest signal in {', '.join(strength_labels)} rather than "
+            f"{_STAT_LABELS.get(sort_stat, sort_stat)} rank in this cohort"
         )
     elif strengths:
         thesis_parts.append(f"driven by {', '.join(strength_labels)} within this cohort")
     if primary_pos != "Unknown":
-        thesis_parts.append(f"evaluated at {primary_pos}")
+        thesis_parts.append(f"evaluated against {primary_pos} offensive standards")
     thesis = " — ".join(thesis_parts) + "."
 
-    takeaway_bits = [
-        f"**{bucket}** on the {CASE_SCORE_LABEL} — not induction odds.",
-    ]
-    if strongest:
-        takeaway_bits.append(f"Strongest evidence: {strongest[0].rstrip('.')}.")
-    if weakest:
-        takeaway_bits.append(f"Main caution: {weakest[0].rstrip('.')}.")
-    if hof_names:
-        takeaway_bits.append(
-            f"Compare to inducted peers ({', '.join(hof_names[:2])}) and non-inducted comps "
-            f"({', '.join(non_hof_names[:2]) if non_hof_names else 'similar profiles'}) for context."
-        )
-    if primary_pos != "Unknown":
-        takeaway_bits.append(f"At {primary_pos}, the verdict reflects position-relative production and era context.")
-    takeaway = " ".join(takeaway_bits)
+    takeaway = _build_final_takeaway(
+        target=target,
+        bucket=bucket,
+        primary_pos=primary_pos,
+        sort_stat=sort_stat,
+        strengths=strengths,
+        weaknesses=weaknesses,
+        strongest=strongest,
+        weakest=weakest,
+    )
 
-    case_evidence = list(signal_context.get("case_evidence") or [])
+    case_evidence = _exclude_duplicate_bullets(
+        list(signal_context.get("case_evidence") or []),
+        strongest,
+    )
     cohort_context_only = list(signal_context.get("cohort_context_only") or [])
     if filter_interp.get("sort_stat_note") and sort_stat in weaknesses:
         cohort_context_only.append(str(filter_interp["sort_stat_note"]))
@@ -761,11 +911,7 @@ def compose_hof_statistical_case(packet: dict[str, Any]) -> dict[str, Any]:
         "recommendation": f"**Verdict: {bucket}** — {thesis}",
         "supporting_points": supporting,
         "case_memo": memo_sections,
-        "disclaimer": str(packet.get("disclaimer") or "").strip()
-        or (
-            "Statistical Hall of Fame case analysis only — not true Hall of Fame induction odds "
-            "or a guaranteed probability."
-        ),
+        "disclaimer": str(packet.get("disclaimer") or "").strip() or _HOF_DISCLAIMER,
         "confidence": str(selectivity.get("confidence") or "moderate"),
         "target_player": target,
     }
