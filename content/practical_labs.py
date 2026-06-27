@@ -244,6 +244,13 @@ SIDEBAR_NAV_ICONS: dict[str, str] = {
     "Advanced reference": "📚",
 }
 
+
+def sidebar_nav_label(page: str) -> str:
+    """Icon + label for sidebar radio — matches home action cards."""
+    icon = SIDEBAR_NAV_ICONS.get(page, "")
+    return f"{icon} {page}" if icon else page
+
+
 PRIMARY_ACTION_LABELS = {
     "Solve a Problem": "Mathematical Problem Solving Lab",
     "Explore a Math Idea": "Mathematical Idea Explorer",

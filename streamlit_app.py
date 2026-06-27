@@ -15,8 +15,8 @@ from content.practical_labs import (
     ACTION_TO_LAB,
     NAV_HELP,
     PRIMARY_ACTIONS,
+    sidebar_nav_label,
 )
-from components.nav import sidebar_nav_label
 from content.platform_meta import VERSION
 from simulations.registry import run_simulation
 from suite_branding import PAGE_ICON
