@@ -732,8 +732,20 @@ def hydrate_applied_intelligence_session(st: Any, *, metrics: dict[str, Any] | N
         "player": str((ctx or {}).get("player") or blob_payload.get("player") or ss.get("_suite_hof_target") or ""),
         "is_hof": bool(is_hof),
         "selected_renderer": selected_renderer,
+        "ami_full_memo_renderer_selected": selected_renderer == "hof_case_analysis",
         "fallback_reason": fallback_reason,
+        "verdict_context_present": isinstance(blob_payload.get("verdict_context"), dict)
+        and bool(blob_payload.get("verdict_context")),
+        "insight_in_blob": isinstance(blob_payload.get("insight"), dict) and bool(blob_payload.get("insight")),
     }
+    try:
+        from suite_deploy_marker import format_build_label, resolve_git_commit_short, resolve_git_branch
+
+        ss["_suite_ai_hydrate_diag"]["deploy_commit"] = resolve_git_commit_short()
+        ss["_suite_ai_hydrate_diag"]["deploy_branch"] = resolve_git_branch()
+        ss["_suite_ai_hydrate_diag"]["build_label"] = format_build_label()
+    except ImportError:
+        pass
     ss["_suite_ai_show_landing_diag"] = True
 
 
@@ -772,6 +784,21 @@ def render_applied_intelligence_landing_diagnostics(
     if not diag and not ss.get("_suite_ai_show_landing_diag"):
         return
     with st.expander("AMI landing diagnostics", expanded=False if expanded is None else bool(expanded)):
+        deploy = str(diag.get("deploy_commit") or "unknown")
+        branch = str(diag.get("deploy_branch") or "unknown")
+        build = str(diag.get("build_label") or deploy)
+        st.caption(f"AMI build `{build}` · commit `{deploy}` · branch `{branch}`")
+        if diag.get("is_hof"):
+            checks = {
+                "hof_case_packet_present": bool(diag.get("hof_case_packet_present")),
+                "hof_case_packet_staged": bool(diag.get("hof_case_packet_staged")),
+                "ami_blob_load_success": bool(diag.get("blob_found")),
+                "ami_full_memo_renderer_selected": bool(diag.get("ami_full_memo_renderer_selected")),
+                "verdict_context_in_blob": bool(diag.get("verdict_context_present")),
+                "insight_in_blob": bool(diag.get("insight_in_blob")),
+            }
+            rows = [f"- **{k.replace('_', ' ')}**: {'yes' if v else 'no'}" for k, v in checks.items()]
+            st.markdown("\n".join(rows))
         st.caption("Handoff hydration status for Baseball → AMI deep links.")
         st.json(diag)
         if diag.get("fallback_reason"):
