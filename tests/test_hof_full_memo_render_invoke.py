@@ -103,10 +103,49 @@ class HofFullMemoRenderInvokeTests(unittest.TestCase):
         mock_full.assert_called_once()
 
     def test_hof_case_analysis_imports_without_hall_of_fame_data(self) -> None:
-        import hof_case_analysis
+        import importlib
+        import pathlib
+        import sys
 
-        self.assertTrue(hasattr(hof_case_analysis, "CASE_SCORE_LABEL"))
-        self.assertTrue(hasattr(hof_case_analysis, "render_hof_case_full_analysis"))
+        root = pathlib.Path(__file__).resolve().parents[1]
+        source = (root / "hof_case_analysis.py").read_text(encoding="utf-8")
+        self.assertNotIn("from hall_of_fame_data import", source)
+        self.assertNotIn("import hall_of_fame_data", source)
+
+        sys.modules.pop("hof_case_analysis", None)
+        mod = importlib.import_module("hof_case_analysis")
+        self.assertEqual(mod.CASE_SCORE_LABEL, "Hall of Fame Statistical Case Score")
+        self.assertEqual(mod.CASE_SCORE_BUCKETS, ("Weak", "Borderline", "Solid", "Strong", "Very Strong"))
+        self.assertEqual(mod.MEMO_QUALITY_VERSION, "hof_memo_quality_v2")
+        self.assertTrue(callable(mod.render_hof_case_full_analysis))
+        self.assertTrue(callable(mod.compose_hof_statistical_case))
+        self.assertNotIn("hall_of_fame_data", sys.modules.get("hof_case_analysis").__dict__)
+
+    def test_render_hof_case_full_analysis_runs_without_hall_of_fame_data(self) -> None:
+        import importlib
+
+        mod = importlib.import_module("hof_case_analysis")
+        st = MagicMock()
+        st.session_state = {}
+        st.markdown = MagicMock()
+        st.caption = MagicMock()
+        packet = {
+            **self._sample_packet(),
+            "target_career_stats": {"HR": 569, "H": 3020, "RBI": 1834, "2B": 585, "G": 2831, "R": 1663},
+            "cohort_strength_stats": ["HR", "H", "RBI"],
+            "target_cohort_ranks": {"HR": {"rank": 10, "of": 87, "value": 569, "percentile_top": 90, "tier": "top 10%"}},
+        }
+        ok = mod.render_hof_case_full_analysis(st, packet)
+        self.assertTrue(ok)
+        st.markdown.assert_called()
+        rendered = " ".join(str(c.args[0]) for c in st.markdown.call_args_list if c.args)
+        self.assertIn("569", rendered)
+        self.assertIn("Verdict", rendered)
+        analysis = mod.compose_hof_statistical_case(packet)
+        self.assertEqual(
+            (analysis.get("case_memo") or {}).get("memo_quality_version"),
+            mod.MEMO_QUALITY_VERSION,
+        )
 
 
 if __name__ == "__main__":

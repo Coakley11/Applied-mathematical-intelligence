@@ -7,7 +7,8 @@ import re
 from datetime import datetime
 from typing import Any
 
-from hall_of_fame_data import CASE_SCORE_BUCKETS, CASE_SCORE_LABEL
+CASE_SCORE_LABEL = "Hall of Fame Statistical Case Score"
+CASE_SCORE_BUCKETS = ("Weak", "Borderline", "Solid", "Strong", "Very Strong")
 
 _FILTER_CONTEXTUAL = frozenset({"batting_hand", "bats", "team_filter", "by_team", "year_range"})
 _FILTER_STRUCTURAL = frozenset({"position", "position_mode", "hof_membership_filter", "stat_minimums"})
