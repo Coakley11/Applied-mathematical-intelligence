@@ -550,19 +550,19 @@ def _enrich_hof_packet_for_full_memo(
     if not out:
         return out
     verdict_dict = verdict if isinstance(verdict, dict) else {}
-    existing = out.get("hof_case_analysis") if isinstance(out.get("hof_case_analysis"), dict) else {}
-    if isinstance(existing, dict) and existing.get("case_memo"):
-        return out
-    if verdict_dict.get("case_memo"):
-        merged = dict(verdict_dict)
-        merged.setdefault("thesis", verdict_dict.get("thesis") or verdict_dict.get("recommendation"))
-        out["hof_case_analysis"] = merged
-        return out
     try:
-        from hof_case_analysis import compose_hof_statistical_case
+        from hof_case_analysis import _force_compose_hof_memo, _structured_case_memo_present
 
-        composed = compose_hof_statistical_case(out)
-        if composed.get("case_memo"):
+        existing = out.get("hof_case_analysis") if isinstance(out.get("hof_case_analysis"), dict) else {}
+        if _structured_case_memo_present(existing.get("case_memo")):
+            return out
+        if _structured_case_memo_present(verdict_dict.get("case_memo")):
+            merged = dict(verdict_dict)
+            merged.setdefault("thesis", verdict_dict.get("thesis") or verdict_dict.get("recommendation"))
+            out["hof_case_analysis"] = merged
+            return out
+        composed, _, _ = _force_compose_hof_memo(out)
+        if _structured_case_memo_present(composed.get("case_memo")):
             out["hof_case_analysis"] = composed
     except Exception:
         pass
@@ -573,12 +573,21 @@ def _hof_handoff_analysis_present(
     packet: dict[str, Any] | None,
     verdict: dict[str, Any] | None,
 ) -> bool:
+    try:
+        from hof_case_analysis import _structured_case_memo_present
+    except ImportError:
+        verdict_dict = verdict if isinstance(verdict, dict) else {}
+        if verdict_dict.get("case_memo"):
+            return True
+        packet_dict = packet if isinstance(packet, dict) else {}
+        analysis = packet_dict.get("hof_case_analysis") if isinstance(packet_dict.get("hof_case_analysis"), dict) else {}
+        return bool(analysis.get("case_memo"))
     verdict_dict = verdict if isinstance(verdict, dict) else {}
-    if verdict_dict.get("case_memo"):
+    if _structured_case_memo_present(verdict_dict.get("case_memo")):
         return True
     packet_dict = packet if isinstance(packet, dict) else {}
     analysis = packet_dict.get("hof_case_analysis") if isinstance(packet_dict.get("hof_case_analysis"), dict) else {}
-    return bool(analysis.get("case_memo"))
+    return _structured_case_memo_present(analysis.get("case_memo"))
 
 
 def should_prefer_hof_full_memo_renderer(st: Any) -> bool:
@@ -868,11 +877,18 @@ def render_applied_intelligence_landing_diagnostics(
                 "hof_case_packet_present": bool(diag.get("hof_case_packet_present")),
                 "hof_case_packet_staged": bool(diag.get("hof_case_packet_staged")),
                 "ami_blob_load_success": bool(diag.get("blob_found")),
+                "selected_renderer": str(diag.get("selected_renderer") or ""),
                 "ami_full_memo_renderer_selected": bool(diag.get("ami_full_memo_renderer_selected")),
                 "hof_case_analysis_present": bool(diag.get("hof_case_analysis_present")),
+                "render_hof_case_full_analysis_entered": bool(diag.get("render_hof_case_full_analysis_entered")),
+                "case_memo_present": bool(diag.get("case_memo_present")),
+                "case_memo_len": int(diag.get("case_memo_len") or 0),
+                "memo_is_full": bool(diag.get("memo_is_full")),
                 "verdict_context_in_blob": bool(diag.get("verdict_context_present")),
                 "insight_in_blob": bool(diag.get("insight_in_blob")),
             }
+            if diag.get("fallback_reason"):
+                st.warning(f"HOF memo fallback: `{diag['fallback_reason']}`")
             rows = [f"- **{k.replace('_', ' ')}**: {'yes' if v else 'no'}" for k, v in checks.items()]
             st.markdown("\n".join(rows))
         st.caption("Handoff hydration status for Baseball → AMI deep links.")

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from hall_of_fame_data import CASE_SCORE_BUCKETS, CASE_SCORE_LABEL
@@ -793,27 +794,178 @@ def build_hof_case_subtitle(packet: dict[str, Any]) -> str:
     return " · ".join(parts)
 
 
+_MEMO_SECTION_KEYS = (
+    "strongest_evidence",
+    "weakest_evidence",
+    "case_evidence",
+    "cohort_context_only",
+    "cohort_interpretation",
+    "position_era_context",
+    "comparison_notes",
+    "final_takeaway",
+)
+_MEMO_FULL_MIN_LEN = 500
+_MEMO_MIN_LEN = 80
+
+
+def _case_memo_dict(raw: Any) -> dict[str, Any]:
+    """Normalize case_memo from dict, JSON string, or pre-rendered markdown."""
+    if isinstance(raw, dict):
+        return dict(raw)
+    if isinstance(raw, str) and raw.strip():
+        text = raw.strip()
+        if text.startswith("{"):
+            try:
+                parsed = json.loads(text)
+                if isinstance(parsed, dict):
+                    return parsed
+            except json.JSONDecodeError:
+                pass
+        if "### Verdict" in text or "#### Statistical case" in text or "#### Final takeaway" in text:
+            return {"_preformatted_markdown": text}
+    return {}
+
+
+def _structured_case_memo_present(raw: Any) -> bool:
+    memo = _case_memo_dict(raw)
+    if not memo:
+        return False
+    if memo.get("_preformatted_markdown"):
+        return True
+    if str(memo.get("verdict") or "").strip():
+        return True
+    if str(memo.get("thesis") or "").strip():
+        return True
+    return any(memo.get(key) for key in _MEMO_SECTION_KEYS)
+
+
+def _normalize_hof_analysis(analysis: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(analysis, dict):
+        return {}
+    out = dict(analysis)
+    memo = _case_memo_dict(out.get("case_memo"))
+    if memo:
+        out["case_memo"] = memo
+    elif "case_memo" in out:
+        out.pop("case_memo", None)
+    return out
+
+
+def _hof_memo_is_full(memo_md: str, summary_line: str = "") -> bool:
+    text = str(memo_md or "").strip()
+    if len(text) < _MEMO_MIN_LEN:
+        return False
+    if summary_line and text == summary_line.strip():
+        return False
+    if "### Verdict:" in text or "### Verdict" in text:
+        return len(text) >= _MEMO_MIN_LEN
+    return len(text) >= _MEMO_FULL_MIN_LEN and any(
+        marker in text
+        for marker in ("#### Statistical case", "Strongest evidence", "Final takeaway", "Weakest evidence")
+    )
+
+
+def _detect_memo_sections(memo: dict[str, Any]) -> list[str]:
+    return [key for key in _MEMO_SECTION_KEYS if memo.get(key)]
+
+
+def _build_hof_memo_render_diag(
+    *,
+    packet: dict[str, Any],
+    verdict: dict[str, Any] | None,
+    analysis: dict[str, Any],
+    memo_md: str,
+    summary_line: str,
+    fallback_reason: str,
+) -> dict[str, Any]:
+    verdict_dict = verdict if isinstance(verdict, dict) else {}
+    packet_dict = packet if isinstance(packet, dict) else {}
+    analysis_dict = analysis if isinstance(analysis, dict) else {}
+    hof_analysis = (
+        packet_dict.get("hof_case_analysis") if isinstance(packet_dict.get("hof_case_analysis"), dict) else {}
+    )
+    case_memo = _case_memo_dict(
+        analysis_dict.get("case_memo")
+        or verdict_dict.get("case_memo")
+        or hof_analysis.get("case_memo")
+    )
+    memo_len = len(str(case_memo.get("_preformatted_markdown") or memo_md or ""))
+    return {
+        "render_hof_case_full_analysis_entered": True,
+        "packet_keys": sorted(packet_dict.keys()) if packet_dict else [],
+        "hof_case_analysis_keys": sorted(hof_analysis.keys()) if hof_analysis else [],
+        "verdict_context_keys": sorted(verdict_dict.keys()) if verdict_dict else [],
+        "case_memo_present": bool(case_memo),
+        "case_memo_len": memo_len,
+        "verdict_present": bool(str(case_memo.get("verdict") or analysis_dict.get("verdict_bucket") or "").strip()),
+        "thesis_present": bool(str(case_memo.get("thesis") or analysis_dict.get("thesis") or "").strip()),
+        "sections_detected": _detect_memo_sections(case_memo),
+        "memo_md_len": len(str(memo_md or "")),
+        "memo_is_full": _hof_memo_is_full(str(memo_md or ""), summary_line),
+        "fallback_reason": fallback_reason or "",
+    }
+
+
+def _store_hof_memo_render_diag(st: Any, diag: dict[str, Any]) -> None:
+    try:
+        ss = st.session_state
+        ss["_hof_case_memo_render_diag"] = dict(diag)
+        hydrate_diag = dict(ss.get("_suite_ai_hydrate_diag") or {})
+        hydrate_diag.update(diag)
+        ss["_suite_ai_hydrate_diag"] = hydrate_diag
+    except Exception:
+        pass
+
+
+def _render_hof_memo_render_diagnostics(st: Any, diag: dict[str, Any]) -> None:
+    try:
+        from components.applied_math_context_diagnostics import applied_math_developer_mode_enabled
+
+        if not applied_math_developer_mode_enabled(st):
+            return
+    except ImportError:
+        return
+    with st.expander("HOF memo render diagnostics", expanded=False):
+        st.json(diag)
+
+
 def resolve_hof_case_analysis(
     packet: dict[str, Any],
     verdict: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Best available composed analysis dict for memo rendering."""
-    if isinstance(verdict, dict) and verdict.get("case_memo"):
-        return verdict
-    analysis = packet.get("hof_case_analysis") if isinstance(packet.get("hof_case_analysis"), dict) else {}
-    if isinstance(analysis, dict) and analysis.get("case_memo"):
+    verdict_dict = _normalize_hof_analysis(verdict if isinstance(verdict, dict) else None)
+    if _structured_case_memo_present(verdict_dict.get("case_memo")):
+        return verdict_dict
+    packet_dict = packet if isinstance(packet, dict) else {}
+    analysis = _normalize_hof_analysis(
+        packet_dict.get("hof_case_analysis") if isinstance(packet_dict.get("hof_case_analysis"), dict) else None
+    )
+    if _structured_case_memo_present(analysis.get("case_memo")):
         return analysis
     try:
-        composed = compose_hof_statistical_case(packet)
-        if composed.get("case_memo"):
+        composed = compose_hof_statistical_case(packet_dict)
+        if _structured_case_memo_present(composed.get("case_memo")):
             return composed
     except Exception:
         pass
-    if isinstance(analysis, dict) and analysis:
+    if analysis:
         return analysis
-    if isinstance(verdict, dict) and verdict:
-        return verdict
+    if verdict_dict:
+        return verdict_dict
     return {}
+
+
+def _force_compose_hof_memo(packet: dict[str, Any]) -> tuple[dict[str, Any], str, str]:
+    """Compose a full memo from packet; returns (analysis, memo_md, error)."""
+    try:
+        composed = compose_hof_statistical_case(packet)
+        memo_md = format_hof_case_memo_markdown(composed)
+        if _structured_case_memo_present(composed.get("case_memo")) or _hof_memo_is_full(memo_md):
+            return composed, memo_md, ""
+    except Exception as exc:
+        return {}, "", f"compose_failed:{type(exc).__name__}:{exc}"
+    return {}, "", "compose_empty_memo"
 
 
 def render_hof_case_full_analysis(
@@ -826,15 +978,42 @@ def render_hof_case_full_analysis(
     if not isinstance(packet, dict) or not packet:
         return False
     target = str(packet.get("target_player") or "").strip()
+    summary_line = str(
+        packet.get("hof_case_summary")
+        or (verdict or {}).get("hof_case_summary")
+        or ""
+    ).strip()
+    fallback_reason = ""
     analysis = resolve_hof_case_analysis(packet, verdict)
     memo_md = format_hof_case_memo_markdown(analysis) if analysis else ""
-    summary_line = str(packet.get("hof_case_summary") or "").strip()
-    if not memo_md or (summary_line and memo_md.strip() == summary_line):
-        try:
-            analysis = compose_hof_statistical_case(packet)
-            memo_md = format_hof_case_memo_markdown(analysis)
-        except Exception:
-            pass
+
+    if not _hof_memo_is_full(memo_md, summary_line):
+        composed, composed_md, compose_error = _force_compose_hof_memo(packet)
+        if compose_error:
+            fallback_reason = compose_error
+        if _hof_memo_is_full(composed_md, summary_line):
+            analysis = composed
+            memo_md = composed_md
+            fallback_reason = ""
+
+    if not _hof_memo_is_full(memo_md, summary_line):
+        if summary_line and memo_md.strip() == summary_line:
+            fallback_reason = fallback_reason or "memo_md_equals_hof_case_summary"
+        elif not memo_md:
+            fallback_reason = fallback_reason or "memo_md_empty_after_compose"
+        else:
+            fallback_reason = fallback_reason or "memo_md_too_short_for_full_memo"
+
+    diag = _build_hof_memo_render_diag(
+        packet=packet,
+        verdict=verdict,
+        analysis=analysis,
+        memo_md=memo_md,
+        summary_line=summary_line,
+        fallback_reason=fallback_reason,
+    )
+    _store_hof_memo_render_diag(st, diag)
+
     st.markdown(f"## Hall of Fame Case — {target or 'Analysis'}")
     subtitle = build_hof_case_subtitle(packet)
     if subtitle:
@@ -842,27 +1021,45 @@ def render_hof_case_full_analysis(
     score_label = str(packet.get("score_label") or analysis.get("score_label") or CASE_SCORE_LABEL).strip()
     if score_label:
         st.caption(score_label)
-    if memo_md and "### Verdict:" in memo_md:
+
+    if _hof_memo_is_full(memo_md, summary_line):
         st.markdown(memo_md)
+        diag["fallback_reason"] = ""
+        _store_hof_memo_render_diag(st, diag)
+        _render_hof_memo_render_diagnostics(st, diag)
         return True
-    if memo_md:
-        st.markdown(memo_md)
-        return True
+
     thesis = str(analysis.get("thesis") or "").strip()
-    if thesis:
+    if thesis and _hof_memo_is_full(thesis, summary_line):
         st.markdown(thesis)
+        diag["fallback_reason"] = ""
+        _store_hof_memo_render_diag(st, diag)
+        _render_hof_memo_render_diagnostics(st, diag)
         return True
+
     if summary_line:
         st.markdown(summary_line)
+        if not fallback_reason:
+            fallback_reason = "used_hof_case_summary_fallback"
+        diag["fallback_reason"] = fallback_reason
+        _store_hof_memo_render_diag(st, diag)
+        _render_hof_memo_render_diagnostics(st, diag)
         return True
+
+    _render_hof_memo_render_diagnostics(st, diag)
     return False
 
 
 def format_hof_case_memo_markdown(analysis: dict[str, Any]) -> str:
     """Render case memo as markdown for AMI / insight panels."""
-    memo = analysis.get("case_memo") if isinstance(analysis.get("case_memo"), dict) else {}
+    memo = _case_memo_dict(analysis.get("case_memo"))
+    if memo.get("_preformatted_markdown"):
+        return str(memo["_preformatted_markdown"]).strip()
     if not memo:
-        return str(analysis.get("recommendation") or "").strip()
+        recommendation = str(analysis.get("recommendation") or "").strip()
+        if recommendation and _hof_memo_is_full(recommendation):
+            return recommendation
+        return recommendation
     lines = [
         f"### Verdict: {memo.get('verdict', '—')}",
         "",
