@@ -574,7 +574,7 @@ def _hof_handoff_analysis_present(
     verdict: dict[str, Any] | None,
 ) -> bool:
     try:
-        from hof_case_analysis import _structured_case_memo_present
+        from hof_case_analysis import _analysis_is_current
     except ImportError:
         verdict_dict = verdict if isinstance(verdict, dict) else {}
         if verdict_dict.get("case_memo"):
@@ -583,11 +583,11 @@ def _hof_handoff_analysis_present(
         analysis = packet_dict.get("hof_case_analysis") if isinstance(packet_dict.get("hof_case_analysis"), dict) else {}
         return bool(analysis.get("case_memo"))
     verdict_dict = verdict if isinstance(verdict, dict) else {}
-    if _structured_case_memo_present(verdict_dict.get("case_memo")):
+    if _analysis_is_current(verdict_dict):
         return True
     packet_dict = packet if isinstance(packet, dict) else {}
     analysis = packet_dict.get("hof_case_analysis") if isinstance(packet_dict.get("hof_case_analysis"), dict) else {}
-    return _structured_case_memo_present(analysis.get("case_memo"))
+    return _analysis_is_current(analysis)
 
 
 def should_prefer_hof_full_memo_renderer(st: Any) -> bool:

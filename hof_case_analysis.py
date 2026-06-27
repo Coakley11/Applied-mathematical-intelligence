@@ -97,6 +97,20 @@ _HOF_DISCLAIMER = (
     "Statistical case score only — not Hall of Fame induction odds or election probability."
 )
 
+MEMO_QUALITY_VERSION = "hof_memo_quality_v2"
+
+_STAT_MILESTONE_THRESHOLDS: dict[str, tuple[tuple[int, str], ...]] = {
+    "HR": ((500, "500-HR"), (400, "400-HR"), (300, "300-HR")),
+    "H": ((3000, "3,000-hit"), (2500, "2,500-hit"), (2000, "2,000-hit")),
+    "RBI": ((1500, "1,500-RBI"), (1000, "1,000-RBI")),
+    "R": ((2000, "2,000-run"),),
+    "2B": ((600, "600-double"), (400, "400-double")),
+    "BB": ((1500, "1,500-walk"), (1000, "1,000-walk")),
+    "SB": ((500, "500-SB"), (300, "300-SB")),
+    "G": ((3000, "3,000-game"), (2000, "2,000-game")),
+    "AB": ((10000, "10,000-AB"), (8000, "8,000-AB")),
+}
+
 
 def _safe_int(value: Any, default: int = 0) -> int:
     """Coerce packet numeric fields without crashing on NaN, floats, or bad strings."""
@@ -311,6 +325,82 @@ def _interpret_filters(filters: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _format_count(val: Any) -> str:
+    return f"{_safe_int(val):,}"
+
+
+def _highest_milestone_line(stat: str, raw_val: Any) -> str | None:
+    """Return actual total with highest cleared milestone, e.g. '569 home runs, clearing the 500-HR milestone'."""
+    stat_key = str(stat or "").strip().upper()
+    if stat_key in ("BA", "OBP", "SLG", "OPS"):
+        val = _safe_float(raw_val)
+        if val <= 0:
+            return None
+        return f"{_format_stat_value(stat_key, val)} {_STAT_LABELS.get(stat_key, stat_key)}"
+    val = _safe_int(raw_val)
+    if val <= 0:
+        return None
+    label = _STAT_LABELS.get(stat_key, stat_key)
+    for threshold, milestone_name in _STAT_MILESTONE_THRESHOLDS.get(stat_key, ()):
+        if val >= threshold:
+            return f"{_format_count(val)} {label}, clearing the {milestone_name} milestone"
+    return None
+
+
+def _build_career_total_evidence(packet: dict[str, Any], *, limit: int = 5) -> list[str]:
+    """Player career totals with one highest milestone per stat — not generic milestone labels."""
+    target_stats = _target_stats(packet)
+    strengths = set(packet.get("cohort_strength_stats") or [])
+    primary_pos = _normalize_position(str(packet.get("primary_position") or "Unknown"))
+    priority = list(_stat_priority_for_position(primary_pos))
+    for stat in ("HR", "H", "2B", "RBI", "G", "R", "BB", "SB", "AB"):
+        if stat not in priority:
+            priority.append(stat)
+    lines: list[str] = []
+    used: set[str] = set()
+    for stat in priority:
+        if stat in used:
+            continue
+        raw = target_stats.get(stat)
+        if raw is None:
+            continue
+        line = _highest_milestone_line(stat, raw)
+        if not line:
+            continue
+        val_n = _safe_int(raw) if stat not in ("BA", "OBP", "SLG", "OPS") else 0
+        thresholds = _STAT_MILESTONE_THRESHOLDS.get(stat, ())
+        has_milestone = any(val_n >= threshold for threshold, _ in thresholds)
+        if has_milestone or stat in strengths:
+            lines.append(line + ".")
+            used.add(stat)
+        if len(lines) >= limit:
+            break
+    return lines
+
+
+def _fmt_position_rank_clause(stat: str, rank_info: dict[str, Any], target_stats: dict[str, Any]) -> str:
+    label = _STAT_LABELS.get(str(stat), str(stat))
+    val = rank_info.get("value") if rank_info.get("value") is not None else target_stats.get(stat)
+    rank = rank_info.get("rank")
+    peer_n = rank_info.get("of")
+    if str(stat) in ("BA", "OBP", "SLG", "OPS"):
+        val_s = _format_stat_value(str(stat), val)
+    else:
+        val_s = _format_count(val)
+    if rank and peer_n:
+        return f"{label} ({val_s}; #{rank} of {_format_count(peer_n)})"
+    return f"{label} ({val_s})"
+
+
+def _analysis_is_current(analysis: dict[str, Any] | None) -> bool:
+    if not isinstance(analysis, dict):
+        return False
+    memo = _case_memo_dict(analysis.get("case_memo"))
+    if str(memo.get("memo_quality_version") or "") != MEMO_QUALITY_VERSION:
+        return False
+    return _structured_case_memo_present(memo)
+
+
 def _normalize_bullet_key(text: str) -> str:
     return re.sub(r"\s+", " ", str(text or "").lower()).strip().rstrip(".")
 
@@ -357,12 +447,14 @@ def _stat_priority_for_position(primary_pos: str) -> tuple[str, ...]:
 
 
 def _build_strongest_evidence(packet: dict[str, Any], *, limit: int = 5) -> list[str]:
-    """Top player-specific signals — awards, milestones, and best cohort/position ranks."""
+    """Top player-specific signals — actual career totals, awards, and elite cohort ranks."""
     lines: list[str] = []
     target_stats = _target_stats(packet)
     ranks = packet.get("target_cohort_ranks") if isinstance(packet.get("target_cohort_ranks"), dict) else {}
     strengths = list(packet.get("cohort_strength_stats") or [])
-    primary_pos = _normalize_position(str(packet.get("primary_position") or "Unknown"))
+    sort_stat = str(packet.get("sort_stat") or "").strip()
+
+    lines.extend(_build_career_total_evidence(packet, limit=limit))
 
     awards = packet.get("target_awards_summary") if isinstance(packet.get("target_awards_summary"), dict) else {}
     major = _safe_int(awards.get("major_awards") or awards.get("mvp_count"))
@@ -373,26 +465,20 @@ def _build_strongest_evidence(packet: dict[str, Any], *, limit: int = 5) -> list
             line += f" ({detail})"
         lines.append(line + " — peak-value support for the case.")
 
-    for ms in packet.get("career_milestones") or []:
-        if isinstance(ms, dict) and ms.get("label"):
-            lines.append(str(ms["label"]) + ".")
-
-    priority_stats = _stat_priority_for_position(primary_pos)
+    priority_stats = _stat_priority_for_position(str(packet.get("primary_position") or "Unknown"))
     ordered = [s for s in priority_stats if s in strengths]
     ordered += [s for s in strengths if s not in ordered]
     for stat in ordered:
         info = ranks.get(stat)
-        if isinstance(info, dict) and _safe_float(info.get("percentile_top")) >= 70:
+        if not isinstance(info, dict):
+            continue
+        pct = _safe_float(info.get("percentile_top"))
+        if pct >= 75 or stat == sort_stat:
             line = _fmt_player_strength(stat, info, target_stats)
             if line:
                 lines.append(line)
         if len(lines) >= limit + 2:
             break
-
-    for note in packet.get("position_rarity_findings") or []:
-        text = str(note).strip()
-        if text:
-            lines.append(text if text.endswith(".") else text + ".")
 
     return _dedupe_lines(lines)[:limit]
 
@@ -405,10 +491,12 @@ def _build_notable_profile_lines(packet: dict[str, Any]) -> list[str]:
 def _build_position_analysis(packet: dict[str, Any], bucket: str) -> list[str]:
     """Position-relative Hall context — not just 'Primary position: 1B.'"""
     pos = _normalize_position(str(packet.get("primary_position") or "Unknown"))
+    target = str(packet.get("target_player") or "").strip() or "The target"
     if pos == "Unknown":
         return []
 
     lines: list[str] = []
+    target_stats = _target_stats(packet)
     bar = _POSITION_HOF_CONTEXT.get(pos)
     if bar:
         lines.append(bar)
@@ -424,29 +512,26 @@ def _build_position_analysis(packet: dict[str, Any], bucket: str) -> list[str]:
             continue
         pct = _safe_float(info.get("percentile_top"))
         tier = str(info.get("tier") or "")
-        label = _STAT_LABELS.get(str(stat), str(stat))
         rank_info = pos_ranks.get(stat) if isinstance(pos_ranks.get(stat), dict) else {}
-        rank = rank_info.get("rank")
-        peer_n = rank_info.get("of")
-        tag = f"{label} (#{rank} of {peer_n} {pos}s)" if rank and peer_n else label
+        clause = _fmt_position_rank_clause(str(stat), rank_info, target_stats)
         if pct >= 90 or any(x in tier.lower() for x in ("top 1", "top 5", "top 10")):
-            elite.append(tag)
+            elite.append(clause)
         elif pct >= 75 or "quartile" in tier.lower():
-            strong.append(tag)
+            strong.append(clause)
         elif pct < 50:
-            weak.append(tag)
+            weak.append(clause)
 
     offense_first = pos in ("1B", "DH", "OF", "3B")
     if elite:
         lines.append(
-            f"Relative to other {pos}s in this dataset, the profile ranks near the top in "
+            f"Relative to other {pos}s in this dataset, {target} ranks near the top in "
             f"{', '.join(elite[:4])} — above typical Hall-caliber offensive production at the position."
             if offense_first
-            else f"Relative to other {pos}s, near the top in {', '.join(elite[:4])}."
+            else f"Relative to other {pos}s, {target} ranks near the top in {', '.join(elite[:4])}."
         )
     elif strong:
         lines.append(
-            f"Solid {pos} offensive standing: top-quartile among position peers in {', '.join(strong[:3])}."
+            f"Solid {pos} offensive standing: {target} is top-quartile among position peers in {', '.join(strong[:3])}."
         )
     elif bucket in ("Borderline", "Weak") and offense_first:
         lines.append(
@@ -464,12 +549,12 @@ def _build_position_analysis(packet: dict[str, Any], bucket: str) -> list[str]:
     hof_names = _player_names(hof_peers, limit=2)
     if hof_names and elite:
         lines.append(
-            f"Inducted {pos} peers in this dataset (e.g. {', '.join(hof_names)}) show a comparable or stronger "
-            "offensive tier — the target must be weighed against that positional bar."
+            f"Same-position Hall of Fame peers in this dataset (e.g. {', '.join(hof_names)}) show a comparable or "
+            "stronger offensive tier — the target must be weighed against that positional bar."
         )
     elif hof_names and bucket in ("Strong", "Very Strong", "Solid"):
         lines.append(
-            f"Among inducted {pos}s here ({', '.join(hof_names)}), the target's best categories "
+            f"Among same-position inducted {pos}s here ({', '.join(hof_names)}), the target's best categories "
             "hold up statistically — supporting the verdict."
         )
 
@@ -504,7 +589,7 @@ def _comparable_shared_reason(target_stats: dict[str, Any], comp: dict[str, Any]
 
 
 def _build_comparable_notes(packet: dict[str, Any]) -> list[str]:
-    """Explain why comparables matter — broader statistical comps, not position peers by default."""
+    """Comparison notes — separate same-position peers from broader statistical comps."""
     comparables = packet.get("comparable_players") if isinstance(packet.get("comparable_players"), dict) else {}
     target_stats = _target_stats(packet)
     sort_stat = str(packet.get("sort_stat") or "HR")
@@ -512,11 +597,25 @@ def _build_comparable_notes(packet: dict[str, Any]) -> list[str]:
     notes: list[str] = []
 
     hof_rows = comparables.get("hall_of_famers") or []
-    if hof_rows:
-        notes.append("**Broader Hall of Fame statistical comps**")
-        for comp in hof_rows[:3]:
-            if not isinstance(comp, dict):
+    hof_same = _filter_position_peers(hof_rows, target_pos) if target_pos != "Unknown" else []
+    hof_same_names = {str(r.get("fullName") or r.get("player") or "").strip() for r in hof_same if isinstance(r, dict)}
+    hof_broader = [
+        r for r in hof_rows if isinstance(r, dict) and str(r.get("fullName") or r.get("player") or "").strip() not in hof_same_names
+    ]
+
+    if hof_same:
+        notes.append("**Same-position Hall of Fame peers**")
+        for comp in hof_same[:3]:
+            comp = {**comp, "_sort_stat": sort_stat}
+            name = str(comp.get("fullName") or comp.get("player") or "").replace("⭐ ", "").strip()
+            if not name:
                 continue
+            reason = _comparable_shared_reason(target_stats, comp)
+            notes.append(f"- **{name}** — {reason}; inducted in this dataset.")
+
+    if hof_broader:
+        notes.append("**Broader Hall of Fame statistical comps**")
+        for comp in hof_broader[:3]:
             comp = {**comp, "_sort_stat": sort_stat}
             name = str(comp.get("fullName") or comp.get("player") or "").replace("⭐ ", "").strip()
             if not name:
@@ -524,16 +623,13 @@ def _build_comparable_notes(packet: dict[str, Any]) -> list[str]:
             reason = _comparable_shared_reason(target_stats, comp)
             comp_pos = _comparable_primary_position(comp)
             pos_note = ""
-            if target_pos != "Unknown" and comp_pos != "Unknown":
-                if comp_pos == target_pos:
-                    pos_note = f"; same primary position ({comp_pos})"
-                else:
-                    pos_note = f"; broader comp at {comp_pos}, not a {target_pos} positional peer"
+            if target_pos != "Unknown" and comp_pos != "Unknown" and comp_pos != target_pos:
+                pos_note = f"; {comp_pos} profile — broader comp, not a {target_pos} positional peer"
             notes.append(f"- **{name}** — {reason}{pos_note}; inducted in this cohort.")
 
     non_rows = comparables.get("non_hall_of_famers") or []
     if non_rows:
-        notes.append("**Broader non-inducted statistical comps**")
+        notes.append("**Not-yet-inducted / non-HOF-flagged comps in this dataset**")
         for comp in non_rows[:3]:
             if not isinstance(comp, dict):
                 continue
@@ -547,7 +643,8 @@ def _build_comparable_notes(packet: dict[str, Any]) -> list[str]:
             if target_pos != "Unknown" and comp_pos != "Unknown" and comp_pos != target_pos:
                 pos_note = f"; {comp_pos} profile — broader comp, not a {target_pos} peer"
             notes.append(
-                f"- **{name}** — {reason}{pos_note}; similar production without induction — a cautionary comp."
+                f"- **{name}** — {reason}{pos_note}; not yet inducted / non-HOF-flagged in this dataset "
+                "(may reflect active, recent, or not-yet-eligible career)."
             )
 
     return notes
@@ -665,7 +762,7 @@ def _build_final_takeaway(
     sort_stat: str,
     strengths: list[str],
     weaknesses: list[str],
-    strongest: list[str],
+    career_totals: list[str],
     weakest: list[str],
 ) -> str:
     """Explain why the verdict follows from the evidence."""
@@ -677,28 +774,35 @@ def _build_final_takeaway(
     elif bucket == "Solid":
         lead = f"**{bucket}** because {target} shows clear {strength_theme}{pos_clause}"
     elif bucket == "Borderline":
-        lead = f"**{bucket}** because {target} has real value in {strength_theme}{pos_clause}, but the case is mixed"
+        lead = (
+            f"**{bucket}** because {target} has real value in {strength_theme}{pos_clause}, "
+            "but the case is mixed"
+        )
     else:
-        lead = f"**{bucket}** because {target} does not separate clearly on {strength_theme or 'core categories'}{pos_clause}"
+        lead = (
+            f"**{bucket}** because {target} does not separate clearly on "
+            f"{strength_theme or 'core categories'}{pos_clause}"
+        )
 
-    extras: list[str] = []
-    if strongest:
-        extras.append(strongest[0].rstrip("."))
+    caution_parts: list[str] = []
     if sort_stat and sort_stat in weaknesses and strengths:
         alt = [s for s in strengths if s != sort_stat][:3]
         if alt:
             alt_text = ", ".join(_STAT_LABELS.get(s, s) for s in alt)
-            extras.append(
+            caution_parts.append(
                 f"the caution is that {_STAT_LABELS.get(sort_stat, sort_stat)} rank is not elite in this "
                 f"{_STAT_LABELS.get(sort_stat, sort_stat)}-sorted cohort, so the case rests more on "
-                f"{alt_text} and complete offensive profile than pure power"
+                f"{alt_text}, longevity, and complete offensive profile than pure power"
             )
     elif weakest:
-        extras.append(weakest[0].rstrip("."))
+        caution_parts.append(weakest[0].rstrip("."))
 
     body = lead + "."
-    if extras:
-        body += f" {'; '.join(extras)}."
+    if career_totals:
+        totals_text = "; ".join(str(x).rstrip(".") for x in career_totals[:3])
+        body += f" Key totals: {totals_text}."
+    if caution_parts:
+        body += f" {'; '.join(caution_parts)}."
     body += f" Verdict reflects the {CASE_SCORE_LABEL} — not induction odds."
     return body
 
@@ -866,6 +970,8 @@ def compose_hof_statistical_case(packet: dict[str, Any]) -> dict[str, Any]:
         thesis_parts.append(f"evaluated against {primary_pos} offensive standards")
     thesis = " — ".join(thesis_parts) + "."
 
+    career_totals = _build_career_total_evidence(packet, limit=4)
+
     takeaway = _build_final_takeaway(
         target=target,
         bucket=bucket,
@@ -873,13 +979,13 @@ def compose_hof_statistical_case(packet: dict[str, Any]) -> dict[str, Any]:
         sort_stat=sort_stat,
         strengths=strengths,
         weaknesses=weaknesses,
-        strongest=strongest,
+        career_totals=career_totals,
         weakest=weakest,
     )
 
     case_evidence = _exclude_duplicate_bullets(
         list(signal_context.get("case_evidence") or []),
-        strongest,
+        strongest + career_totals,
     )
     cohort_context_only = list(signal_context.get("cohort_context_only") or [])
     if filter_interp.get("sort_stat_note") and sort_stat in weaknesses:
@@ -887,6 +993,7 @@ def compose_hof_statistical_case(packet: dict[str, Any]) -> dict[str, Any]:
 
     supporting = strongest[:4] + ([weakest[0]] if weakest else [])
     memo_sections = {
+        "memo_quality_version": MEMO_QUALITY_VERSION,
         "verdict": bucket,
         "thesis": thesis,
         "strongest_evidence": strongest,
@@ -1081,14 +1188,14 @@ def resolve_hof_case_analysis(
     verdict: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Best available composed analysis dict for memo rendering."""
-    verdict_dict = _normalize_hof_analysis(verdict if isinstance(verdict, dict) else None)
-    if _structured_case_memo_present(verdict_dict.get("case_memo")):
-        return verdict_dict
     packet_dict = packet if isinstance(packet, dict) else {}
+    verdict_dict = _normalize_hof_analysis(verdict if isinstance(verdict, dict) else None)
+    if _analysis_is_current(verdict_dict):
+        return verdict_dict
     analysis = _normalize_hof_analysis(
         packet_dict.get("hof_case_analysis") if isinstance(packet_dict.get("hof_case_analysis"), dict) else None
     )
-    if _structured_case_memo_present(analysis.get("case_memo")):
+    if _analysis_is_current(analysis):
         return analysis
     try:
         composed = compose_hof_statistical_case(packet_dict)
