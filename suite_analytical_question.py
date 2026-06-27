@@ -614,6 +614,80 @@ def should_prefer_hof_full_memo_renderer(st: Any) -> bool:
     )
 
 
+def _merge_hof_render_diag(st: Any, **updates: Any) -> None:
+    ss = st.session_state
+    diag = dict(ss.get("_suite_ai_hydrate_diag") or {})
+    diag.update(updates)
+    ss["_suite_ai_hydrate_diag"] = diag
+
+
+def ensure_hof_handoff_session_staged(st: Any) -> bool:
+    """Stage HOF packet/verdict in session from blob when URL handoff flags are set."""
+    ss = st.session_state
+    if isinstance(ss.get("_hof_case_packet"), dict) and ss.get("_hof_case_packet"):
+        if not ss.get("_suite_hof_case"):
+            ss["_suite_hof_case"] = True
+        return True
+
+    def _qp(name: str) -> str:
+        try:
+            raw = st.query_params.get(name)
+        except Exception:
+            return ""
+        if raw is None:
+            return ""
+        if isinstance(raw, list):
+            return str(raw[0] or "").strip()
+        return str(raw).strip()
+
+    qid = str(ss.get("_suite_ai_question_id") or "").strip()
+    if not qid:
+        try:
+            from suite_resume_launch import resolve_url_suite_ai_question_id
+
+            qid = resolve_url_suite_ai_question_id(st)
+        except Exception:
+            qid = ""
+    if not qid:
+        return False
+
+    payload = load_analytical_question_payload(qid)
+    packet = payload.get("hof_case_packet")
+    if not isinstance(packet, dict):
+        ctx = payload.get("context") if isinstance(payload.get("context"), dict) else {}
+        packet = ctx.get("hof_case_packet") if isinstance(ctx.get("hof_case_packet"), dict) else None
+    if not isinstance(packet, dict) or not packet:
+        return False
+
+    verdict = payload.get("verdict_context") if isinstance(payload.get("verdict_context"), dict) else {}
+    enriched = _enrich_hof_packet_for_full_memo(packet, verdict or None)
+    ss["_hof_case_packet"] = enriched
+    ss["_suite_hof_case"] = True
+    ss["_suite_ai_area"] = "hall_of_fame_case"
+    ss["_suite_ai_page"] = "Solve a Problem"
+    ss["view_mode"] = "Solve a Problem"
+    if verdict:
+        ss["_hof_case_verdict"] = copy.deepcopy(verdict)
+    target = str(
+        payload.get("target_player")
+        or enriched.get("target_player")
+        or _qp("suite_hof_target")
+        or ""
+    ).strip()
+    if target:
+        ss["_suite_hof_target"] = target
+    ss["_suite_ai_selected_renderer"] = "render_hof_case_full_analysis"
+    return True
+
+
+def should_render_hof_full_memo_content(st: Any) -> bool:
+    """True when Solve a Problem should render the full HOF memo body."""
+    ss = st.session_state
+    if str(ss.get("_suite_ai_selected_renderer") or "").strip() == "render_hof_case_full_analysis":
+        return True
+    return should_prefer_hof_full_memo_renderer(st)
+
+
 def hydrate_applied_intelligence_session(st: Any, *, metrics: dict[str, Any] | None = None) -> None:
     """Map URL params / resume metrics into Applied Intelligence session keys."""
     ss = st.session_state
@@ -906,9 +980,15 @@ def render_applied_intelligence_landing_diagnostics(
 def render_hof_case_solve_problem_handoff(st: Any) -> bool:
     """Render Hall of Fame case analysis when hydrated from Baseball. Returns True if content shown."""
     ss = st.session_state
+    ensure_hof_handoff_session_staged(st)
     packet = ss.get("_hof_case_packet")
     if not ss.get("_suite_hof_case"):
         if not (isinstance(packet, dict) and packet):
+            _merge_hof_render_diag(
+                st,
+                render_hof_case_full_analysis_entered=False,
+                render_dispatch_reason="hof_handoff_missing_flags_and_packet",
+            )
             return False
     verdict = ss.get("_hof_case_verdict")
     dev_mode = _developer_tools_enabled(st)
@@ -917,6 +997,11 @@ def render_hof_case_solve_problem_handoff(st: Any) -> bool:
         render_applied_intelligence_landing_diagnostics(st, developer_mode=True)
 
     if not isinstance(packet, dict) or not packet:
+        _merge_hof_render_diag(
+            st,
+            render_hof_case_full_analysis_entered=False,
+            render_dispatch_reason="hof_case_packet_missing_in_session",
+        )
         st.error(
             "Hall of Fame case handoff failed: no `hof_case_packet` in session."
             + (" Enable Developer Mode for hydration diagnostics." if not dev_mode else "")
@@ -929,12 +1014,34 @@ def render_hof_case_solve_problem_handoff(st: Any) -> bool:
     )
     ss["_hof_case_packet"] = packet
     ss["_suite_ai_selected_renderer"] = "render_hof_case_full_analysis"
+    _merge_hof_render_diag(
+        st,
+        selected_renderer="render_hof_case_full_analysis",
+        render_dispatch_reason="invoking_render_hof_case_full_analysis",
+    )
 
     try:
         from hof_case_analysis import render_hof_case_full_analysis
 
-        return render_hof_case_full_analysis(st, packet, verdict=verdict if isinstance(verdict, dict) else None)
-    except ImportError:
+        ok = render_hof_case_full_analysis(st, packet, verdict=verdict if isinstance(verdict, dict) else None)
+        memo_diag = dict(ss.get("_hof_case_memo_render_diag") or {})
+        _merge_hof_render_diag(
+            st,
+            render_hof_case_full_analysis_entered=bool(memo_diag.get("render_hof_case_full_analysis_entered")),
+            case_memo_present=bool(memo_diag.get("case_memo_present")),
+            case_memo_len=int(memo_diag.get("case_memo_len") or 0),
+            memo_is_full=bool(memo_diag.get("memo_is_full")),
+            fallback_reason=str(memo_diag.get("fallback_reason") or ""),
+        )
+        return ok
+    except Exception as exc:
+        _merge_hof_render_diag(
+            st,
+            render_hof_case_full_analysis_entered=False,
+            render_dispatch_reason=f"render_hof_case_full_analysis_failed:{type(exc).__name__}:{exc}",
+        )
+        if dev_mode:
+            st.exception(exc)
         target = str(ss.get("_suite_hof_target") or packet.get("target_player") or "").strip()
         st.markdown(f"## Hall of Fame Case — {target}" if target else "## Hall of Fame Case Analysis")
         summary = str(packet.get("hof_case_summary") or "").strip()
@@ -946,6 +1053,9 @@ def render_hof_case_solve_problem_handoff(st: Any) -> bool:
 
 def render_applied_intelligence_solve_problem_content(st: Any) -> bool:
     """Primary AMI Solve-a-Problem renderer — prefers full HOF memo over compact insight cards."""
+    ensure_hof_handoff_session_staged(st)
+    if should_render_hof_full_memo_content(st):
+        return render_hof_case_solve_problem_handoff(st)
     return render_applied_intelligence_handoff_page(st)
 
 
@@ -970,13 +1080,15 @@ def render_applied_intelligence_handoff_page(st: Any) -> bool:
             return str(raw[0] or "").strip()
         return str(raw).strip()
 
-    if url_qid and _qp("suite_hof_case") == "1" and not ss.get("_suite_hof_case"):
-        try:
-            hydrate_applied_intelligence_session(st)
-        except Exception:
-            pass
+    if url_qid and _qp("suite_hof_case") == "1":
+        if not ss.get("_hof_case_packet") or not ss.get("_suite_hof_case"):
+            try:
+                hydrate_applied_intelligence_session(st)
+            except Exception:
+                pass
+        ensure_hof_handoff_session_staged(st)
 
-    if should_prefer_hof_full_memo_renderer(st):
+    if should_render_hof_full_memo_content(st):
         return render_hof_case_solve_problem_handoff(st)
 
     dev_mode = _developer_tools_enabled(st)
