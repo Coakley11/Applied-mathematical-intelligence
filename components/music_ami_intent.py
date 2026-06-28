@@ -40,11 +40,23 @@ _PRACTICE_INTENT_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("difficulty", ("too difficult", "too hard", "too easy", "my level", "difficult for", "within my level")),
     ("backing_track", ("backing track", "groove", "play along")),
     ("lyrics_cues", ("lyrics", "lyric", "when do i come in", "memorize", "cue")),
+    (
+        "practice_log_analysis",
+        (
+            "analyze my practice",
+            "practice history",
+            "practice log",
+            "patterns",
+            "repeated challenge",
+            "next session plan",
+        ),
+    ),
 )
 
 _SOLVER_INTENTS = frozenset(
     {
         "practice_plan",
+        "practice_log_analysis",
         "chord_transition",
         "section_focus",
         "tempo_key",
@@ -75,6 +87,14 @@ def detect_music_send_intent(question: str, coach_page: str = "", ctx: dict | No
 
     bag = dict(ctx or {})
     hint = str(bag.get("routing_hint") or bag.get("intent") or bag.get("problem_type_hint") or "").strip().lower()
+    if str(bag.get("handoff_kind") or "") == "practice_log_analysis":
+        return "practice_log_analysis"
+    if str(bag.get("display_category") or "") == "analysis_handoff" and str(
+        bag.get("user_request") or ""
+    ) == "analyze_practice":
+        return "practice_log_analysis"
+    if hint in {"practice_history_analysis", "practice_log_analysis"}:
+        return "practice_log_analysis"
     if hint in _SOLVER_INTENTS:
         return hint
 

@@ -1460,6 +1460,63 @@ def store_applied_math_insight(
     return iid
 
 
+def persist_suite_return_insight(
+    st: Any,
+    *,
+    question: str,
+    source_app: str,
+    source_page: str = "",
+    context: dict[str, Any] | None = None,
+    route: Any | None = None,
+    result: Any | None = None,
+) -> dict[str, Any]:
+    """Persist solver output as a return insight after ``render_suite_solver_answer``."""
+    ctx = dict(context or {})
+    qid = ""
+    try:
+        qid = str(st.session_state.get("_suite_ai_question_id") or ctx.get("question_id") or "").strip()
+    except Exception:
+        qid = str(ctx.get("question_id") or "").strip()
+    source_state: dict[str, Any] | None = None
+    if qid:
+        try:
+            from suite_analytical_question import load_analytical_question_source_state
+
+            loaded = load_analytical_question_source_state(qid)
+            if isinstance(loaded, dict) and loaded:
+                source_state = loaded
+        except Exception:
+            pass
+    try:
+        insight = build_return_insight_payload(
+            question=question,
+            source_app=source_app,
+            source_page=source_page,
+            question_id=qid,
+            route=route,
+            result=result,
+            context=ctx,
+            resume_key=str(ctx.get("resume_key") or "").strip(),
+        )
+        store_applied_math_insight(
+            insight,
+            return_context=ctx,
+            source_state=source_state,
+            st=st,
+        )
+        trace = dict(getattr(st, "session_state", {}).get("_ami_insight_store_trace") or {})
+        return trace
+    except Exception as exc:
+        log.warning("persist_suite_return_insight failed: %s", exc)
+        return {"store_exception": str(exc), "store_blob_written_success": False}
+
+
+def prepare_ami_insight_store_context(st: Any) -> dict[str, Any]:
+    """Compatibility hook for import smoke tests and future store prep."""
+    _ = st
+    return {}
+
+
 def load_applied_math_insight(insight_id: str, *, source_app: str = "") -> dict[str, Any]:
     """Load stored insight by id, preferring blobs that include usable source_state."""
     iid = str(insight_id or "").strip()

@@ -24,6 +24,7 @@ AMI_SIDEBAR_DEPLOY_LABEL = "Applied Math question sender live"
 AMI_SIDEBAR_DEPLOY_VERSION = "2026-06-08-return-insight-restore-v12"
 _CTX_JSON_SUBTITLE_LIMIT = 8000
 _CONTEXT_ITEM_TYPE = "analytical_question_context"
+PRACTICE_LOG_ANALYSIS_TITLE = "Music Practice Log Analysis"
 ANALYTICAL_QUESTION_CONTINUE_PRIORITY = 64
 ANALYTICAL_QUESTION_BUTTON_LABEL = "Continue in Applied Mathematics →"
 _SEND_COOLDOWN_SECONDS = 120
@@ -147,6 +148,13 @@ _PUBLIC_CONTEXT_KEYS = (
     "ami_guidance",
     "projection",
     "watchlist",
+    "practice_log_summary",
+    "recent_practice_history",
+    "practice_log_ami_payload",
+    "user_request",
+    "intent",
+    "handoff_kind",
+    "display_category",
 )
 
 _CONTEXT_LABELS = {
@@ -215,12 +223,26 @@ def source_app_label(source_app: str) -> str:
     return _SOURCE_LABELS.get(key, key.replace("_", " ").title())
 
 
+def is_practice_log_analysis_context(context: dict[str, Any] | None) -> bool:
+    ctx = dict(context or {})
+    return (
+        str(ctx.get("user_request") or "") == "analyze_practice"
+        or str(ctx.get("intent") or "") in {"practice_history_analysis", "practice_log_analysis"}
+        or str(ctx.get("display_category") or "") == "analysis_handoff"
+        or str(ctx.get("handoff_kind") or "") == "practice_log_analysis"
+        or str(ctx.get("routing_hint") or "") == "practice_history_analysis"
+    )
+
+
 def source_question_card_title(
     source_app: str,
     context: dict[str, Any] | None = None,
 ) -> str:
     """Normalized Continue / activity title for cross-app questions."""
-    app = normalize_source_app_id(source_app, context)
+    ctx = dict(context or {})
+    app = normalize_source_app_id(source_app, ctx)
+    if app == "music" and is_practice_log_analysis_context(ctx):
+        return PRACTICE_LOG_ANALYSIS_TITLE
     if app == "music":
         return "Music Coach question from Music"
     label = _SOURCE_LABELS.get(app, app.replace("_", " ").title())
@@ -1145,6 +1167,12 @@ def analytical_question_continue_copy(payload: dict[str, Any]) -> tuple[str, str
     ctx = payload.get("context") if isinstance(payload.get("context"), dict) else {}
     app = normalize_source_app_id(str(payload.get("source_app") or ""), ctx)
     question = str(payload.get("question") or "").strip()
+    if app == "music" and is_practice_log_analysis_context(ctx):
+        summary = ctx.get("practice_log_summary") if isinstance(ctx.get("practice_log_summary"), dict) else {}
+        count = int(summary.get("session_count") or 0)
+        mins = int(summary.get("total_minutes") or 0)
+        subtitle = f"{count} session(s), {mins} min logged — review patterns and next focus"
+        return (PRACTICE_LOG_ANALYSIS_TITLE, subtitle, "Continue Practice Log Analysis →")
     title = source_question_card_title(app, ctx)
     if app == "music":
         return (title, question, "Continue with Music Coach →")

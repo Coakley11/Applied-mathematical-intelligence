@@ -21,9 +21,13 @@ class TestSuiteAnalyticalQuestionImports(unittest.TestCase):
         self.assertTrue(callable(mod.persist_question_context_blob))
 
     def test_prepare_ami_insight_store_context_imports_persist_helper(self) -> None:
-        from applied_math_return_insight import prepare_ami_insight_store_context
+        from applied_math_return_insight import (
+            persist_suite_return_insight,
+            prepare_ami_insight_store_context,
+        )
 
         self.assertTrue(callable(prepare_ami_insight_store_context))
+        self.assertTrue(callable(persist_suite_return_insight))
 
     def test_persist_question_context_blob_uses_remember_saved_item_only(self) -> None:
         from suite_analytical_question import persist_question_context_blob

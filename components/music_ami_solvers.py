@@ -7,6 +7,7 @@ from typing import Any
 from components.applied_math_problem_router import (
     MUSIC_BACKING_TRACK,
     MUSIC_CHORD_TRANSITION,
+    MUSIC_PRACTICE_LOG_ANALYSIS,
     MUSIC_PRACTICE_PLAN,
     MUSIC_SECTION_FOCUS,
     MUSIC_SKILL_TECHNIQUE,
@@ -289,6 +290,93 @@ def _backing_track_result(question: str, ctx: dict[str, Any]) -> Any:
     )
 
 
+def _practice_log_analysis_result(question: str, ctx: dict[str, Any]) -> Any:
+    summary = ctx.get("practice_log_summary") if isinstance(ctx.get("practice_log_summary"), dict) else {}
+    payload = ctx.get("practice_log_ami_payload") if isinstance(ctx.get("practice_log_ami_payload"), dict) else {}
+    if not summary and isinstance(payload.get("practice_log_summary"), dict):
+        summary = dict(payload.get("practice_log_summary") or {})
+    sessions = (
+        ctx.get("recent_practice_history")
+        or ctx.get("recent_sessions")
+        or payload.get("recent_sessions")
+        or []
+    )
+    if not isinstance(sessions, list):
+        sessions = []
+
+    count = int(summary.get("session_count") or len(sessions) or 0)
+    total_mins = int(summary.get("total_minutes") or 0)
+    top_song = str(summary.get("top_song") or "").strip()
+    top_focus = str(summary.get("top_focus") or summary.get("suggested_next_focus") or "").strip()
+    repeated = str(summary.get("repeated_challenge") or "").strip()
+    next_focus = str(summary.get("suggested_next_focus") or top_focus or "timing/rhythm").strip()
+
+    lines = ["**Practice log analysis**"]
+    if count:
+        lines.append(f"- **{count}** sessions in view ({total_mins} min total)")
+    else:
+        lines.append("- No logged sessions were included in this handoff.")
+    if top_song:
+        lines.append(f"- Most practiced song: **{top_song}**")
+    if top_focus:
+        lines.append(f"- Top focus area: **{top_focus}**")
+    if repeated:
+        lines.append(f"- Repeated challenge: **{repeated}**")
+
+    if sessions:
+        lines.append("\n**Recent sessions**")
+        for row in sessions[:6]:
+            if not isinstance(row, dict):
+                continue
+            song = str(row.get("active_song") or row.get("song") or "Untitled")
+            mins = row.get("duration_minutes") or row.get("minutes") or 0
+            focus = str(row.get("focus_area") or row.get("focus") or "").strip()
+            hard = str(row.get("what_was_hard") or "").strip()
+            suffix = f" — hard: {hard}" if hard else ""
+            lines.append(f"- {song} ({mins} min{f', {focus}' if focus else ''}){suffix}")
+
+    plan_mins = 30
+    lines.append(f"\n**Suggested next {plan_mins}-minute session**")
+    lines.append(f"1. Warmup (5 min): groove and tone in **{next_focus}**")
+    lines.append(
+        f"2. Focus block (15 min): work **{repeated or next_focus}**"
+        + (f" on **{top_song}**" if top_song else "")
+    )
+    lines.append("3. Run-through (10 min): perform the section at target tempo")
+
+    short = "\n".join(lines)
+    intent = (
+        "You're asking for an analysis of your recent practice history, patterns, "
+        "repeated challenges, and a concrete next-session plan."
+    )
+    data_used = [
+        f"Sessions analyzed: **{count}**",
+        f"Total minutes: **{total_mins}**" if total_mins else "",
+        f"Top focus: **{top_focus}**" if top_focus else "",
+    ]
+    result = _music_coach_result(
+        question=question,
+        problem_type="Music Practice Log Analysis",
+        math_idea="Pattern synthesis over logged sessions — frequency, focus areas, and friction points.",
+        variables=f"session_count={count}; total_minutes={total_mins}",
+        data_used=[line for line in data_used if line],
+        calculation="Aggregate practice log summary + recent session rows.",
+        result=short,
+        interpretation=short,
+        assumptions=["Practice log entries in the handoff reflect your recent logged sessions."],
+        sensitivity_notes="Add more logged sessions for stronger pattern detection.",
+        problem_type_id=MUSIC_PRACTICE_LOG_ANALYSIS,
+        computed={"session_count": count, "total_minutes": total_mins},
+        conclusion="Practice history analysis",
+        confidence_pct=88 if count else 52,
+        short_answer="Review your practice patterns and use the next-session plan below.",
+        model_note="Structured practice log handoff",
+    )
+    result.intent_restatement = intent
+    result.model_name = "Music Practice Log Analysis"
+    return result
+
+
 def solve_music_question(
     route: ProblemRoute,
     question: str,
@@ -306,6 +394,8 @@ def solve_music_question(
         p in low for p in ("chord change", "chord changes", "chord transition", "transitions")
     )
 
+    if pid == MUSIC_PRACTICE_LOG_ANALYSIS:
+        return _practice_log_analysis_result(question, ctx)
     if pid == MUSIC_PRACTICE_PLAN:
         return _practice_plan_result(question, ctx, chord_focus=chord_focus)
     if pid == MUSIC_CHORD_TRANSITION:

@@ -66,10 +66,12 @@ MUSIC_CHORD_TRANSITION = "music_chord_transition"
 MUSIC_TEMPO_KEY = "music_tempo_key"
 MUSIC_BACKING_TRACK = "music_backing_track"
 MUSIC_SKILL_TECHNIQUE = "music_skill_technique"
+MUSIC_PRACTICE_LOG_ANALYSIS = "music_practice_log_analysis"
 MUSIC_GENERIC = "music_generic"
 
 _MUSIC_INTENT_TO_PID: dict[str, str] = {
     "practice_plan": MUSIC_PRACTICE_PLAN,
+    "practice_log_analysis": MUSIC_PRACTICE_LOG_ANALYSIS,
     "chord_transition": MUSIC_CHORD_TRANSITION,
     "section_focus": MUSIC_SECTION_FOCUS,
     "tempo_key": MUSIC_TEMPO_KEY,
@@ -85,6 +87,7 @@ _MUSIC_PID_LABELS: dict[str, str] = {
     MUSIC_TEMPO_KEY: "Music tempo & key",
     MUSIC_BACKING_TRACK: "Music backing track practice",
     MUSIC_SKILL_TECHNIQUE: "Music technique & readiness",
+    MUSIC_PRACTICE_LOG_ANALYSIS: "Music Practice Log Analysis",
     MUSIC_GENERIC: "Music practice coaching",
 }
 
@@ -129,6 +132,11 @@ MODEL_ID_TO_ROUTE: dict[str, tuple[str, str, tuple[str, ...]]] = {
     MUSIC_TEMPO_KEY: ("Music tempo & key", "music", ("display_key", "bpm")),
     MUSIC_BACKING_TRACK: ("Music backing track practice", "music", ("practice_focus_section",)),
     MUSIC_SKILL_TECHNIQUE: ("Music technique coaching", "music", ("instrument", "level")),
+    MUSIC_PRACTICE_LOG_ANALYSIS: (
+        "Music Practice Log Analysis",
+        "music",
+        ("practice_log_summary", "recent_practice_history", "question"),
+    ),
     MUSIC_GENERIC: ("Music practice coaching", "music", ("question",)),
     GENERIC_INTERACTIVE: ("Interactive partial model", "unknown", ("question",)),
 }
@@ -305,6 +313,44 @@ def _route_aligns(domain: ProblemRoute, interp: ProblemInterpretation) -> bool:
 
 def _route_music(question: str, ctx: dict[str, Any]) -> ProblemRoute:
     from components.music_ami_intent import detect_music_send_intent, minutes_from_question
+
+    try:
+        from suite_analytical_question import is_practice_log_analysis_context
+    except ImportError:
+        is_practice_log_analysis_context = lambda _ctx: False  # type: ignore[misc,assignment]
+
+    if is_practice_log_analysis_context(ctx):
+        summary = ctx.get("practice_log_summary") if isinstance(ctx.get("practice_log_summary"), dict) else {}
+        payload = ctx.get("practice_log_ami_payload") if isinstance(ctx.get("practice_log_ami_payload"), dict) else {}
+        if not summary and isinstance(payload.get("practice_log_summary"), dict):
+            summary = dict(payload.get("practice_log_summary") or {})
+        sessions = ctx.get("recent_practice_history") or ctx.get("recent_sessions") or payload.get("recent_sessions") or []
+        count = int(summary.get("session_count") or (len(sessions) if isinstance(sessions, list) else 0) or 0)
+        restatement = (
+            "You're asking for an **analysis of your recent practice history**, including patterns, "
+            "repeated challenges, and a concrete next-session plan."
+        )
+        if count:
+            restatement += f" ({count} logged session(s) in view.)"
+        avail, miss = _audit_fields(
+            ctx,
+            ("practice_log_summary", "recent_practice_history", "question"),
+        )
+        return ProblemRoute(
+            problem_type_id=MUSIC_PRACTICE_LOG_ANALYSIS,
+            problem_type="Music Practice Log Analysis",
+            confidence=0.95,
+            source_app="music",
+            required_fields=["question"],
+            available_fields=avail,
+            missing_fields=miss,
+            intent_restatement=restatement,
+            math_purpose="practice_history_analysis",
+            purpose_label="Practice log analysis",
+            model_name="Music Practice Log Analysis",
+            model_rationale="Structured practice-history handoff from Music Practice Log.",
+            solvability="approximate" if miss else "exact",
+        )
 
     coach_page = str(ctx.get("coach_page") or ctx.get("source_page") or "").strip().lower()
     intent = detect_music_send_intent(question, coach_page, ctx)

@@ -719,6 +719,7 @@ def render_coach_answer(
     question: str = "",
     source_app: str = "",
     source_page: str = "",
+    context: dict[str, Any] | None = None,
 ) -> bool:
     """Card-based learning layout — question → answer → math → try it → sensitivity."""
     q = (question or result.question or "").strip()
@@ -740,16 +741,25 @@ def render_coach_answer(
     conf_lbl = result.confidence_label or (f"{conf_pct}%" if conf_pct is not None else "")
 
     # 1 — Question card
+    ctx = dict(context or {})
     with st.container(border=True):
         st.markdown("##### Your question")
         if source_app:
             try:
-                from suite_analytical_question import source_question_card_title
+                from suite_analytical_question import (
+                    PRACTICE_LOG_ANALYSIS_TITLE,
+                    is_practice_log_analysis_context,
+                    source_question_card_title,
+                )
 
-                src = source_question_card_title(source_app)
+                if is_practice_log_analysis_context(ctx):
+                    st.caption(PRACTICE_LOG_ANALYSIS_TITLE)
+                else:
+                    src = source_question_card_title(source_app, ctx)
+                    st.caption(src + (f" · {source_page}" if source_page else ""))
             except Exception:
                 src = str(source_app or "").strip()
-            st.caption(src + (f" · {source_page}" if source_page else ""))
+                st.caption(src + (f" · {source_page}" if source_page else ""))
         if q:
             st.markdown(f'*"{q}"*')
         if intent_txt:
@@ -863,6 +873,7 @@ def render_solver_sections(
     question: str = "",
     source_app: str = "",
     source_page: str = "",
+    context: dict[str, Any] | None = None,
 ) -> None:
     render_coach_answer(
         st,
@@ -871,6 +882,7 @@ def render_solver_sections(
         question=question,
         source_app=source_app,
         source_page=source_page,
+        context=context,
     )
 
 
@@ -1484,16 +1496,21 @@ def render_suite_solver_answer(
     ctx = dict(context or {})
     app_key = str(source_app or ctx.get("source_app") or "").strip().lower()
     if app_key == "music":
-        canonical = _load_canonical_music_insight(st, ctx)
-        if canonical and str(canonical.get("conclusion") or "").strip():
-            return _render_canonical_music_answer(
-                st,
-                question=question,
-                source_app=source_app,
-                source_page=source_page,
-                context=ctx,
-                canonical=canonical,
-            )
+        try:
+            from suite_analytical_question import is_practice_log_analysis_context
+        except ImportError:
+            is_practice_log_analysis_context = lambda _ctx: False  # type: ignore[misc,assignment]
+        if not is_practice_log_analysis_context(ctx):
+            canonical = _load_canonical_music_insight(st, ctx)
+            if canonical and str(canonical.get("conclusion") or "").strip():
+                return _render_canonical_music_answer(
+                    st,
+                    question=question,
+                    source_app=source_app,
+                    source_page=source_page,
+                    context=ctx,
+                    canonical=canonical,
+                )
     if app_key == "investment":
         canonical = _load_canonical_instant_insight(st, ctx, source_app="investment")
         if canonical and str(canonical.get("conclusion") or "").strip():
@@ -1580,6 +1597,7 @@ def render_suite_solver_answer(
         question=question,
         source_app=source_app,
         source_page=source_page,
+        context=ctx,
     )
 
     from applied_math_return_insight import AMI_INSIGHT_STORE_VERSION, persist_suite_return_insight
