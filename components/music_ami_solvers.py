@@ -290,6 +290,186 @@ def _backing_track_result(question: str, ctx: dict[str, Any]) -> Any:
     )
 
 
+def _as_str_list(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [str(x).strip() for x in value if str(x).strip()]
+    if isinstance(value, str) and value.strip():
+        return [value.strip()]
+    return []
+
+
+def _summary_top(summary: dict[str, Any], *keys: str) -> str:
+    for key in keys:
+        items = _as_str_list(summary.get(key))
+        if items:
+            return items[0]
+        raw = summary.get(key)
+        if isinstance(raw, str) and raw.strip():
+            return raw.strip()
+    return ""
+
+
+def _summary_list(summary: dict[str, Any], *keys: str, limit: int = 5) -> list[str]:
+    for key in keys:
+        items = _as_str_list(summary.get(key))
+        if items:
+            return items[:limit]
+    return []
+
+
+def _session_instruments(sessions: list[dict[str, Any]]) -> list[str]:
+    from collections import Counter
+
+    counts = Counter(
+        str(row.get("instrument") or "").strip()
+        for row in sessions
+        if isinstance(row, dict) and str(row.get("instrument") or "").strip()
+    )
+    return [name for name, _ in counts.most_common(4)]
+
+
+def _session_notes(sessions: list[dict[str, Any]], *, limit: int = 4) -> list[str]:
+    notes: list[str] = []
+    for row in sessions:
+        if not isinstance(row, dict):
+            continue
+        for key in ("what_was_hard", "what_went_well", "next_step", "notes"):
+            text = str(row.get(key) or "").strip()
+            if text and text not in notes:
+                notes.append(text)
+            if len(notes) >= limit:
+                return notes
+    return notes
+
+
+def _practice_log_confidence(count: int) -> tuple[int, str]:
+    if count <= 0:
+        return 52, "Confidence is low because no logged sessions were included in this handoff."
+    if count <= 2:
+        return 68, f"Confidence is moderate because only **{count}** session(s) are logged so far."
+    if count <= 4:
+        return 78, f"Confidence is fair — **{count}** recent sessions give a useful but still limited sample."
+    return 88, f"Confidence is solid based on **{count}** logged sessions in view."
+
+
+def _practice_log_priorities(
+    *,
+    top_focus: str,
+    repeated: list[str],
+    suggested: str,
+    sessions: list[dict[str, Any]],
+    top_song: str,
+) -> list[str]:
+    priorities: list[str] = []
+    seen: set[str] = set()
+
+    def _add(line: str) -> None:
+        key = line.lower().strip()
+        if not line or key in seen:
+            return
+        seen.add(key)
+        priorities.append(line)
+
+    for challenge in repeated[:2]:
+        label = challenge[0].upper() + challenge[1:] if challenge else challenge
+        _add(f"Reduce friction on **{label}** — loop the trouble spot slowly before tempo.")
+    if top_focus:
+        focus_low = top_focus.lower()
+        if "tone" in focus_low or "sound" in focus_low:
+            _add("Keep **tone and control** as the main quality bar, not speed.")
+        elif "chord" in focus_low or "transition" in focus_low:
+            _add(f"Isolate **chord transitions** on **{top_song or 'your chart'}** in short loops.")
+        elif "rhythm" in focus_low or "timing" in focus_low or "groove" in focus_low:
+            _add("Practice with a metronome or backing track until the groove stays steady.")
+        elif "scale" in focus_low:
+            _add("Connect scale work to one musical section so it transfers to the song.")
+        else:
+            _add(f"Keep **{top_focus}** as the primary focus for the next block.")
+    if suggested and suggested.lower() not in {p.lower() for p in priorities}:
+        _add(f"Your logs suggest next emphasis: **{suggested}**.")
+    for row in sessions[:3]:
+        if not isinstance(row, dict):
+            continue
+        hard = str(row.get("what_was_hard") or "").strip()
+        song = str(row.get("active_song") or row.get("song") or "").strip()
+        if hard:
+            _add(
+                f"On **{song or 'recent material'}**, keep working **{hard}** until it feels predictable."
+            )
+        if len(priorities) >= 4:
+            break
+    if top_song and len(priorities) < 4:
+        _add(f"Anchor the next session to **{top_song}** — one section at a time, then a run-through.")
+    if not priorities:
+        priorities.append("Log one more focused session so your coach can spot clearer patterns.")
+    return priorities[:4]
+
+
+def _practice_log_session_plan(
+    *,
+    plan_mins: int,
+    top_song: str,
+    top_focus: str,
+    repeated: list[str],
+    instrument: str,
+    last_session: dict[str, Any],
+) -> list[str]:
+    focus_low = (top_focus or "").lower()
+    challenge = repeated[0] if repeated else ""
+    section = str(last_session.get("section_practiced") or last_session.get("section_name") or "").strip()
+    bpm = last_session.get("bpm")
+    weights = {
+        "warmup_tone": 5.0,
+        "slow_section": 8.0,
+        "rhythm_bpm": 7.0,
+        "run_through": 7.0,
+        "notes_next": 3.0,
+    }
+    if "tone" in focus_low or "sound" in focus_low:
+        weights["warmup_tone"] = 8.0
+        weights["slow_section"] = 7.0
+    elif "chord" in focus_low or "transition" in focus_low or challenge:
+        weights["slow_section"] = 12.0
+        weights["rhythm_bpm"] = 5.0
+    elif "rhythm" in focus_low or "timing" in focus_low or "groove" in focus_low:
+        weights["rhythm_bpm"] = 12.0
+        weights["slow_section"] = 6.0
+    elif bpm:
+        weights["rhythm_bpm"] = 10.0
+    blocks = _allocate_minutes(plan_mins, weights)
+    inst = instrument or "your instrument"
+    warmup_focus = top_focus or "long tones and easy articulation"
+    section_target = section if section and section.lower() not in {"unspecified", "whole song", ""} else (
+        challenge or top_focus or "the hardest section"
+    )
+    song_ref = top_song or str(last_session.get("active_song") or last_session.get("song") or "your song").strip()
+    bpm_note = f" at **{bpm} BPM**" if bpm else ""
+    lines = [f"**Next {plan_mins}-minute session plan**"]
+    lines.append(
+        f"- **{blocks.get('warmup_tone', 5)} min** warmup / tone on **{inst}** — {warmup_focus}."
+    )
+    lines.append(
+        f"- **{blocks.get('slow_section', 8)} min** slow section work on **{section_target}**"
+        + (f" in **{song_ref}**" if song_ref else "")
+        + "."
+    )
+    lines.append(
+        f"- **{blocks.get('rhythm_bpm', 7)} min** rhythm / tempo work"
+        + (f" on **{top_focus}**" if top_focus else "")
+        + bpm_note
+        + "."
+    )
+    lines.append(
+        f"- **{blocks.get('run_through', 7)} min** song run-through"
+        + (f" of **{song_ref}**" if song_ref else "")
+        + " at a comfortable tempo."
+    )
+    lines.append(
+        f"- **{blocks.get('notes_next', 3)} min** notes + next step — write one thing that improved and one to fix."
+    )
+    return lines
+
+
 def _practice_log_analysis_result(question: str, ctx: dict[str, Any]) -> Any:
     summary = ctx.get("practice_log_summary") if isinstance(ctx.get("practice_log_summary"), dict) else {}
     payload = ctx.get("practice_log_ami_payload") if isinstance(ctx.get("practice_log_ami_payload"), dict) else {}
@@ -303,56 +483,124 @@ def _practice_log_analysis_result(question: str, ctx: dict[str, Any]) -> Any:
     )
     if not isinstance(sessions, list):
         sessions = []
+    sessions = [row for row in sessions if isinstance(row, dict)]
+
+    last_raw = summary.get("last_session_summary")
+    last_session = dict(last_raw) if isinstance(last_raw, dict) else (sessions[0] if sessions else {})
 
     count = int(summary.get("session_count") or len(sessions) or 0)
     total_mins = int(summary.get("total_minutes") or 0)
-    top_song = str(summary.get("top_song") or "").strip()
-    top_focus = str(summary.get("top_focus") or summary.get("suggested_next_focus") or "").strip()
-    repeated = str(summary.get("repeated_challenge") or "").strip()
-    next_focus = str(summary.get("suggested_next_focus") or top_focus or "timing/rhythm").strip()
+    top_songs = _summary_list(summary, "most_practiced_songs", "top_song", limit=3)
+    if not top_songs:
+        top_songs = _as_str_list(summary.get("top_song"))
+    top_song = top_songs[0] if top_songs else ""
+    top_focuses = _summary_list(summary, "most_common_focus_areas", "top_focus", "suggested_next_focus", limit=3)
+    top_focus = top_focuses[0] if top_focuses else _summary_top(summary, "top_focus", "suggested_next_focus")
+    repeated = _summary_list(summary, "repeated_challenges", "repeated_challenge", limit=4)
+    if not repeated:
+        repeated = _as_str_list(summary.get("repeated_challenge"))
+    suggested = _summary_top(summary, "suggested_next_focus", "top_focus")
+    instruments = _session_instruments(sessions)
+    if not instruments and isinstance(last_session, dict):
+        inst = str(last_session.get("instrument") or "").strip()
+        if inst:
+            instruments = [inst]
+    session_notes = _session_notes(sessions)
+    conf_pct, conf_note = _practice_log_confidence(count)
+    plan_mins = 30
 
-    lines = ["**Practice log analysis**"]
-    if count:
-        lines.append(f"- **{count}** sessions in view ({total_mins} min total)")
+    # Opening short answer — coach tone, data-backed.
+    if count and top_song:
+        focus_phrase = f" with emphasis on **{top_focus}**" if top_focus else ""
+        challenge_phrase = ""
+        if repeated:
+            challenge_phrase = f"; **{repeated[0]}** shows up as a repeated challenge"
+        opening = (
+            f"Your recent practice history points toward **{top_song}**{focus_phrase}{challenge_phrase}. "
+            f"Across **{count}** logged session(s) ({total_mins} min), the logs support a focused next session "
+            f"on slow quality work, written-key transitions, and one full run-through."
+        )
+    elif count:
+        opening = (
+            f"Your **{count}** logged session(s) ({total_mins} min total) give a starting picture of your practice habits. "
+            "Use the priorities and timed plan below for the next session."
+        )
     else:
-        lines.append("- No logged sessions were included in this handoff.")
-    if top_song:
-        lines.append(f"- Most practiced song: **{top_song}**")
-    if top_focus:
-        lines.append(f"- Top focus area: **{top_focus}**")
+        opening = (
+            "No logged sessions were included in this handoff — log a few sessions in Music Practice Coach "
+            "so this analysis can summarize patterns and build a concrete plan."
+        )
+
+    lines: list[str] = [opening, "", "**Practice patterns**"]
+    if count:
+        lines.append(f"- **{count}** session(s) in view · **{total_mins}** total minutes logged")
+    else:
+        lines.append("- No sessions in the current window.")
+    if top_songs:
+        lines.append(f"- Most practiced song(s): **{', '.join(top_songs)}**")
+    if instruments:
+        lines.append(f"- Instrument(s): **{', '.join(instruments)}**")
+    if top_focuses:
+        lines.append(f"- Top focus area(s): **{', '.join(top_focuses)}**")
     if repeated:
-        lines.append(f"- Repeated challenge: **{repeated}**")
+        lines.append(f"- Repeated challenge(s): **{'; '.join(repeated[:3])}**")
+    if session_notes:
+        lines.append("- Recent notes from your log:")
+        for note in session_notes[:3]:
+            excerpt = note if len(note) <= 160 else note[:157] + "…"
+            lines.append(f"  - {excerpt}")
+
+    priorities = _practice_log_priorities(
+        top_focus=top_focus,
+        repeated=repeated,
+        suggested=suggested,
+        sessions=sessions,
+        top_song=top_song,
+    )
+    lines.extend(["", "**What to focus on next**"])
+    for item in priorities:
+        lines.append(f"- {item}")
+
+    lines.extend(
+        _practice_log_session_plan(
+            plan_mins=plan_mins,
+            top_song=top_song,
+            top_focus=top_focus,
+            repeated=repeated,
+            instrument=instruments[0] if instruments else "",
+            last_session=last_session,
+        )
+    )
 
     if sessions:
-        lines.append("\n**Recent sessions**")
+        lines.extend(["", "**Recent sessions**"])
         for row in sessions[:6]:
-            if not isinstance(row, dict):
-                continue
             song = str(row.get("active_song") or row.get("song") or "Untitled")
             mins = row.get("duration_minutes") or row.get("minutes") or 0
+            inst = str(row.get("instrument") or "").strip()
             focus = str(row.get("focus_area") or row.get("focus") or "").strip()
             hard = str(row.get("what_was_hard") or "").strip()
+            bits = [f"**{song}** ({mins} min)"]
+            if inst:
+                bits.append(inst)
+            if focus:
+                bits.append(focus)
             suffix = f" — hard: {hard}" if hard else ""
-            lines.append(f"- {song} ({mins} min{f', {focus}' if focus else ''}){suffix}")
+            lines.append(f"- {' · '.join(bits)}{suffix}")
 
-    plan_mins = 30
-    lines.append(f"\n**Suggested next {plan_mins}-minute session**")
-    lines.append(f"1. Warmup (5 min): groove and tone in **{next_focus}**")
-    lines.append(
-        f"2. Focus block (15 min): work **{repeated or next_focus}**"
-        + (f" on **{top_song}**" if top_song else "")
-    )
-    lines.append("3. Run-through (10 min): perform the section at target tempo")
+    lines.extend(["", f"**Confidence / caveat**", f"- {conf_note}"])
 
     short = "\n".join(lines)
     intent = (
-        "You're asking for an analysis of your recent practice history, patterns, "
+        "You're asking for an analysis of your recent practice history, including patterns, "
         "repeated challenges, and a concrete next-session plan."
     )
     data_used = [
         f"Sessions analyzed: **{count}**",
         f"Total minutes: **{total_mins}**" if total_mins else "",
+        f"Top song: **{top_song}**" if top_song else "",
         f"Top focus: **{top_focus}**" if top_focus else "",
+        f"Instrument(s): **{', '.join(instruments)}**" if instruments else "",
     ]
     result = _music_coach_result(
         question=question,
@@ -360,16 +608,23 @@ def _practice_log_analysis_result(question: str, ctx: dict[str, Any]) -> Any:
         math_idea="Pattern synthesis over logged sessions — frequency, focus areas, and friction points.",
         variables=f"session_count={count}; total_minutes={total_mins}",
         data_used=[line for line in data_used if line],
-        calculation="Aggregate practice log summary + recent session rows.",
+        calculation="Aggregate practice_log_summary + recent_practice_history rows into coach priorities and a timed plan.",
         result=short,
         interpretation=short,
         assumptions=["Practice log entries in the handoff reflect your recent logged sessions."],
         sensitivity_notes="Add more logged sessions for stronger pattern detection.",
         problem_type_id=MUSIC_PRACTICE_LOG_ANALYSIS,
-        computed={"session_count": count, "total_minutes": total_mins},
+        computed={
+            "session_count": count,
+            "total_minutes": total_mins,
+            "plan_minutes": plan_mins,
+            "top_song": top_song,
+            "top_focus": top_focus,
+        },
         conclusion="Practice history analysis",
-        confidence_pct=88 if count else 52,
-        short_answer="Review your practice patterns and use the next-session plan below.",
+        confidence_pct=conf_pct,
+        short_answer=short,
+        why=opening,
         model_note="Structured practice log handoff",
     )
     result.intent_restatement = intent
