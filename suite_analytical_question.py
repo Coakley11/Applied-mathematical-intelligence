@@ -892,15 +892,21 @@ def render_practice_log_solve_problem_handoff(st: Any) -> bool:
         if conclusion and conclusion.startswith("#"):
             markdown = conclusion
 
-    if not markdown and progress:
+    if progress:
         try:
-            from practice_progress_report_render import format_progress_report_markdown
+            from practice_progress_report_render import render_progress_report_ui
 
-            markdown = format_progress_report_markdown(progress)
+            render_progress_report_ui(st, progress)
         except Exception:
-            markdown = str(progress.get("executive_summary") or "").strip()
+            try:
+                from practice_progress_report_render import format_progress_report_markdown
 
-    if not markdown:
+                st.markdown(format_progress_report_markdown(progress))
+            except Exception:
+                st.markdown(str(progress.get("executive_summary") or "").strip())
+    elif markdown:
+        st.markdown(markdown)
+    else:
         ss["_practice_log_render_error"] = "practice_log_progress_report_missing_on_render"
         return False
 
@@ -912,7 +918,6 @@ def render_practice_log_solve_problem_handoff(st: Any) -> bool:
     ).strip()
     ss["_practice_log_visible_run_id"] = run_id
     ss["_suite_ai_selected_renderer"] = PRACTICE_LOG_FULL_REPORT_RENDERER
-    st.markdown(markdown)
     return True
 
 
