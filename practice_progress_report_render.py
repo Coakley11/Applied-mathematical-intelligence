@@ -21,7 +21,7 @@ _BARE_ORPHAN_TOKENS = frozenset(
 )
 
 _SECTION_KEYS: tuple[tuple[str, str], ...] = (
-    ("Executive Summary", "executive_summary"),
+    ("Coach Summary", "executive_summary"),
     ("Practice Activity", "practice_activity"),
     ("Upload Analysis Findings", "upload_analysis_findings"),
     ("Tone & Tuner Findings", "tone_tuner_findings"),
@@ -31,6 +31,19 @@ _SECTION_KEYS: tuple[tuple[str, str], ...] = (
     ("Recommended Next Practice Plan", "recommended_next_practice_plan"),
     ("Evidence Used", "evidence_used"),
 )
+
+_SECTION_ACCENTS: dict[str, str] = {
+    "executive_summary": "#2563eb",
+    "practice_activity": "#64748b",
+    "upload_analysis_findings": "#7c3aed",
+    "tone_tuner_findings": "#0891b2",
+    "cross_evidence_connections": "#9333ea",
+    "improvements": "#059669",
+    "needs_work": "#dc2626",
+    "recommended_next_practice_plan": "#d97706",
+    "evidence_used": "#475569",
+    "data_safety": "#64748b",
+}
 
 
 def _clean_item_text(item: Any) -> str:
@@ -73,8 +86,8 @@ def _parse_evidence_chips(evidence_text: str) -> list[str]:
         (r"(\d+)\s+practice logs?", "practice logs"),
         (r"(\d+)\s+saved upload analyses?", "upload analyses"),
         (r"(\d+)\s+tone takes?", "tone takes"),
-        (r"(\d+)\s+saved export\(s\)", "saved multitrack exports"),
-        (r"(\d+)\s+linked analyzed export\(s\)", "linked analyzed exports"),
+        (r"(\d+)\s+saved export", "saved multitrack exports"),
+        (r"(\d+)\s+linked analyzed export", "linked analyzed exports"),
     ]
     for pattern, label in patterns:
         match = re.search(pattern, text, flags=re.IGNORECASE)
@@ -84,6 +97,27 @@ def _parse_evidence_chips(evidence_text: str) -> list[str]:
     if range_match:
         chips.append(f"Date range: {range_match.group(1).strip()}")
     return chips
+
+
+def _render_section_card(st: Any, heading: str, key: str, body: Any, *, bullet: bool = True) -> None:
+    items = _section_body_items(body)
+    if not items:
+        return
+    accent = _SECTION_ACCENTS.get(key, "#64748b")
+    st.markdown(
+        f'<div style="border-left:4px solid {accent};border-radius:8px;padding-left:.35rem;margin:.4rem 0 .15rem;">',
+        unsafe_allow_html=True,
+    )
+    with st.container(border=True):
+        st.markdown(f"#### {heading}")
+        if key == "executive_summary":
+            st.markdown(items[0])
+        elif bullet:
+            for item in items:
+                st.markdown(f"- {item}")
+        else:
+            for item in items:
+                st.markdown(item)
 
 
 def _render_evidence_chips(st: Any, report: dict[str, Any]) -> None:
@@ -100,20 +134,37 @@ def _render_evidence_chips(st: Any, report: dict[str, Any]) -> None:
     st.markdown(html_chips, unsafe_allow_html=True)
 
 
+def _split_plan_step(text: str) -> tuple[str, str]:
+    text = str(text).strip()
+    match = re.match(r"^(\d+\s*min\s*[—\-]\s*[^:]+)(?::\s*(.+))?$", text, flags=re.IGNORECASE)
+    if match:
+        return match.group(1).strip(), (match.group(2) or "").strip()
+    return text, ""
+
+
 def _render_plan_section(st: Any, items: list[str]) -> None:
+    accent = _SECTION_ACCENTS["recommended_next_practice_plan"]
+    st.markdown(
+        f'<div style="border-left:4px solid {accent};border-radius:8px;padding-left:.35rem;margin:.4rem 0 .15rem;">',
+        unsafe_allow_html=True,
+    )
     with st.container(border=True):
         st.markdown("#### Recommended Next Practice Plan")
         st.markdown("**Next 30-minute session**")
         step = 0
         for item in items:
-            text = str(item).strip()
-            if not text:
+            title, desc = _split_plan_step(item)
+            if not title:
                 continue
-            if re.match(r"^\d+\s*min", text, flags=re.IGNORECASE):
+            if re.match(r"^\d+\s*min", title, flags=re.IGNORECASE):
                 step += 1
-                st.markdown(f"{step}. **{text}**")
+                st.markdown(f"{step}. **{title}**")
+                if desc:
+                    st.markdown(f"   {desc}")
             else:
-                st.markdown(f"   {text}")
+                st.markdown(f"- {title}")
+                if desc:
+                    st.markdown(f"   {desc}")
 
 
 def format_progress_report_markdown(report: dict[str, Any]) -> str:
@@ -154,21 +205,13 @@ def render_progress_report_ui(
 
     summary = str(report.get("executive_summary") or "").strip()
     if summary:
-        with st.container(border=True):
-            st.markdown("#### Coach summary")
-            st.markdown(summary)
+        _render_section_card(st, "Coach Summary", "executive_summary", summary, bullet=False)
         _render_evidence_chips(st, report)
 
     for heading, key in _SECTION_KEYS:
         if key in {"executive_summary", "evidence_used", "recommended_next_practice_plan"}:
             continue
-        items = _section_body_items(report.get(key))
-        if not items:
-            continue
-        with st.container(border=True):
-            st.markdown(f"#### {heading}")
-            for item in items:
-                st.markdown(f"- {item}")
+        _render_section_card(st, heading, key, report.get(key))
 
     plan_items = _section_body_items(report.get("recommended_next_practice_plan"))
     if plan_items:
@@ -176,10 +219,7 @@ def render_progress_report_ui(
 
     evidence_items = _section_body_items(report.get("evidence_used"))
     if evidence_items:
-        with st.container(border=True):
-            st.markdown("#### Evidence Used")
-            for item in evidence_items:
-                st.markdown(item)
+        _render_section_card(st, "Evidence Used", "evidence_used", evidence_items, bullet=False)
 
     safety = report.get("data_safety_confirmation") if isinstance(report.get("data_safety_confirmation"), dict) else {}
     if dev_mode and safety:
@@ -191,11 +231,14 @@ def render_progress_report_ui(
                 f"Deleted items excluded: **{safety.get('deleted_items_excluded', True)}**"
             )
     elif not dev_mode:
-        with st.expander("Data safety", expanded=False):
-            st.caption(
-                "This report used saved summaries and metadata only. Raw audio was not included."
-            )
+        _render_section_card(
+            st,
+            "Data Safety",
+            "data_safety",
+            "This report used saved summaries and metadata only. Raw audio was not included.",
+            bullet=False,
+        )
 
     if dev_mode:
         with st.expander("Practice Log report payload (Developer Mode)", expanded=False):
-            st.json({k: report.get(k) for k, _ in _SECTION_KEYS if report.get(k)})
+            st.json(report)

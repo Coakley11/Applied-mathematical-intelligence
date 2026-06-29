@@ -81,11 +81,11 @@ class TestPracticeProgressReportRender(unittest.TestCase):
             updated_at="2026-06-29T13:35:00+00:00",
         )
         joined = " ".join(st.markdown_calls)
-        self.assertIn("Coach summary", joined)
+        self.assertIn("Coach Summary", joined)
         self.assertIn("You logged 2 sessions", joined)
         self.assertGreaterEqual(st.containers, 2)
 
-    def test_data_safety_collapsed_in_normal_mode(self) -> None:
+    def test_data_safety_visible_in_normal_mode(self) -> None:
         st = _FakeSt()
         render_progress_report_ui(
             st,
@@ -99,9 +99,10 @@ class TestPracticeProgressReportRender(unittest.TestCase):
             },
             dev_mode=False,
         )
-        self.assertEqual(len(st.expanders), 1)
-        self.assertIn("Data safety", st.expanders[0][0])
-        self.assertFalse(st.expanders[0][1])
+        joined = " ".join(st.markdown_calls)
+        self.assertIn("Data Safety", joined)
+        self.assertIn("Raw audio was not included", joined)
+        self.assertEqual(len(st.expanders), 0)
 
     def test_thirty_minute_plan_section(self) -> None:
         st = _FakeSt()
