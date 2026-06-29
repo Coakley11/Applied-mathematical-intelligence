@@ -100,6 +100,20 @@ def _render_evidence_chips(st: Any, report: dict[str, Any]) -> None:
     st.markdown(html_chips, unsafe_allow_html=True)
 
 
+def _render_plan_section(st: Any, items: list[str]) -> None:
+    with st.container(border=True):
+        st.markdown("#### Recommended Next Practice Plan")
+        st.markdown("**Next 30-minute session**")
+        for item in items:
+            text = str(item).strip()
+            if not text:
+                continue
+            if re.match(r"^\d+\s*min", text, flags=re.IGNORECASE):
+                st.markdown(f"**{text}**")
+            else:
+                st.markdown(f"- {text}")
+
+
 def format_progress_report_markdown(report: dict[str, Any]) -> str:
     """Render progress report sections as markdown (10-section Practice Analysis)."""
     lines = [f"# {report.get('title', 'Analyze My Practice — Progress Report')}", ""]
@@ -144,7 +158,7 @@ def render_progress_report_ui(
         _render_evidence_chips(st, report)
 
     for heading, key in _SECTION_KEYS:
-        if key in {"executive_summary", "evidence_used"}:
+        if key in {"executive_summary", "evidence_used", "recommended_next_practice_plan"}:
             continue
         items = _section_body_items(report.get(key))
         if not items:
@@ -154,6 +168,10 @@ def render_progress_report_ui(
             for item in items:
                 st.markdown(f"- {item}")
 
+    plan_items = _section_body_items(report.get("recommended_next_practice_plan"))
+    if plan_items:
+        _render_plan_section(st, plan_items)
+
     evidence_items = _section_body_items(report.get("evidence_used"))
     if evidence_items:
         with st.container(border=True):
@@ -162,8 +180,8 @@ def render_progress_report_ui(
                 st.markdown(item)
 
     safety = report.get("data_safety_confirmation") if isinstance(report.get("data_safety_confirmation"), dict) else {}
-    if safety:
-        if dev_mode:
+    if safety or not dev_mode:
+        if dev_mode and safety:
             with st.container(border=True):
                 st.markdown("#### Data Safety Confirmation")
                 st.markdown(
@@ -174,8 +192,7 @@ def render_progress_report_ui(
         else:
             with st.expander("Data safety", expanded=False):
                 st.caption(
-                    "Raw audio was not included in this AMI report. "
-                    "The analysis used saved metadata and summaries only."
+                    "This report used saved summaries and metadata only. Raw audio was not included."
                 )
 
     if dev_mode:

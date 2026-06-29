@@ -103,6 +103,22 @@ class TestPracticeProgressReportRender(unittest.TestCase):
         self.assertIn("Data safety", st.expanders[0][0])
         self.assertFalse(st.expanders[0][1])
 
+    def test_thirty_minute_plan_section(self) -> None:
+        st = _FakeSt()
+        render_progress_report_ui(
+            st,
+            {
+                "executive_summary": "Summary.",
+                "recommended_next_practice_plan": [
+                    "5 min — Long tones on Tenor Saxophone F#/Gb.",
+                    "8 min — Pitch/intonation drill on G major scale.",
+                ],
+            },
+        )
+        joined = " ".join(st.markdown_calls)
+        self.assertIn("Next 30-minute session", joined)
+        self.assertIn("Long tones", joined)
+
     def test_eastern_time_in_updated_caption(self) -> None:
         st = _FakeSt()
         render_progress_report_ui(
