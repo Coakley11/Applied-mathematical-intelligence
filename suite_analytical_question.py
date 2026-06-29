@@ -892,11 +892,31 @@ def render_practice_log_solve_problem_handoff(st: Any) -> bool:
         if conclusion and conclusion.startswith("#"):
             markdown = conclusion
 
+    dev_mode = _developer_tools_enabled(st)
+    if dev_mode:
+        try:
+            from components.applied_math_context_diagnostics import render_practice_log_restore_diagnostics
+
+            render_practice_log_restore_diagnostics(st)
+        except Exception:
+            pass
+
+    updated_at = str(
+        ctx.get("report_generated_at")
+        or ss.get("_practice_log_visible_report_at")
+        or ""
+    ).strip()
+
     if progress:
         try:
             from practice_progress_report_render import render_progress_report_ui
 
-            render_progress_report_ui(st, progress)
+            render_progress_report_ui(
+                st,
+                progress,
+                dev_mode=dev_mode,
+                updated_at=updated_at,
+            )
         except Exception:
             try:
                 from practice_progress_report_render import format_progress_report_markdown
@@ -905,6 +925,10 @@ def render_practice_log_solve_problem_handoff(st: Any) -> bool:
             except Exception:
                 st.markdown(str(progress.get("executive_summary") or "").strip())
     elif markdown:
+        st.markdown("# Music Practice Log Analysis")
+        st.caption(
+            "Synthesized from your saved practice logs, upload analyses, tone takes, and multitrack evidence."
+        )
         st.markdown(markdown)
     else:
         ss["_practice_log_render_error"] = "practice_log_progress_report_missing_on_render"

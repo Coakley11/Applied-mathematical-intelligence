@@ -240,36 +240,41 @@ def _render_suite_question_view() -> None:
 
     from components.applied_math_suite_page import render_suite_question_page_header
 
-    render_suite_question_page_header(
-        st,
-        question=preloaded,
-        source_app=source,
-        source_page=source_page,
-    )
+    try:
+        from suite_analytical_question import should_render_practice_log_full_report
+    except ImportError:
+        should_render_practice_log_full_report = lambda _st: False  # type: ignore[misc,assignment]
+
+    if not should_render_practice_log_full_report(st):
+        render_suite_question_page_header(
+            st,
+            question=preloaded,
+            source_app=source,
+            source_page=source_page,
+        )
 
     try:
         from components.applied_math_context_diagnostics import (
+            applied_math_developer_mode_enabled,
             render_applied_math_context_diagnostics,
             render_practice_log_restore_diagnostics,
         )
 
-        render_applied_math_context_diagnostics(
-            st,
-            question=preloaded,
-            question_id=str(st.session_state.get("_suite_ai_question_id") or "").strip(),
-            source_app=source,
-            source_page=source_page,
-            context=ctx_dict,
-        )
+        if applied_math_developer_mode_enabled(st) and not should_render_practice_log_full_report(st):
+            render_applied_math_context_diagnostics(
+                st,
+                question=preloaded,
+                question_id=str(st.session_state.get("_suite_ai_question_id") or "").strip(),
+                source_app=source,
+                source_page=source_page,
+                context=ctx_dict,
+            )
+            render_practice_log_restore_diagnostics(st)
     except Exception:
         pass
 
-    try:
-        from components.applied_math_context_diagnostics import render_practice_log_restore_diagnostics
-
-        render_practice_log_restore_diagnostics(st)
-    except Exception:
-        pass
+    if should_render_practice_log_full_report(st):
+        return
 
     from components.applied_math_solver_ui import render_suite_solver_answer
 
