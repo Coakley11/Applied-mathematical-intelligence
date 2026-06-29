@@ -86,8 +86,8 @@ def _parse_evidence_chips(evidence_text: str) -> list[str]:
         (r"(\d+)\s+practice logs?", "practice logs"),
         (r"(\d+)\s+saved upload analyses?", "upload analyses"),
         (r"(\d+)\s+tone takes?", "tone takes"),
-        (r"(\d+)\s+saved export", "saved multitrack exports"),
-        (r"(\d+)\s+linked analyzed export", "linked analyzed exports"),
+        (r"(\d+)\s+saved export", "saved multitrack export"),
+        (r"(\d+)\s+linked analyzed export", "linked analyzed export"),
     ]
     for pattern, label in patterns:
         match = re.search(pattern, text, flags=re.IGNORECASE)
@@ -95,7 +95,7 @@ def _parse_evidence_chips(evidence_text: str) -> list[str]:
             chips.append(f"{match.group(1)} {label}")
     range_match = re.search(r"Date range:\s*(?:\*\*)?([^*.]+?)(?:\*\*)?(?:\.|$)", text, flags=re.IGNORECASE)
     if range_match:
-        chips.append(f"Date range: {range_match.group(1).strip()}")
+        chips.append(range_match.group(1).strip())
     return chips
 
 
@@ -125,13 +125,17 @@ def _render_evidence_chips(st: Any, report: dict[str, Any]) -> None:
     chips = _parse_evidence_chips(evidence)
     if not chips:
         return
-    html_chips = " ".join(
-        f'<span style="display:inline-block;background:#f1f5f9;border:1px solid #cbd5e1;'
-        f'border-radius:999px;padding:0.2rem 0.65rem;margin:0.15rem 0.35rem 0.15rem 0;'
-        f'font-size:0.82rem;">{html.escape(chip)}</span>'
+    html_chips = "".join(
+        f'<span style="display:inline-block;background:#f8fafc;border:1px solid #cbd5e1;'
+        f'border-radius:999px;padding:0.28rem 0.72rem;margin:0.28rem 0.45rem 0.28rem 0;'
+        f'font-size:0.82rem;line-height:1.35;">{html.escape(chip)}</span>'
         for chip in chips
     )
-    st.markdown(html_chips, unsafe_allow_html=True)
+    st.markdown(
+        f'<div style="display:flex;flex-wrap:wrap;align-items:center;gap:0.15rem;margin:0.35rem 0 0.15rem;">'
+        f"{html_chips}</div>",
+        unsafe_allow_html=True,
+    )
 
 
 def _split_plan_step(text: str) -> tuple[str, str]:
