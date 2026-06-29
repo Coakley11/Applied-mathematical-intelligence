@@ -119,6 +119,15 @@ class TestPracticeProgressReportRender(unittest.TestCase):
         self.assertIn("Next 30-minute session", joined)
         self.assertIn("Long tones", joined)
 
+    def test_evidence_chips_parse_friendly_date_range(self) -> None:
+        from practice_progress_report_render import _parse_evidence_chips
+
+        chips = _parse_evidence_chips(
+            "Evidence used: 2 practice logs, 4 saved upload analyses, and 2 tone takes. "
+            "Date range: Jun 22–Jun 29, 2026."
+        )
+        self.assertTrue(any("Jun 22" in chip for chip in chips))
+
     def test_eastern_time_in_updated_caption(self) -> None:
         st = _FakeSt()
         render_progress_report_ui(

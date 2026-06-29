@@ -80,7 +80,7 @@ def _parse_evidence_chips(evidence_text: str) -> list[str]:
         match = re.search(pattern, text, flags=re.IGNORECASE)
         if match:
             chips.append(f"{match.group(1)} {label}")
-    range_match = re.search(r"Date range:\s*\*\*([^*]+)\*\*", text, flags=re.IGNORECASE)
+    range_match = re.search(r"Date range:\s*(?:\*\*)?([^*.]+?)(?:\*\*)?(?:\.|$)", text, flags=re.IGNORECASE)
     if range_match:
         chips.append(f"Date range: {range_match.group(1).strip()}")
     return chips
@@ -104,14 +104,16 @@ def _render_plan_section(st: Any, items: list[str]) -> None:
     with st.container(border=True):
         st.markdown("#### Recommended Next Practice Plan")
         st.markdown("**Next 30-minute session**")
+        step = 0
         for item in items:
             text = str(item).strip()
             if not text:
                 continue
             if re.match(r"^\d+\s*min", text, flags=re.IGNORECASE):
-                st.markdown(f"**{text}**")
+                step += 1
+                st.markdown(f"{step}. **{text}**")
             else:
-                st.markdown(f"- {text}")
+                st.markdown(f"   {text}")
 
 
 def format_progress_report_markdown(report: dict[str, Any]) -> str:
@@ -180,20 +182,19 @@ def render_progress_report_ui(
                 st.markdown(item)
 
     safety = report.get("data_safety_confirmation") if isinstance(report.get("data_safety_confirmation"), dict) else {}
-    if safety or not dev_mode:
-        if dev_mode and safety:
-            with st.container(border=True):
-                st.markdown("#### Data Safety Confirmation")
-                st.markdown(
-                    f"- Raw audio excluded: **{safety.get('raw_audio_excluded', True)}** · "
-                    f"Base64 excluded: **{safety.get('base64_excluded', True)}** · "
-                    f"Deleted items excluded: **{safety.get('deleted_items_excluded', True)}**"
-                )
-        else:
-            with st.expander("Data safety", expanded=False):
-                st.caption(
-                    "This report used saved summaries and metadata only. Raw audio was not included."
-                )
+    if dev_mode and safety:
+        with st.container(border=True):
+            st.markdown("#### Data Safety Confirmation")
+            st.markdown(
+                f"- Raw audio excluded: **{safety.get('raw_audio_excluded', True)}** · "
+                f"Base64 excluded: **{safety.get('base64_excluded', True)}** · "
+                f"Deleted items excluded: **{safety.get('deleted_items_excluded', True)}**"
+            )
+    elif not dev_mode:
+        with st.expander("Data safety", expanded=False):
+            st.caption(
+                "This report used saved summaries and metadata only. Raw audio was not included."
+            )
 
     if dev_mode:
         with st.expander("Practice Log report payload (Developer Mode)", expanded=False):
