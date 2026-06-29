@@ -241,7 +241,101 @@ def is_practice_log_analysis_context(context: dict[str, Any] | None) -> bool:
         or str(ctx.get("display_category") or "") == "analysis_handoff"
         or str(ctx.get("handoff_kind") or "") == "practice_log_analysis"
         or str(ctx.get("routing_hint") or "") == "practice_history_analysis"
+        or str(ctx.get("analysis_type") or "") == "practice_history_analysis"
     )
+
+
+PRACTICE_LOG_FULL_REPORT_RENDERER = "render_practice_log_full_report"
+
+
+def has_practice_log_progress_blob(context: dict[str, Any] | None) -> bool:
+    """True when loaded context carries a Practice Log Analysis report payload."""
+    ctx = dict(context or {})
+    if is_practice_log_analysis_context(ctx):
+        return True
+    if isinstance(ctx.get("progress_report"), dict) and bool(ctx.get("progress_report")):
+        return True
+    if isinstance(ctx.get("practice_history_payload"), dict) and bool(ctx.get("practice_history_payload")):
+        return True
+    return False
+
+
+def analysis_run_id_from_ami_insight(ami_insight: str) -> str:
+    """Derive analysis_run_id from ``pa:{run_id}`` insight ids."""
+    iid = str(ami_insight or "").strip()
+    if iid.startswith("pa:"):
+        return iid[3:].strip()
+    return ""
+
+
+def _stage_practice_log_pending_insight(
+    ss: dict[str, Any],
+    ctx: dict[str, Any],
+    *,
+    analysis_run_id: str,
+    ami_insight: str,
+) -> bool:
+    """Stage visible Practice Analysis report from loaded blob — overwrites stale pending insight."""
+    try:
+        from applied_math_return_insight import SESSION_PENDING_KEY
+    except ImportError:
+        SESSION_PENDING_KEY = "_ami_pending_insight"
+
+    progress = ctx.get("progress_report") if isinstance(ctx.get("progress_report"), dict) else {}
+    run_id = str(analysis_run_id or ctx.get("analysis_run_id") or analysis_run_id_from_ami_insight(ami_insight) or "").strip()
+    iid = str(ami_insight or (f"pa:{run_id}" if run_id else "")).strip()
+    if not progress and not has_practice_log_progress_blob(ctx):
+        return False
+
+    prev_iid = str(ss.get("_ami_hydrated_insight_id") or "").strip()
+    pending = ss.get(SESSION_PENDING_KEY)
+    pending_id = ""
+    if isinstance(pending, dict):
+        pending_id = str(pending.get("insight_id") or "").strip()
+    if iid and (prev_iid != iid or pending_id != iid):
+        ss.pop(SESSION_PENDING_KEY, None)
+        ss.pop("_ami_hydrated_insight_id", None)
+
+    markdown = ""
+    if progress:
+        try:
+            from practice_progress_report_render import format_progress_report_markdown
+
+            markdown = format_progress_report_markdown(progress)
+        except Exception:
+            markdown = str(progress.get("executive_summary") or "").strip()
+
+    report_at = str(
+        ctx.get("report_generated_at")
+        or progress.get("generated_at")
+        or ""
+    ).strip()
+    insight = {
+        "insight_id": iid,
+        "conclusion": markdown or PRACTICE_LOG_ANALYSIS_TITLE,
+        "question": PRACTICE_LOG_ANALYSIS_TITLE,
+        "source_app": "music",
+        "source_page": str(ctx.get("source_page") or "Practice Log").strip(),
+        "context_snapshot": {
+            "analysis_run_id": run_id,
+            "report_generated_at": report_at,
+            "routing_hint": ctx.get("routing_hint"),
+            "handoff_kind": ctx.get("handoff_kind"),
+        },
+        "progress_report": copy.deepcopy(progress) if progress else {},
+    }
+    ss[SESSION_PENDING_KEY] = insight
+    if iid:
+        ss["_ami_hydrated_insight_id"] = iid
+        ss["_suite_ami_insight"] = iid
+    if run_id:
+        ss["_suite_practice_analysis_run_id"] = run_id
+        ss["_practice_log_visible_run_id"] = run_id
+    if report_at:
+        ss["_practice_log_visible_report_at"] = report_at
+    ss["_ami_practice_log_stale_fallback_blocked"] = True
+    ss["_ami_practice_log_restore_insight_id"] = iid
+    return bool(markdown or progress)
 
 
 def source_question_card_title(
@@ -753,6 +847,75 @@ def should_render_hof_full_memo_content(st: Any) -> bool:
     return should_prefer_hof_full_memo_renderer(st)
 
 
+def should_render_practice_log_full_report(st: Any) -> bool:
+    """True when Solve a Problem should render the full Practice Log Analysis report."""
+    ss = st.session_state
+    if str(ss.get("_suite_ai_selected_renderer") or "").strip() == PRACTICE_LOG_FULL_REPORT_RENDERER:
+        return True
+    try:
+        ctx_raw = str(ss.get("_suite_ai_context") or "")
+        ctx = json.loads(ctx_raw) if ctx_raw.startswith("{") else {}
+    except json.JSONDecodeError:
+        ctx = {}
+    if has_practice_log_progress_blob(ctx if isinstance(ctx, dict) else {}):
+        progress = (ctx or {}).get("progress_report") if isinstance(ctx, dict) else {}
+        if isinstance(progress, dict) and progress:
+            return True
+    return bool(ss.get("_suite_practice_analysis_run_id") and ss.get("_ami_practice_log_stale_fallback_blocked"))
+
+
+def render_practice_log_solve_problem_handoff(st: Any) -> bool:
+    """Render full Practice Log Analysis report from staged blob/insight."""
+    ss = st.session_state
+    ctx: dict[str, Any] = {}
+    try:
+        ctx_raw = str(ss.get("_suite_ai_context") or "")
+        if ctx_raw.startswith("{"):
+            parsed = json.loads(ctx_raw)
+            if isinstance(parsed, dict):
+                ctx = parsed
+    except json.JSONDecodeError:
+        pass
+
+    progress = ctx.get("progress_report") if isinstance(ctx.get("progress_report"), dict) else {}
+    markdown = ""
+    try:
+        from applied_math_return_insight import SESSION_PENDING_KEY
+    except ImportError:
+        SESSION_PENDING_KEY = "_ami_pending_insight"
+    pending = ss.get(SESSION_PENDING_KEY)
+    if isinstance(pending, dict):
+        pending_report = pending.get("progress_report") if isinstance(pending.get("progress_report"), dict) else {}
+        if pending_report and not progress:
+            progress = pending_report
+        conclusion = str(pending.get("conclusion") or "").strip()
+        if conclusion and conclusion.startswith("#"):
+            markdown = conclusion
+
+    if not markdown and progress:
+        try:
+            from practice_progress_report_render import format_progress_report_markdown
+
+            markdown = format_progress_report_markdown(progress)
+        except Exception:
+            markdown = str(progress.get("executive_summary") or "").strip()
+
+    if not markdown:
+        ss["_practice_log_render_error"] = "practice_log_progress_report_missing_on_render"
+        return False
+
+    run_id = str(
+        ss.get("_suite_practice_analysis_run_id")
+        or ctx.get("analysis_run_id")
+        or ss.get("_practice_log_visible_run_id")
+        or ""
+    ).strip()
+    ss["_practice_log_visible_run_id"] = run_id
+    ss["_suite_ai_selected_renderer"] = PRACTICE_LOG_FULL_REPORT_RENDERER
+    st.markdown(markdown)
+    return True
+
+
 def hydrate_applied_intelligence_session(st: Any, *, metrics: dict[str, Any] | None = None) -> None:
     """Map URL params / resume metrics into Applied Intelligence session keys."""
     ss = st.session_state
@@ -775,6 +938,8 @@ def hydrate_applied_intelligence_session(st: Any, *, metrics: dict[str, Any] | N
         or ""
     ).strip()
     ami_insight = str(m.get("ami_insight") or _qp("suite_ami_insight") or "").strip()
+    if not analysis_run_id and ami_insight:
+        analysis_run_id = analysis_run_id_from_ami_insight(ami_insight)
     if analysis_run_id and not ami_insight:
         ami_insight = f"pa:{analysis_run_id}"
     question = clean_analytical_question_display(
@@ -906,6 +1071,7 @@ def hydrate_applied_intelligence_session(st: Any, *, metrics: dict[str, Any] | N
         or str((ctx or {}).get("routing_hint") or "") == "hof_case_analysis"
         or str((ctx or {}).get("intent") or "") == "hof_case_analysis"
     )
+    is_practice_log = has_practice_log_progress_blob(ctx) and not is_hof
     selected_renderer = "default_homepage"
     fallback_reason = ""
     packet_staged = False
@@ -957,6 +1123,29 @@ def hydrate_applied_intelligence_session(st: Any, *, metrics: dict[str, Any] | N
             selected_renderer = "hof_case_fallback_error"
         elif not analysis_present:
             fallback_reason = "hof_case_analysis_missing_compose_on_render"
+    elif is_practice_log:
+        ss["view_mode"] = "Solve a Problem"
+        ss["_suite_ai_page"] = "Solve a Problem"
+        selected_renderer = PRACTICE_LOG_FULL_REPORT_RENDERER
+        ss.pop("_ami_force_insight_render", None)
+        ss.pop("_ami_submit_render_insight_this_run", None)
+        if not analysis_run_id:
+            analysis_run_id = str(ctx.get("analysis_run_id") or analysis_run_id_from_ami_insight(ami_insight) or "").strip()
+            if analysis_run_id:
+                ss["_suite_practice_analysis_run_id"] = analysis_run_id
+        if not ami_insight and analysis_run_id:
+            ami_insight = f"pa:{analysis_run_id}"
+            ss["_suite_ami_insight"] = ami_insight
+        insight_staged = _stage_practice_log_pending_insight(
+            ss,
+            ctx,
+            analysis_run_id=analysis_run_id,
+            ami_insight=ami_insight,
+        )
+        progress = ctx.get("progress_report") if isinstance(ctx.get("progress_report"), dict) else {}
+        analysis_present = bool(progress) or insight_staged
+        if not analysis_present:
+            fallback_reason = "practice_log_progress_report_missing_after_hydrate"
     elif qid and not (blob_payload.get("context") or blob_payload.get("hof_case_packet")):
         fallback_reason = "question_id_blob_not_found"
     elif not ctx:
@@ -986,7 +1175,11 @@ def hydrate_applied_intelligence_session(st: Any, *, metrics: dict[str, Any] | N
         "player": str((ctx or {}).get("player") or blob_payload.get("player") or ss.get("_suite_hof_target") or target or ""),
         "is_hof": bool(is_hof),
         "selected_renderer": selected_renderer,
-        "ami_full_memo_renderer_selected": selected_renderer == "render_hof_case_full_analysis",
+        "ami_full_memo_renderer_selected": selected_renderer
+        in (PRACTICE_LOG_FULL_REPORT_RENDERER, "render_hof_case_full_analysis"),
+        "practice_log_renderer_selected": selected_renderer == PRACTICE_LOG_FULL_REPORT_RENDERER,
+        "practice_log_insight_staged": insight_staged if is_practice_log else False,
+        "practice_log_analysis_present": analysis_present if is_practice_log else False,
         "fallback_reason": fallback_reason,
         "verdict_context_present": verdict_staged
         or (
@@ -1159,6 +1352,8 @@ def render_applied_intelligence_solve_problem_content(st: Any) -> bool:
     ensure_hof_handoff_session_staged(st)
     if should_render_hof_full_memo_content(st):
         return render_hof_case_solve_problem_handoff(st)
+    if should_render_practice_log_full_report(st):
+        return render_practice_log_solve_problem_handoff(st)
     return render_applied_intelligence_handoff_page(st)
 
 

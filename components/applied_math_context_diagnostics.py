@@ -369,15 +369,23 @@ def render_practice_log_restore_diagnostics(st: Any) -> None:
     except Exception:
         parsed = {}
     with st.expander("Practice Log Analysis restore (Developer Mode)", expanded=False):
+        st.text(f"incoming suite_ami_insight: {_query_param(st, 'suite_ami_insight') or ss.get('_suite_ami_insight')}")
+        derived_run = str(ss.get("_suite_practice_analysis_run_id") or _query_param(st, "suite_practice_analysis_run_id") or "").strip()
+        if not derived_run:
+            ami_raw = _query_param(st, "suite_ami_insight") or str(ss.get("_suite_ami_insight") or "")
+            if ami_raw.startswith("pa:"):
+                derived_run = ami_raw[3:].strip()
+        st.text(f"derived analysis_run_id: {derived_run}")
         st.text(f"received analysis_run_id: {ss.get('_suite_practice_analysis_run_id') or _query_param(st, 'suite_practice_analysis_run_id')}")
-        st.text(f"received suite_ami_insight: {_query_param(st, 'suite_ami_insight') or ss.get('_suite_ami_insight')}")
-        st.text(f"loaded insight/report id: {pending.get('insight_id') or ss.get('_ami_practice_log_restore_insight_id')}")
+        st.text(f"loaded blob/report id: {pending.get('insight_id') or ss.get('_ami_practice_log_restore_insight_id')}")
+        st.text(f"staged pending insight id: {pending.get('insight_id')}")
+        st.text(f"selected renderer: {ss.get('_suite_ai_selected_renderer')}")
         st.text(f"loaded report timestamp: {ss.get('_practice_log_visible_report_at') or report_at}")
         st.text(f"hydrate source: {ss.get('_suite_ai_hydrate_source')}")
         st.text(f"insight hydrate source: {ss.get('_ami_insight_hydrate_source')}")
         st.text(f"stale session fallback blocked: {ss.get('_ami_practice_log_stale_fallback_blocked')}")
-        st.text(f"visible run id: {ss.get('_practice_log_visible_run_id')}")
-        st.text(f"restore error: {ss.get('_practice_log_restore_error')}")
+        st.text(f"visible report run id: {ss.get('_practice_log_visible_run_id')}")
+        st.text(f"restore error: {ss.get('_practice_log_restore_error') or ss.get('_practice_log_render_error')}")
         st.text(f"active pending insight id: {pending.get('insight_id')}")
         params = []
         for name in (

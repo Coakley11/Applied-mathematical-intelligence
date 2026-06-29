@@ -825,6 +825,11 @@ def hydrate_applied_math_insight_for_session(st: Any, app_key: str) -> bool:
     run_id = _query_param(st, "suite_practice_analysis_run_id") or str(
         ss.get("_suite_practice_analysis_run_id") or ""
     ).strip()
+    if not run_id:
+        url_only = insight_return_query_id(st)
+        if url_only.startswith("pa:"):
+            run_id = url_only[3:].strip()
+            ss["_suite_practice_analysis_run_id"] = run_id
     if key == "applied_intelligence" and run_id:
         expected_iid = f"pa:{run_id}"
         url_iid = insight_return_query_id(st) or expected_iid
@@ -1923,16 +1928,19 @@ def apply_ami_insight_from_query(st: Any, app_key: str) -> bool:
         return str(raw).strip()
 
     iid = _qp("suite_ami_insight")
-    if not iid:
-        run_id = _qp("suite_practice_analysis_run_id")
-        if run_id:
-            iid = f"pa:{run_id}"
+    run_id = _qp("suite_practice_analysis_run_id")
+    if not run_id and iid.startswith("pa:"):
+        run_id = iid[3:].strip()
+    if not iid and run_id:
+        iid = f"pa:{run_id}"
     if not iid:
         return False
 
     ss = st.session_state
     ss["_ami_practice_log_restore_attempted"] = True
-    ss["_ami_practice_log_restore_run_id"] = _qp("suite_practice_analysis_run_id")
+    ss["_ami_practice_log_restore_run_id"] = run_id
+    if run_id:
+        ss["_suite_practice_analysis_run_id"] = run_id
 
     _clear_stale_return_insight_cache(st, iid)
     prev = str(st.session_state.get("_ami_hydrated_insight_id") or "").strip()
@@ -1984,7 +1992,23 @@ def apply_ami_insight_from_query(st: Any, app_key: str) -> bool:
     st.session_state["_ami_hydrated_insight_id"] = iid
     ss["_ami_practice_log_restore_insight_id"] = iid
     ss["_ami_practice_log_restore_loaded"] = bool(insight)
-    ss["_ami_practice_log_stale_fallback_blocked"] = bool(_qp("suite_practice_analysis_run_id"))
+    ss["_ami_practice_log_stale_fallback_blocked"] = bool(run_id or iid.startswith("pa:"))
+    if key == "applied_intelligence" and (run_id or iid.startswith("pa:")):
+        ctx_raw = str(ss.get("_suite_ai_context") or "")
+        if ctx_raw.startswith("{"):
+            try:
+                ctx = json.loads(ctx_raw)
+                if isinstance(ctx, dict) and ctx.get("progress_report"):
+                    from suite_analytical_question import _stage_practice_log_pending_insight
+
+                    _stage_practice_log_pending_insight(
+                        ss,
+                        ctx,
+                        analysis_run_id=run_id or iid[3:].strip(),
+                        ami_insight=iid,
+                    )
+            except Exception:
+                pass
     if str(app_key or "").strip().lower() == "investment":
         _sync_investment_insight_tab_keys(st, app_key, insight=insight if isinstance(insight, dict) else {})
         try:

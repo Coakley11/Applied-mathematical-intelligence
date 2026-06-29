@@ -8,7 +8,12 @@ from unittest.mock import MagicMock, patch
 
 from applied_math_return_insight import SESSION_PENDING_KEY, apply_ami_insight_from_query, hydrate_applied_math_insight_for_session
 from components.problem_solving import _load_suite_context
-from suite_analytical_question import hydrate_applied_intelligence_session, load_analytical_question_payload
+from suite_analytical_question import (
+    PRACTICE_LOG_FULL_REPORT_RENDERER,
+    hydrate_applied_intelligence_session,
+    load_analytical_question_payload,
+    should_render_practice_log_full_report,
+)
 
 
 class _St:
@@ -87,6 +92,52 @@ class TestPracticeLogAmiRestore(unittest.TestCase):
             ok = hydrate_applied_math_insight_for_session(st, "applied_intelligence")
         self.assertFalse(ok)
         self.assertEqual(st.session_state.get("_ami_insight_hydrate_source"), "practice_analysis_run_id_missing")
+
+    def test_hydrate_selects_practice_log_renderer_and_stages_insight(self) -> None:
+        st = _St(
+            {
+                "suite_practice_analysis_run_id": "run-b",
+                "suite_ami_insight": "pa:run-b",
+            }
+        )
+        st.session_state[SESSION_PENDING_KEY] = {
+            "insight_id": "pa:run-a",
+            "conclusion": "yesterday",
+        }
+        fresh_ctx = {
+            "routing_hint": "practice_history_analysis",
+            "handoff_kind": "practice_log_analysis",
+            "analysis_run_id": "run-b",
+            "report_generated_at": "2026-06-29T13:28:00+00:00",
+            "progress_report": {
+                "title": "Analyze My Practice — Progress Report",
+                "executive_summary": "run B executive",
+            },
+        }
+        with patch(
+            "suite_analytical_question.load_analytical_question_payload",
+            return_value={"context": fresh_ctx, "question_id": "q1", "source_app": "music"},
+        ):
+            hydrate_applied_intelligence_session(st)
+        self.assertEqual(st.session_state.get("_suite_ai_selected_renderer"), PRACTICE_LOG_FULL_REPORT_RENDERER)
+        self.assertEqual(st.session_state[SESSION_PENDING_KEY]["insight_id"], "pa:run-b")
+        self.assertIn("run B executive", st.session_state[SESSION_PENDING_KEY]["conclusion"])
+        self.assertTrue(should_render_practice_log_full_report(st))
+
+    def test_ami_insight_only_url_derives_run_id(self) -> None:
+        st = _St({"suite_ami_insight": "pa:run-b"})
+        with patch(
+            "applied_math_return_insight.load_applied_math_insight",
+            return_value={
+                "insight_id": "pa:run-b",
+                "conclusion": "today",
+                "context_snapshot": {"analysis_run_id": "run-b"},
+            },
+        ):
+            ok = apply_ami_insight_from_query(st, "applied_intelligence")
+        self.assertTrue(ok)
+        self.assertEqual(st.session_state.get("_suite_practice_analysis_run_id"), "run-b")
+        self.assertTrue(st.session_state.get("_ami_practice_log_stale_fallback_blocked"))
 
     def test_hydrate_from_url_reapplies_insight_when_resume_flag_set(self) -> None:
         from suite_resume_launch import hydrate_applied_intelligence_from_url

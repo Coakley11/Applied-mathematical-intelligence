@@ -471,6 +471,36 @@ def _practice_log_session_plan(
 
 
 def _practice_log_analysis_result(question: str, ctx: dict[str, Any]) -> Any:
+    progress = ctx.get("progress_report") if isinstance(ctx.get("progress_report"), dict) else {}
+    if progress:
+        try:
+            from practice_progress_report_render import format_progress_report_markdown
+
+            markdown = format_progress_report_markdown(progress)
+        except Exception:
+            markdown = str(progress.get("executive_summary") or "").strip()
+        if markdown:
+            run_id = str(ctx.get("analysis_run_id") or "").strip()
+            return _music_coach_result(
+                question=question,
+                problem_type="Music Practice Log Analysis",
+                math_idea="Cross-source practice synthesis from saved logs, analyses, and tone takes.",
+                variables=f"analysis_run_id={run_id}" if run_id else "",
+                data_used=["Full progress report from Music Practice Coach handoff."],
+                calculation="Render pre-built progress_report sections from practice history synthesis.",
+                result=markdown,
+                interpretation=markdown,
+                assumptions=["Progress report was generated in Music Practice Coach before handoff."],
+                sensitivity_notes="",
+                problem_type_id=MUSIC_PRACTICE_LOG_ANALYSIS,
+                computed={"analysis_run_id": run_id, "progress_report_sections": len(progress)},
+                conclusion="Practice history analysis",
+                confidence_pct=88,
+                short_answer=markdown,
+                why=str(progress.get("executive_summary") or markdown.split("\n", 1)[0]),
+                model_note="Music practice history progress report",
+            )
+
     summary = ctx.get("practice_log_summary") if isinstance(ctx.get("practice_log_summary"), dict) else {}
     payload = ctx.get("practice_log_ami_payload") if isinstance(ctx.get("practice_log_ami_payload"), dict) else {}
     if not summary and isinstance(payload.get("practice_log_summary"), dict):

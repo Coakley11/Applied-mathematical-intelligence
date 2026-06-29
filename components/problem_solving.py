@@ -287,9 +287,15 @@ def render_problem_solving_lab() -> None:
         from suite_analytical_question import (
             render_applied_intelligence_solve_problem_content,
             should_render_hof_full_memo_content,
+            should_render_practice_log_full_report,
         )
 
-        if should_render_hof_full_memo_content(st) or st.session_state.get("_suite_ai_question") or st.session_state.get("_suite_ai_question_id"):
+        if (
+            should_render_hof_full_memo_content(st)
+            or should_render_practice_log_full_report(st)
+            or st.session_state.get("_suite_ai_question")
+            or st.session_state.get("_suite_ai_question_id")
+        ):
             if render_applied_intelligence_solve_problem_content(st):
                 return
     except Exception:
