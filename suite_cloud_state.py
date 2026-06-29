@@ -52,12 +52,15 @@ _RESUME_QUERY_KEYS: dict[str, tuple[str, ...]] = {
         "suite_fl_view",
     ),
     "applied_intelligence": (
+        "suite_resume",
         "suite_page",
         "suite_lesson",
         "suite_ai_question",
         "suite_ai_question_id",
         "suite_ai_source_app",
         "suite_ai_context",
+        "suite_practice_analysis_run_id",
+        "suite_ami_insight",
     ),
 }
 
@@ -74,6 +77,13 @@ _WORKSPACE_RESTORE_BLOCKING_QUERY_KEYS: dict[str, tuple[str, ...]] = {
     "music": (
         "suite_resume",
         "suite_page",
+        "suite_ami_insight",
+        "suite_ai_question_id",
+    ),
+    "applied_intelligence": (
+        "suite_resume",
+        "suite_page",
+        "suite_practice_analysis_run_id",
         "suite_ami_insight",
         "suite_ai_question_id",
     ),

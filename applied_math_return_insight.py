@@ -822,6 +822,32 @@ def hydrate_applied_math_insight_for_session(st: Any, app_key: str) -> bool:
 
     sync_dismissed_insights_from_cloud(st, key)
 
+    run_id = _query_param(st, "suite_practice_analysis_run_id") or str(
+        ss.get("_suite_practice_analysis_run_id") or ""
+    ).strip()
+    if key == "applied_intelligence" and run_id:
+        expected_iid = f"pa:{run_id}"
+        url_iid = insight_return_query_id(st) or expected_iid
+        if url_iid != expected_iid:
+            url_iid = expected_iid
+        _clear_stale_return_insight_cache(st, url_iid)
+        insight = load_applied_math_insight(url_iid, source_app="music")
+        if not insight:
+            insight = load_applied_math_insight(url_iid, source_app="applied_intelligence")
+        if insight:
+            ss[SESSION_PENDING_KEY] = insight
+            ss["_ami_hydrated_insight_id"] = url_iid
+            ss["_ami_insight_hydrate_success"] = True
+            ss["_ami_insight_hydrate_source"] = "practice_analysis_run_id"
+            ss["_ami_practice_log_restore_run_id"] = run_id
+            ss["_ami_practice_log_restore_insight_id"] = url_iid
+            ss["_ami_practice_log_stale_fallback_blocked"] = True
+            return True
+        ss["_ami_insight_hydrate_success"] = False
+        ss["_ami_insight_hydrate_source"] = "practice_analysis_run_id_missing"
+        ss["_ami_practice_log_stale_fallback_blocked"] = True
+        return False
+
     url_iid = insight_return_query_id(st)
     if url_iid and _insight_is_dismissed(st, url_iid):
         url_iid = ""
@@ -841,10 +867,19 @@ def hydrate_applied_math_insight_for_session(st: Any, app_key: str) -> bool:
 
     pending = _pending_insight_valid(st)
     if pending:
+        if ss.get("_ami_practice_log_stale_fallback_blocked"):
+            ss["_ami_insight_hydrate_success"] = False
+            ss["_ami_insight_hydrate_source"] = "session_blocked_for_run_id"
+            return False
         ss["_ami_insight_hydrate_success"] = True
         ss["_ami_insight_hydrate_source"] = "session"
         _sync_investment_insight_tab_keys(st, key, insight=pending)
         return True
+
+    if ss.get("_ami_practice_log_stale_fallback_blocked"):
+        ss["_ami_insight_hydrate_success"] = False
+        ss["_ami_insight_hydrate_source"] = "cloud_blocked_for_run_id"
+        return False
 
     dismissed = _get_dismissed_insight_ids(st)
     latest = load_latest_applied_math_insight_for_app(key, exclude_ids=dismissed)
@@ -1554,8 +1589,21 @@ def load_applied_math_insight(insight_id: str, *, source_app: str = "") -> dict[
     return best
 
 
-def load_applied_math_insight_for_question(question_id: str, *, source_app: str = "") -> dict[str, Any]:
-    """Load the stored insight tied to a question_id (instant / canonical answer)."""
+def load_applied_math_insight_for_question(
+    question_id: str,
+    *,
+    source_app: str = "",
+    analysis_run_id: str = "",
+) -> dict[str, Any]:
+    """Load the stored insight tied to a question_id or practice analysis run."""
+    run_id = str(analysis_run_id or "").strip()
+    if run_id:
+        loaded = load_applied_math_insight(f"pa:{run_id}", source_app=source_app or "music")
+        if loaded:
+            return loaded
+        loaded = load_applied_math_insight(f"pa:{run_id}", source_app="applied_intelligence")
+        if loaded:
+            return loaded
     qid = str(question_id or "").strip()
     if not qid:
         return {}
@@ -1876,7 +1924,15 @@ def apply_ami_insight_from_query(st: Any, app_key: str) -> bool:
 
     iid = _qp("suite_ami_insight")
     if not iid:
+        run_id = _qp("suite_practice_analysis_run_id")
+        if run_id:
+            iid = f"pa:{run_id}"
+    if not iid:
         return False
+
+    ss = st.session_state
+    ss["_ami_practice_log_restore_attempted"] = True
+    ss["_ami_practice_log_restore_run_id"] = _qp("suite_practice_analysis_run_id")
 
     _clear_stale_return_insight_cache(st, iid)
     prev = str(st.session_state.get("_ami_hydrated_insight_id") or "").strip()
@@ -1885,6 +1941,10 @@ def apply_ami_insight_from_query(st: Any, app_key: str) -> bool:
         return False
 
     insight = load_applied_math_insight(iid, source_app=app_key)
+    if not insight and iid.startswith("pa:"):
+        insight = load_applied_math_insight(iid, source_app="music")
+    if not insight and iid.startswith("pa:"):
+        insight = load_applied_math_insight(iid, source_app="applied_intelligence")
     if not insight:
         placeholder = (
             "Applied Investment Insight loaded."
@@ -1922,6 +1982,9 @@ def apply_ami_insight_from_query(st: Any, app_key: str) -> bool:
             st.session_state["_skip_page_restore_for"] = page
 
     st.session_state["_ami_hydrated_insight_id"] = iid
+    ss["_ami_practice_log_restore_insight_id"] = iid
+    ss["_ami_practice_log_restore_loaded"] = bool(insight)
+    ss["_ami_practice_log_stale_fallback_blocked"] = bool(_qp("suite_practice_analysis_run_id"))
     if str(app_key or "").strip().lower() == "investment":
         _sync_investment_insight_tab_keys(st, app_key, insight=insight if isinstance(insight, dict) else {})
         try:

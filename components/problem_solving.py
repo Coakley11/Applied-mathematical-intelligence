@@ -51,6 +51,49 @@ def _load_suite_context() -> tuple[str, str, str, dict]:
     ctx_dict: dict = {}
     hydrate_source = str(st.session_state.get("_suite_ai_hydrate_source") or "").strip()
 
+    analysis_run_id = _url_query_param("suite_practice_analysis_run_id") or str(
+        st.session_state.get("_suite_practice_analysis_run_id") or ""
+    ).strip()
+    if analysis_run_id:
+        st.session_state["_suite_practice_analysis_run_id"] = analysis_run_id
+        try:
+            from suite_analytical_question import (
+                PRACTICE_LOG_ANALYSIS_TITLE,
+                is_practice_log_analysis_context,
+                load_analytical_question_payload,
+            )
+
+            payload = load_analytical_question_payload("", analysis_run_id=analysis_run_id)
+            blob_ctx = payload.get("context") if isinstance(payload.get("context"), dict) else {}
+            if blob_ctx and is_practice_log_analysis_context(blob_ctx):
+                ctx_dict = blob_ctx
+                hydrate_source = "analysis_run_id_blob"
+                preloaded = PRACTICE_LOG_ANALYSIS_TITLE
+                st.session_state["_suite_ai_question"] = preloaded
+                st.session_state["ps_library_problem"] = preloaded
+                st.session_state["_suite_ai_context"] = json.dumps(ctx_dict, ensure_ascii=False)
+                st.session_state["_suite_ai_hydrate_source"] = hydrate_source
+                st.session_state["_practice_log_visible_run_id"] = analysis_run_id
+                st.session_state["_practice_log_visible_report_at"] = str(
+                    blob_ctx.get("report_generated_at")
+                    or (payload.get("report_generated_at") if isinstance(payload, dict) else "")
+                    or ""
+                )
+                qid = str(payload.get("question_id") or st.session_state.get("_suite_ai_question_id") or "").strip()
+                if qid:
+                    st.session_state["_suite_ai_question_id"] = qid
+                if not source:
+                    source = str(blob_ctx.get("source_app") or payload.get("source_app") or "music").strip()
+                    st.session_state["_suite_ai_source_app"] = source
+                if hydrate_source:
+                    st.session_state["_suite_ai_hydrate_source"] = hydrate_source
+                return preloaded, source, source_page, ctx_dict
+            st.session_state["_practice_log_restore_error"] = str(
+                payload.get("blob_load_error") or "analysis_run_id_blob_not_found"
+            )
+        except Exception as exc:
+            st.session_state["_practice_log_restore_error"] = str(exc)
+
     try:
         from suite_resume_launch import resolve_url_suite_ai_question_id
 
@@ -67,6 +110,13 @@ def _load_suite_context() -> tuple[str, str, str, dict]:
         preloaded = url_question
 
     qid = url_qid or str(st.session_state.get("_suite_ai_question_id") or "").strip()
+    if analysis_run_id:
+        # Do not fall back to stable question_id blob when an explicit run id was requested.
+        if hydrate_source:
+            st.session_state["_suite_ai_hydrate_source"] = hydrate_source
+        if not source and ctx_dict.get("source_app"):
+            source = str(ctx_dict.get("source_app") or "").strip()
+        return preloaded, source, source_page, ctx_dict
     if qid:
         try:
             from suite_analytical_question import load_analytical_question_payload
@@ -198,7 +248,10 @@ def _render_suite_question_view() -> None:
     )
 
     try:
-        from components.applied_math_context_diagnostics import render_applied_math_context_diagnostics
+        from components.applied_math_context_diagnostics import (
+            render_applied_math_context_diagnostics,
+            render_practice_log_restore_diagnostics,
+        )
 
         render_applied_math_context_diagnostics(
             st,
@@ -208,6 +261,13 @@ def _render_suite_question_view() -> None:
             source_page=source_page,
             context=ctx_dict,
         )
+    except Exception:
+        pass
+
+    try:
+        from components.applied_math_context_diagnostics import render_practice_log_restore_diagnostics
+
+        render_practice_log_restore_diagnostics(st)
     except Exception:
         pass
 

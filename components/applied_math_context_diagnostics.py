@@ -347,6 +347,51 @@ def render_applied_math_context_diagnostics(
         st.code(json.dumps(context, indent=2, ensure_ascii=False, default=str)[:12000])
 
 
+def render_practice_log_restore_diagnostics(st: Any) -> None:
+    """Developer Mode — Practice Log Analysis Continue restore trace."""
+    if not applied_math_developer_mode_enabled(st):
+        return
+    ss = st.session_state
+    try:
+        from applied_math_return_insight import SESSION_PENDING_KEY
+    except ImportError:
+        SESSION_PENDING_KEY = "_ami_pending_insight"
+    pending = ss.get(SESSION_PENDING_KEY) if isinstance(ss.get(SESSION_PENDING_KEY), dict) else {}
+    ctx_raw = str(ss.get("_suite_ai_context") or "")
+    report_at = ""
+    try:
+        parsed = json.loads(ctx_raw) if ctx_raw.startswith("{") else {}
+        if isinstance(parsed, dict):
+            report_at = str(parsed.get("report_generated_at") or "")
+            progress = parsed.get("progress_report") if isinstance(parsed.get("progress_report"), dict) else {}
+            if not report_at and progress.get("generated_at"):
+                report_at = str(progress.get("generated_at") or "")
+    except Exception:
+        parsed = {}
+    with st.expander("Practice Log Analysis restore (Developer Mode)", expanded=False):
+        st.text(f"received analysis_run_id: {ss.get('_suite_practice_analysis_run_id') or _query_param(st, 'suite_practice_analysis_run_id')}")
+        st.text(f"received suite_ami_insight: {_query_param(st, 'suite_ami_insight') or ss.get('_suite_ami_insight')}")
+        st.text(f"loaded insight/report id: {pending.get('insight_id') or ss.get('_ami_practice_log_restore_insight_id')}")
+        st.text(f"loaded report timestamp: {ss.get('_practice_log_visible_report_at') or report_at}")
+        st.text(f"hydrate source: {ss.get('_suite_ai_hydrate_source')}")
+        st.text(f"insight hydrate source: {ss.get('_ami_insight_hydrate_source')}")
+        st.text(f"stale session fallback blocked: {ss.get('_ami_practice_log_stale_fallback_blocked')}")
+        st.text(f"visible run id: {ss.get('_practice_log_visible_run_id')}")
+        st.text(f"restore error: {ss.get('_practice_log_restore_error')}")
+        st.text(f"active pending insight id: {pending.get('insight_id')}")
+        params = []
+        for name in (
+            "suite_resume",
+            "suite_practice_analysis_run_id",
+            "suite_ami_insight",
+            "suite_ai_question_id",
+        ):
+            val = _query_param(st, name)
+            if val:
+                params.append(f"{name}={val[:80]}")
+        st.text(f"URL params: {' · '.join(params) if params else '(none)'}")
+
+
 def _preview_value(val: Any, limit: int = 120) -> str:
     if isinstance(val, dict):
         text = json.dumps(val, ensure_ascii=False, default=str)

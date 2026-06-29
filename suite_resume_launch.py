@@ -75,8 +75,9 @@ def apply_suite_resume_launch(st: Any, app_key: str) -> bool:
     ami_insight = _qp_get(st, "suite_ami_insight")
     ai_qid = resolve_url_suite_ai_question_id(st) if key == "applied_intelligence" else ""
     ai_question = _qp_get(st, "suite_ai_question") if key == "applied_intelligence" else ""
+    practice_run_id = _qp_get(st, "suite_practice_analysis_run_id") if key == "applied_intelligence" else ""
     if not resume and not page and not ami_insight:
-        if key != "applied_intelligence" or not (ai_qid or ai_question):
+        if key != "applied_intelligence" or not (ai_qid or ai_question or practice_run_id):
             return False
 
     if st.session_state.get(flag):
@@ -346,15 +347,23 @@ def _apply_applied_intelligence(st: Any, page: str) -> None:
         ctx_raw = _qp_get(st, "suite_ai_context")
         if ctx_raw:
             st.session_state["_suite_ai_context"] = ctx_raw
-        for qp, key in (
+        for qp, key_name in (
             ("suite_ai_source_app", "_suite_ai_source_app"),
             ("suite_ai_source_page", "_suite_ai_source_page"),
             ("suite_ai_area", "_suite_ai_area"),
             ("suite_ai_question_id", "_suite_ai_question_id"),
+            ("suite_practice_analysis_run_id", "_suite_practice_analysis_run_id"),
+            ("suite_ami_insight", "_suite_ami_insight"),
         ):
             val = _qp_get(st, qp)
             if val:
-                st.session_state[key] = val
+                st.session_state[key_name] = val
+    try:
+        from applied_math_return_insight import apply_ami_insight_from_query
+
+        apply_ami_insight_from_query(st, "applied_intelligence")
+    except Exception:
+        pass
 
 
 def resolve_url_suite_ai_question_id(st: Any) -> str:
@@ -363,12 +372,18 @@ def resolve_url_suite_ai_question_id(st: Any) -> str:
     if qid:
         return qid
     resume = _qp_get(st, "suite_resume")
+    if resume.startswith("ai:practice_log_analysis:"):
+        return resume.split(":", 2)[-1].strip()
     if resume.startswith("ai:question:"):
         return resume.split(":", 2)[-1].strip()
     return ""
 
 
 def _applied_intelligence_url_hydrate_active(st: Any) -> bool:
+    if _qp_get(st, "suite_practice_analysis_run_id"):
+        return True
+    if _qp_get(st, "suite_ami_insight"):
+        return True
     if resolve_url_suite_ai_question_id(st):
         return True
     if _qp_get(st, "suite_ai_question"):
@@ -380,7 +395,7 @@ def _applied_intelligence_url_hydrate_active(st: Any) -> bool:
     if _qp_get(st, "suite_ai_source_app"):
         return True
     resume = _qp_get(st, "suite_resume")
-    return resume.startswith("ai:question:")
+    return resume.startswith("ai:question:") or resume.startswith("ai:practice_log_analysis:")
 
 
 def hydrate_applied_intelligence_from_url(st: Any) -> bool:
@@ -411,4 +426,16 @@ def hydrate_applied_intelligence_from_url(st: Any) -> bool:
             val = _qp_get(st, qp)
             if val:
                 st.session_state[key] = val
+    # Practice Log Continue must re-apply insight every load — resume launch flag may
+    # already be set from a prior visit, leaving stale _ami_pending_insight otherwise.
+    run_id = _qp_get(st, "suite_practice_analysis_run_id")
+    ami_insight = _qp_get(st, "suite_ami_insight")
+    resume = _qp_get(st, "suite_resume")
+    if run_id or ami_insight or resume.startswith("ai:practice_log_analysis:"):
+        try:
+            from applied_math_return_insight import apply_ami_insight_from_query
+
+            apply_ami_insight_from_query(st, "applied_intelligence")
+        except Exception:
+            pass
     return True

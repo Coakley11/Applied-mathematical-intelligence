@@ -25,9 +25,19 @@ AMI_SIDEBAR_DEPLOY_VERSION = "2026-06-08-return-insight-restore-v12"
 _CTX_JSON_SUBTITLE_LIMIT = 8000
 _CONTEXT_ITEM_TYPE = "analytical_question_context"
 PRACTICE_LOG_ANALYSIS_TITLE = "Music Practice Log Analysis"
+PRACTICE_LOG_ANALYSIS_CONTINUE_PRIORITY = 65
 ANALYTICAL_QUESTION_CONTINUE_PRIORITY = 64
 ANALYTICAL_QUESTION_BUTTON_LABEL = "Continue in Applied Mathematics →"
 _SEND_COOLDOWN_SECONDS = 120
+
+
+def clean_analytical_question_display(text: str) -> str:
+    """Strip embedded storage JSON from user-facing question text."""
+    cleaned = str(text or "").strip()
+    if "__ctx_json__:" in cleaned:
+        cleaned = cleaned.split("\n__ctx_json__:", 1)[0].strip()
+    return cleaned
+
 
 _SOURCE_AREA: dict[str, str] = {
     "baseball": "sports",
@@ -481,9 +491,35 @@ def _load_hof_resume_bundle_fallback(
 def load_analytical_question_payload(
     question_id: str,
     *,
+    analysis_run_id: str = "",
     hof_target_slug: str = "",
 ) -> dict[str, Any]:
-    """Load full question blob (context + source_state) by question_id."""
+    """Load full question blob (context + source_state) by run id or question_id."""
+    run_id = str(analysis_run_id or "").strip()
+    if run_id:
+        load_attempts: list[str] = []
+        try:
+            from suite_account import fetch_saved_item, fetch_saved_item_any_app
+
+            for app_name in _CONTEXT_SEARCH_APPS:
+                load_attempts.append(f"saved_item_run:{app_name}")
+                row = fetch_saved_item(app_name, _CONTEXT_ITEM_TYPE, run_id)
+                if row:
+                    payload = _payload_from_saved_row(row, load_source=f"saved_item_run:{app_name}")
+                    payload["blob_load_candidates"] = load_attempts
+                    payload["analysis_run_id"] = run_id
+                    return payload
+            load_attempts.append("saved_item_run:any_app")
+            row = fetch_saved_item_any_app(_CONTEXT_ITEM_TYPE, run_id)
+            if row:
+                payload = _payload_from_saved_row(row, load_source="saved_item_run:any_app")
+                payload["blob_load_candidates"] = load_attempts
+                payload["analysis_run_id"] = run_id
+                return payload
+        except Exception as exc:
+            log.warning("direct saved-item lookup failed for practice analysis run: %s", exc)
+        return {"analysis_run_id": run_id, "blob_load_error": "analysis_run_id_blob_not_found"}
+
     qid = str(question_id or "").strip()
     if not qid:
         return {}
@@ -556,9 +592,16 @@ def load_analytical_question_payload(
     return {"blob_load_candidates": load_attempts, "question_id": qid}
 
 
-def load_analytical_question_source_state(question_id: str) -> dict[str, Any]:
+def load_analytical_question_source_state(
+    question_id: str,
+    *,
+    analysis_run_id: str = "",
+) -> dict[str, Any]:
     """Load page-restore snapshot saved at question send time."""
-    payload = load_analytical_question_payload(question_id)
+    payload = load_analytical_question_payload(
+        question_id,
+        analysis_run_id=analysis_run_id,
+    )
     ss = payload.get("source_state")
     return dict(ss) if isinstance(ss, dict) else {}
 
@@ -726,7 +769,17 @@ def hydrate_applied_intelligence_session(st: Any, *, metrics: dict[str, Any] | N
         return str(raw).strip()
 
     m = dict(metrics or {})
-    question = str(m.get("question") or _qp("suite_ai_question") or "").strip()
+    analysis_run_id = str(
+        m.get("analysis_run_id")
+        or _qp("suite_practice_analysis_run_id")
+        or ""
+    ).strip()
+    ami_insight = str(m.get("ami_insight") or _qp("suite_ami_insight") or "").strip()
+    if analysis_run_id and not ami_insight:
+        ami_insight = f"pa:{analysis_run_id}"
+    question = clean_analytical_question_display(
+        str(m.get("question") or _qp("suite_ai_question") or "").strip()
+    )
     qid = str(m.get("question_id") or m.get("dedupe_fingerprint") or _qp("suite_ai_question_id") or "").strip()
     source_app = str(m.get("source_app") or _qp("suite_ai_source_app") or "").strip()
     source_page = str(m.get("source_page") or _qp("suite_ai_source_page") or "").strip()
@@ -738,8 +791,25 @@ def hydrate_applied_intelligence_session(st: Any, *, metrics: dict[str, Any] | N
     hydrate_source = "none"
     blob_payload: dict[str, Any] = {}
 
+    # Run-id first: latest Practice Analysis report for this Continue click.
+    if analysis_run_id:
+        blob_payload = load_analytical_question_payload("", analysis_run_id=analysis_run_id)
+        blob_ctx = blob_payload.get("context") if isinstance(blob_payload.get("context"), dict) else {}
+        if blob_ctx:
+            ctx = copy.deepcopy(blob_ctx)
+            hydrate_source = "analysis_run_id_blob"
+        blob_ss = blob_payload.get("source_state") if isinstance(blob_payload.get("source_state"), dict) else {}
+        if blob_ss:
+            source_state = copy.deepcopy(blob_ss)
+        if not question:
+            question = str(blob_payload.get("question") or PRACTICE_LOG_ANALYSIS_TITLE).strip()
+        if not qid:
+            qid = str(blob_payload.get("question_id") or "").strip()
+        if not source_app:
+            source_app = str(blob_payload.get("source_app") or "music").strip()
+
     # Blob-first: full context by question_id before metrics/URL (avoids truncated deep links).
-    if qid:
+    if not ctx and qid:
         blob_payload = load_analytical_question_payload(qid, hof_target_slug=_qp("suite_hof_target"))
         blob_ctx = blob_payload.get("context") if isinstance(blob_payload.get("context"), dict) else {}
         if blob_ctx:
@@ -789,9 +859,16 @@ def hydrate_applied_intelligence_session(st: Any, *, metrics: dict[str, Any] | N
 
     if question:
         ss["_suite_ai_question"] = question
-        ss["ps_library_problem"] = question
+        if is_practice_log_analysis_context(ctx):
+            ss["ps_library_problem"] = PRACTICE_LOG_ANALYSIS_TITLE
+        else:
+            ss["ps_library_problem"] = question
     if qid:
         ss["_suite_ai_question_id"] = qid
+    if analysis_run_id:
+        ss["_suite_practice_analysis_run_id"] = analysis_run_id
+    if ami_insight:
+        ss["_suite_ami_insight"] = ami_insight
     if source_app:
         ss["_suite_ai_source_app"] = source_app
     if source_page:
@@ -805,8 +882,12 @@ def hydrate_applied_intelligence_session(st: Any, *, metrics: dict[str, Any] | N
     if source_state:
         ss["_suite_ai_source_state"] = copy.deepcopy(source_state)
     ss["_suite_ai_hydrate_source"] = hydrate_source
+    ss["_suite_ai_hydrate_analysis_run_id"] = analysis_run_id
+    ss["_suite_ai_hydrate_ami_insight"] = ami_insight
     url_params = {
         "suite_ai_question_id": qid or _qp("suite_ai_question_id"),
+        "suite_practice_analysis_run_id": analysis_run_id or _qp("suite_practice_analysis_run_id"),
+        "suite_ami_insight": ami_insight or _qp("suite_ami_insight"),
         "suite_ai_question": question or _qp("suite_ai_question"),
         "suite_ai_source_app": source_app or _qp("suite_ai_source_app"),
         "suite_ai_source_page": source_page or _qp("suite_ai_source_page"),
