@@ -2,6 +2,8 @@
 
 **A decision-analysis and reasoning platform** built with Python and Streamlit. AMI applies mathematics, probability, statistics, forecasting, optimization, simulation, and AI-assisted reasoning to real-world decisions — from bets and games to disease models, optimization problems, and open-ended ideas.
 
+AMI contains 23+ simulation engines and 8 primary analytical workflows spanning sports, finance, medicine, forecasting, optimization, and AI.
+
 **Live demo:** [applied-mathematical-intelligence.streamlit.app](https://applied-mathematical-intelligence-8l8bqrzpp6fghaj7xuig53.streamlit.app)  
 **Deploy branch:** `dev` · **Entry point:** `streamlit_app.py` · **Version:** 3.6.1
 
@@ -13,15 +15,38 @@ Built as part of the **Daniel Cohen AI Suite** (shared workspace auth, cloud per
 
 Most analytics tools answer one narrow question. **AMI is a general-purpose mathematical decision engine** — bring a problem, decision, prediction, strategy, or idea, and the platform helps you think about it quantitatively.
 
+The goal is to help users make better decisions by combining mathematical analysis, simulation, forecasting, optimization, and AI-assisted reasoning within a single workflow.
+
 AMI combines:
 
 - Interactive simulation labs across sports, medicine, AI, weather, and finance
 - Structured problem-solving workflows with solver-backed reasoning
 - Optimization workshops and idea/invention analysis
 - LLM-assisted analytical questions routed to and from **Command Center**
-- Account-owned workspace isolation so each user's page state, questions, and insights stay private
 
 The app is designed as a portfolio piece demonstrating **systems design, mathematical modeling, AI-assisted workflows, and cross-application integration** — not a static textbook or course.
+
+---
+
+## Example Questions AMI Can Analyze
+
+**Sports & Betting**
+- Is this sports bet positive expected value?
+- Which NBA team has the best championship probability?
+
+**Career & Decisions**
+- Should I accept Job Offer A or Job Offer B?
+- What is the optimal strategy under uncertainty?
+
+**Health & Medicine**
+- Which treatment strategy produces the best disease outcome?
+
+**Business & Innovation**
+- Which business idea has the highest expected upside?
+- How sensitive is my prediction to changes in assumptions?
+
+**Investing & Risk**
+- Which investment decision has the best risk/reward profile?
 
 ---
 
@@ -38,18 +63,26 @@ The app is designed as a portfolio piece demonstrating **systems design, mathema
 
 ---
 
+## Development Scope
+
+AMI is part of a seven-application analytics suite developed by a single developer.
+
+The project combines mathematical modeling, software engineering, product design, AI integration, persistence systems, authentication, cloud deployment, and cross-application workflows into a unified platform.
+
+---
+
 ## For Employers & Reviewers
 
 AMI demonstrates end-to-end ownership of a **multi-domain analytics product**:
 
 | Skill area | Evidence in AMI |
 |------------|-----------------|
-| **Systems design** | Shared suite infrastructure (auth, workspace, cloud, deep links) across 7+ sibling apps |
+| **Systems design** | Shared suite infrastructure across 7+ sibling apps |
 | **Analytics architecture** | Simulation registry, practical labs, solver routing, persistence protocol |
 | **Mathematical modeling** | EV engines, disease SIR models, optimization workshops, forecasting labs |
 | **AI-assisted workflows** | Analytical question blobs, insight return to source apps, Command Center handoff |
 | **Product development** | Beginner-friendly lab structure (what/why/run/read/math/try/portfolio) |
-| **Cross-application integration** | Resume launch, scoped cloud keys, AMI context from Music/Baseball/Investment |
+| **Cross-application integration** | Resume launch, structured app context, AMI context from Music/Baseball/Investment |
 
 Inspect `tests/test_workspace_account_ownership.py` and `tests/test_workspace_ami.py` without running the full UI.
 
@@ -142,6 +175,12 @@ content/                                # Labs, domains, case studies, tool guid
 
 ## Why This Project Is Different
 
+Most analytics tools answer one category of question.
+
+AMI was designed as a reusable reasoning framework that can be applied across sports, finance, medicine, forecasting, optimization, and open-ended decision making.
+
+The same platform architecture supports all of these domains through a shared simulation, persistence, and analysis layer.
+
 | Typical math/calc app | AMI |
 |----------------------|-----|
 | Single formula or chart | Multi-domain decision engine |
@@ -162,7 +201,8 @@ AMI shows that you can:
 - Build **persistence that survives Streamlit reruns** with workspace-scoped disk + cloud sync
 - Integrate **LLM-assisted reasoning** without losing structured mathematical context
 - Ship **cross-app intelligence** — questions and insights flow between AMI and Baseball, Music, Investment, NBA, FutureLens
-- Enforce **account-owned workspace isolation** so `coakley11` never loads Daniel's saved state
+- Translate open-ended real-world decisions into structured mathematical workflows
+- Bridge mathematical theory and practical decision support through interactive software
 
 A hiring manager can grasp scope and sophistication in **2–3 minutes** from this README plus the live demo.
 
