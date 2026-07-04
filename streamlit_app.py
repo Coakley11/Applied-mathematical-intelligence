@@ -200,9 +200,11 @@ try:
 except ImportError:
     pass
 
+_current_view_mode = st.session_state.get("view_mode", "Home")
+
 nav_index = (
-    PRIMARY_NAV.index(st.session_state.view_mode)
-    if st.session_state.view_mode in PRIMARY_NAV
+    PRIMARY_NAV.index(_current_view_mode)
+    if _current_view_mode in PRIMARY_NAV
     else 0
 )
 
