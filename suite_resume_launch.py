@@ -64,24 +64,18 @@ def apply_suite_resume_launch(st: Any, app_key: str) -> bool:
         pass
 
     flag = f"_suite_resume_launch_{app_key}"
-    key = str(app_key or "").strip()
-    if key == "math":
-        key = "applied_intelligence"
-    if st.session_state.get(flag) and key != "applied_intelligence":
+    if st.session_state.get(flag):
         return False
 
     resume = _qp_get(st, "suite_resume")
     page = _qp_get(st, "suite_page")
     ami_insight = _qp_get(st, "suite_ami_insight")
-    ai_qid = resolve_url_suite_ai_question_id(st) if key == "applied_intelligence" else ""
-    ai_question = _qp_get(st, "suite_ai_question") if key == "applied_intelligence" else ""
-    practice_run_id = _qp_get(st, "suite_practice_analysis_run_id") if key == "applied_intelligence" else ""
     if not resume and not page and not ami_insight:
-        if key != "applied_intelligence" or not (ai_qid or ai_question or practice_run_id):
-            return False
-
-    if st.session_state.get(flag):
         return False
+
+    key = str(app_key or "").strip()
+    if key == "math":
+        key = "applied_intelligence"
 
     if key == "music":
         _apply_music(st, resume, page)
@@ -210,6 +204,64 @@ def _apply_baseball(st: Any, resume: str, page: str) -> None:
         target_page = "Comparison Tool"
     if not target_page and resume.startswith("trend:"):
         target_page = "Trend Value"
+    if not target_page and resume.startswith("bb:live_draft:"):
+        target_page = "Live Draft Room"
+    if not target_page and resume.startswith("bb:draft_lab:"):
+        target_page = "Draft Simulation Test Mode"
+    draft_room = _qp_get(st, "suite_draft_room")
+    if not draft_room and resume.startswith("bb:live_draft:"):
+        draft_room = resume.split(":", 2)[-1].strip()
+    if not draft_room and resume.startswith("bb:draft_lab:"):
+        tail = resume.split(":", 2)[-1].strip()
+        if tail.startswith("team:"):
+            draft_room = tail.split(":", 1)[-1].strip()
+        elif tail not in {"team", "team_analysis"}:
+            draft_room = tail
+    if draft_room:
+        st.session_state["_suite_resume_draft_room"] = draft_room
+    draft_section = _qp_get(st, "suite_draft_section")
+    if not draft_section and resume.startswith("bb:draft_lab:team:"):
+        draft_section = "team_analysis"
+    if draft_section:
+        st.session_state["_suite_resume_draft_section"] = draft_section
+    proposal_id = _qp_get(st, "suite_trade_proposal")
+    if not proposal_id and resume.startswith("bb:trade_center:"):
+        proposal_id = resume.split(":", 2)[-1].strip()
+    if proposal_id:
+        st.session_state["_suite_resume_trade_proposal"] = proposal_id
+    league_id = _qp_get(st, "suite_league")
+    if not league_id and resume.startswith("bb:library:"):
+        league_id = resume.split(":", 2)[-1].strip()
+    if league_id:
+        st.session_state["_suite_resume_league_id"] = league_id
+    invite_id = _qp_get(st, "suite_invite")
+    if not invite_id and resume.startswith("bb:invite:"):
+        invite_id = resume.split(":", 2)[-1].strip()
+    if invite_id:
+        st.session_state["_suite_resume_invite_id"] = invite_id
+    lineup_week = _qp_get(st, "suite_lineup_week")
+    if not lineup_week and resume.startswith("bb:lineup:"):
+        if ":w" in resume:
+            lineup_week = resume.rsplit(":w", 1)[-1].strip()
+    if lineup_week:
+        st.session_state["_suite_resume_lineup_week"] = lineup_week
+    waiver_tx = _qp_get(st, "suite_waiver_tx")
+    if not waiver_tx and resume.startswith("bb:waiver:"):
+        waiver_tx = resume.split(":", 2)[-1].strip()
+    if waiver_tx:
+        st.session_state["_suite_resume_waiver_tx"] = waiver_tx
+    if not target_page and resume.startswith("bb:trade_center"):
+        target_page = "Trade Center"
+    if not target_page and resume.startswith("bb:waiver"):
+        target_page = "Waiver Wire / Add-Drop Center"
+    if not target_page and resume.startswith("bb:lineup"):
+        target_page = "Fantasy Lineup Assistant"
+    if not target_page and (
+        resume.startswith("bb:library")
+        or resume.startswith("bb:invite:")
+        or resume.startswith("bb:saved_draft:")
+    ):
+        target_page = "Saved Draft Library"
     trend_player = _qp_get(st, "suite_trend_player")
     if not trend_player and resume.startswith("trend:"):
         trend_player = resume.split(":", 1)[-1].strip()
@@ -347,95 +399,12 @@ def _apply_applied_intelligence(st: Any, page: str) -> None:
         ctx_raw = _qp_get(st, "suite_ai_context")
         if ctx_raw:
             st.session_state["_suite_ai_context"] = ctx_raw
-        for qp, key_name in (
-            ("suite_ai_source_app", "_suite_ai_source_app"),
-            ("suite_ai_source_page", "_suite_ai_source_page"),
-            ("suite_ai_area", "_suite_ai_area"),
-            ("suite_ai_question_id", "_suite_ai_question_id"),
-            ("suite_practice_analysis_run_id", "_suite_practice_analysis_run_id"),
-            ("suite_ami_insight", "_suite_ami_insight"),
-        ):
-            val = _qp_get(st, qp)
-            if val:
-                st.session_state[key_name] = val
-    try:
-        from applied_math_return_insight import apply_ami_insight_from_query
-
-        apply_ami_insight_from_query(st, "applied_intelligence")
-    except Exception:
-        pass
-
-
-def resolve_url_suite_ai_question_id(st: Any) -> str:
-    """Resolve question_id from suite_ai_question_id param or ai:question: resume key."""
-    qid = _qp_get(st, "suite_ai_question_id")
-    if qid:
-        return qid
-    resume = _qp_get(st, "suite_resume")
-    if resume.startswith("ai:practice_log_analysis:"):
-        return resume.split(":", 2)[-1].strip()
-    if resume.startswith("ai:question:"):
-        return resume.split(":", 2)[-1].strip()
-    return ""
-
-
-def _applied_intelligence_url_hydrate_active(st: Any) -> bool:
-    if _qp_get(st, "suite_practice_analysis_run_id"):
-        return True
-    if _qp_get(st, "suite_ami_insight"):
-        return True
-    if resolve_url_suite_ai_question_id(st):
-        return True
-    if _qp_get(st, "suite_ai_question"):
-        return True
-    if _qp_get(st, "suite_hof_case") == "1":
-        return True
-    if _qp_get(st, "suite_ai_context"):
-        return True
-    if _qp_get(st, "suite_ai_source_app"):
-        return True
-    resume = _qp_get(st, "suite_resume")
-    return resume.startswith("ai:question:") or resume.startswith("ai:practice_log_analysis:")
-
-
-def hydrate_applied_intelligence_from_url(st: Any) -> bool:
-    """Early URL hydrate for Baseball → AMI deep links (runs before cloud restore)."""
-    if not _applied_intelligence_url_hydrate_active(st):
-        return False
-    qid = resolve_url_suite_ai_question_id(st)
-    if qid:
-        st.session_state["_suite_ai_question_id"] = qid
-    try:
-        from suite_analytical_question import hydrate_applied_intelligence_session
-
-        hydrate_applied_intelligence_session(st)
-    except Exception as exc:
-        st.session_state["_suite_ai_hydrate_error"] = str(exc)
-        q = _qp_get(st, "suite_ai_question")
-        if q:
-            st.session_state["_suite_ai_question"] = q
-            st.session_state["ps_library_problem"] = q
-        ctx_raw = _qp_get(st, "suite_ai_context")
-        if ctx_raw:
-            st.session_state["_suite_ai_context"] = ctx_raw
         for qp, key in (
             ("suite_ai_source_app", "_suite_ai_source_app"),
             ("suite_ai_source_page", "_suite_ai_source_page"),
             ("suite_ai_area", "_suite_ai_area"),
+            ("suite_ai_question_id", "_suite_ai_question_id"),
         ):
             val = _qp_get(st, qp)
             if val:
                 st.session_state[key] = val
-    # Practice Log Continue must re-apply insight every load — resume launch flag may
-    # already be set from a prior visit, leaving stale _ami_pending_insight otherwise.
-    run_id = _qp_get(st, "suite_practice_analysis_run_id")
-    ami_insight = _qp_get(st, "suite_ami_insight")
-    resume = _qp_get(st, "suite_resume")
-    if run_id or ami_insight or resume.startswith("ai:practice_log_analysis:"):
-        try:
-            from applied_math_return_insight import apply_ami_insight_from_query
-
-            apply_ami_insight_from_query(st, "applied_intelligence")
-        except Exception:
-            pass
-    return True

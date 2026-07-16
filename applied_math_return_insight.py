@@ -822,37 +822,6 @@ def hydrate_applied_math_insight_for_session(st: Any, app_key: str) -> bool:
 
     sync_dismissed_insights_from_cloud(st, key)
 
-    run_id = _query_param(st, "suite_practice_analysis_run_id") or str(
-        ss.get("_suite_practice_analysis_run_id") or ""
-    ).strip()
-    if not run_id:
-        url_only = insight_return_query_id(st)
-        if url_only.startswith("pa:"):
-            run_id = url_only[3:].strip()
-            ss["_suite_practice_analysis_run_id"] = run_id
-    if key == "applied_intelligence" and run_id:
-        expected_iid = f"pa:{run_id}"
-        url_iid = insight_return_query_id(st) or expected_iid
-        if url_iid != expected_iid:
-            url_iid = expected_iid
-        _clear_stale_return_insight_cache(st, url_iid)
-        insight = load_applied_math_insight(url_iid, source_app="music")
-        if not insight:
-            insight = load_applied_math_insight(url_iid, source_app="applied_intelligence")
-        if insight:
-            ss[SESSION_PENDING_KEY] = insight
-            ss["_ami_hydrated_insight_id"] = url_iid
-            ss["_ami_insight_hydrate_success"] = True
-            ss["_ami_insight_hydrate_source"] = "practice_analysis_run_id"
-            ss["_ami_practice_log_restore_run_id"] = run_id
-            ss["_ami_practice_log_restore_insight_id"] = url_iid
-            ss["_ami_practice_log_stale_fallback_blocked"] = True
-            return True
-        ss["_ami_insight_hydrate_success"] = False
-        ss["_ami_insight_hydrate_source"] = "practice_analysis_run_id_missing"
-        ss["_ami_practice_log_stale_fallback_blocked"] = True
-        return False
-
     url_iid = insight_return_query_id(st)
     if url_iid and _insight_is_dismissed(st, url_iid):
         url_iid = ""
@@ -872,19 +841,10 @@ def hydrate_applied_math_insight_for_session(st: Any, app_key: str) -> bool:
 
     pending = _pending_insight_valid(st)
     if pending:
-        if ss.get("_ami_practice_log_stale_fallback_blocked"):
-            ss["_ami_insight_hydrate_success"] = False
-            ss["_ami_insight_hydrate_source"] = "session_blocked_for_run_id"
-            return False
         ss["_ami_insight_hydrate_success"] = True
         ss["_ami_insight_hydrate_source"] = "session"
         _sync_investment_insight_tab_keys(st, key, insight=pending)
         return True
-
-    if ss.get("_ami_practice_log_stale_fallback_blocked"):
-        ss["_ami_insight_hydrate_success"] = False
-        ss["_ami_insight_hydrate_source"] = "cloud_blocked_for_run_id"
-        return False
 
     dismissed = _get_dismissed_insight_ids(st)
     latest = load_latest_applied_math_insight_for_app(key, exclude_ids=dismissed)
@@ -1500,63 +1460,6 @@ def store_applied_math_insight(
     return iid
 
 
-def persist_suite_return_insight(
-    st: Any,
-    *,
-    question: str,
-    source_app: str,
-    source_page: str = "",
-    context: dict[str, Any] | None = None,
-    route: Any | None = None,
-    result: Any | None = None,
-) -> dict[str, Any]:
-    """Persist solver output as a return insight after ``render_suite_solver_answer``."""
-    ctx = dict(context or {})
-    qid = ""
-    try:
-        qid = str(st.session_state.get("_suite_ai_question_id") or ctx.get("question_id") or "").strip()
-    except Exception:
-        qid = str(ctx.get("question_id") or "").strip()
-    source_state: dict[str, Any] | None = None
-    if qid:
-        try:
-            from suite_analytical_question import load_analytical_question_source_state
-
-            loaded = load_analytical_question_source_state(qid)
-            if isinstance(loaded, dict) and loaded:
-                source_state = loaded
-        except Exception:
-            pass
-    try:
-        insight = build_return_insight_payload(
-            question=question,
-            source_app=source_app,
-            source_page=source_page,
-            question_id=qid,
-            route=route,
-            result=result,
-            context=ctx,
-            resume_key=str(ctx.get("resume_key") or "").strip(),
-        )
-        store_applied_math_insight(
-            insight,
-            return_context=ctx,
-            source_state=source_state,
-            st=st,
-        )
-        trace = dict(getattr(st, "session_state", {}).get("_ami_insight_store_trace") or {})
-        return trace
-    except Exception as exc:
-        log.warning("persist_suite_return_insight failed: %s", exc)
-        return {"store_exception": str(exc), "store_blob_written_success": False}
-
-
-def prepare_ami_insight_store_context(st: Any) -> dict[str, Any]:
-    """Compatibility hook for import smoke tests and future store prep."""
-    _ = st
-    return {}
-
-
 def load_applied_math_insight(insight_id: str, *, source_app: str = "") -> dict[str, Any]:
     """Load stored insight by id, preferring blobs that include usable source_state."""
     iid = str(insight_id or "").strip()
@@ -1594,21 +1497,8 @@ def load_applied_math_insight(insight_id: str, *, source_app: str = "") -> dict[
     return best
 
 
-def load_applied_math_insight_for_question(
-    question_id: str,
-    *,
-    source_app: str = "",
-    analysis_run_id: str = "",
-) -> dict[str, Any]:
-    """Load the stored insight tied to a question_id or practice analysis run."""
-    run_id = str(analysis_run_id or "").strip()
-    if run_id:
-        loaded = load_applied_math_insight(f"pa:{run_id}", source_app=source_app or "music")
-        if loaded:
-            return loaded
-        loaded = load_applied_math_insight(f"pa:{run_id}", source_app="applied_intelligence")
-        if loaded:
-            return loaded
+def load_applied_math_insight_for_question(question_id: str, *, source_app: str = "") -> dict[str, Any]:
+    """Load the stored insight tied to a question_id (instant / canonical answer)."""
     qid = str(question_id or "").strip()
     if not qid:
         return {}
@@ -1928,19 +1818,8 @@ def apply_ami_insight_from_query(st: Any, app_key: str) -> bool:
         return str(raw).strip()
 
     iid = _qp("suite_ami_insight")
-    run_id = _qp("suite_practice_analysis_run_id")
-    if not run_id and iid.startswith("pa:"):
-        run_id = iid[3:].strip()
-    if not iid and run_id:
-        iid = f"pa:{run_id}"
     if not iid:
         return False
-
-    ss = st.session_state
-    ss["_ami_practice_log_restore_attempted"] = True
-    ss["_ami_practice_log_restore_run_id"] = run_id
-    if run_id:
-        ss["_suite_practice_analysis_run_id"] = run_id
 
     _clear_stale_return_insight_cache(st, iid)
     prev = str(st.session_state.get("_ami_hydrated_insight_id") or "").strip()
@@ -1949,10 +1828,6 @@ def apply_ami_insight_from_query(st: Any, app_key: str) -> bool:
         return False
 
     insight = load_applied_math_insight(iid, source_app=app_key)
-    if not insight and iid.startswith("pa:"):
-        insight = load_applied_math_insight(iid, source_app="music")
-    if not insight and iid.startswith("pa:"):
-        insight = load_applied_math_insight(iid, source_app="applied_intelligence")
     if not insight:
         placeholder = (
             "Applied Investment Insight loaded."
@@ -1990,25 +1865,6 @@ def apply_ami_insight_from_query(st: Any, app_key: str) -> bool:
             st.session_state["_skip_page_restore_for"] = page
 
     st.session_state["_ami_hydrated_insight_id"] = iid
-    ss["_ami_practice_log_restore_insight_id"] = iid
-    ss["_ami_practice_log_restore_loaded"] = bool(insight)
-    ss["_ami_practice_log_stale_fallback_blocked"] = bool(run_id or iid.startswith("pa:"))
-    if key == "applied_intelligence" and (run_id or iid.startswith("pa:")):
-        ctx_raw = str(ss.get("_suite_ai_context") or "")
-        if ctx_raw.startswith("{"):
-            try:
-                ctx = json.loads(ctx_raw)
-                if isinstance(ctx, dict) and ctx.get("progress_report"):
-                    from suite_analytical_question import _stage_practice_log_pending_insight
-
-                    _stage_practice_log_pending_insight(
-                        ss,
-                        ctx,
-                        analysis_run_id=run_id or iid[3:].strip(),
-                        ami_insight=iid,
-                    )
-            except Exception:
-                pass
     if str(app_key or "").strip().lower() == "investment":
         _sync_investment_insight_tab_keys(st, app_key, insight=insight if isinstance(insight, dict) else {})
         try:
@@ -2071,18 +1927,6 @@ def render_applied_math_insight_panel(
     insight: dict[str, Any] | None = None,
 ) -> bool:
     """Display-only insight card on source app pages. Returns True if rendered."""
-    app_key = str(source_app or "").strip().lower()
-    if app_key != "baseball":
-        try:
-            from suite_analytical_question import (
-                render_applied_intelligence_solve_problem_content,
-                should_prefer_hof_full_memo_renderer,
-            )
-
-            if should_prefer_hof_full_memo_renderer(st):
-                return render_applied_intelligence_solve_problem_content(st)
-        except ImportError:
-            pass
     data = insight if isinstance(insight, dict) else st.session_state.get(SESSION_PENDING_KEY)
     if not isinstance(data, dict) or not data.get("conclusion"):
         return False

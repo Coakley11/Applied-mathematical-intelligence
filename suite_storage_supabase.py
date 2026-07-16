@@ -334,6 +334,19 @@ def _cloud_user_id() -> str | None:
     return uid
 
 
+def _apply_user_scope_params(params: dict[str, str]) -> None:
+    """
+    Match activity rows written with cloud user_id or legacy null user_id rows.
+
+    Single-tenant suite: null user_id rows are legacy writes before auth-scoped ids.
+    """
+    uid = _cloud_user_id()
+    if uid:
+        params["or"] = f"(user_id.eq.{uid},user_id.is.null)"
+    else:
+        params["user_id"] = "is.null"
+
+
 def ensure_user_row(
     external_id: str,
     *,
@@ -432,21 +445,37 @@ def append_event(
     *,
     page: str = "",
     metrics: dict[str, Any] | None = None,
-) -> None:
+) -> str:
     app_key = _scoped_storage_app(app)
     if not app_key:
-        return
+        return ""
+    try:
+        from suite_activity_namespace import stamp_activity_metrics
+
+        stamped = stamp_activity_metrics(metrics)
+    except ImportError:
+        stamped = dict(metrics or {})
     body: dict[str, Any] = {
         "app": app_key,
         "event": event,
         "page": page or "",
         "timestamp": _now_iso(),
-        "metrics": metrics or {},
+        "metrics": stamped,
     }
     uid = _cloud_user_id()
     if uid:
         body["user_id"] = uid
-    _request("POST", _TABLE_EVENTS, json_body=body)
+    rows = _request(
+        "POST",
+        _TABLE_EVENTS,
+        json_body=body,
+        prefer="return=representation",
+    )
+    if isinstance(rows, list) and rows and isinstance(rows[0], dict):
+        return str(rows[0].get("id") or "")
+    if isinstance(rows, dict):
+        return str(rows.get("id") or "")
+    return ""
 
 
 def save_current_state(
@@ -556,11 +585,7 @@ def load_events(limit: int = MAX_EVENTS) -> list[dict[str, Any]]:
         "order": "timestamp.desc",
         "limit": str(limit),
     }
-    uid = _cloud_user_id()
-    if uid:
-        params["user_id"] = f"eq.{uid}"
-    else:
-        params["user_id"] = "is.null"
+    _apply_user_scope_params(params)
     if allowed:
         params["app"] = f"in.({','.join(sorted(allowed))})"
     with _egress("load_events"):
@@ -642,13 +667,14 @@ def load_active_resume_items(limit: int = 8, *, app: str | None = None) -> list[
     app_keys = [_scoped_storage_app(app)] if app else _workspace_storage_app_keys()
     if not app_keys:
         return []
+    params: dict[str, str] = {"select": "app,item_key,title,subtitle,action_url,updated_at"}
+    _apply_user_scope_params(params)
     with _egress("load_active_resume_items"):
         rows = _request(
             "GET",
             _TABLE_RESUME,
             params={
-                "select": "app,item_key,title,subtitle,action_url,updated_at",
-                "user_id": f"eq.{_scoped_user_id()}",
+                **params,
                 "valid": "eq.true",
                 "order": "updated_at.desc",
                 "limit": str(limit),
@@ -925,78 +951,6 @@ def load_saved_items(
     return out
 
 
-def load_saved_item_by_key(
-    item_type: str,
-    item_key: str,
-    *,
-    app: str | None = None,
-) -> dict[str, Any] | None:
-    """
-    Fetch one saved item by exact ``item_key`` (not a recent-items scan).
-
-    When ``app`` is omitted, searches all workspace-scoped app keys for the user,
-    then falls back to an app-agnostic query so cross-app blobs still resolve.
-    """
-    from suite_workspace import logical_storage_app_key
-
-    key = str(item_key or "").strip()
-    itype = str(item_type or "").strip()
-    if not key or not itype:
-        return None
-    uid = _scoped_user_id()
-    if not uid:
-        return None
-
-    def _fetch(*, app_filter: str | None) -> dict[str, Any] | None:
-        params: dict[str, str] = {
-            "select": "app,item_type,item_key,title,payload,updated_at",
-            "user_id": f"eq.{uid}",
-            "item_type": f"eq.{itype}",
-            "item_key": f"eq.{key}",
-            "valid": "eq.true",
-            "limit": "1",
-        }
-        if app_filter:
-            params["app"] = f"eq.{app_filter}"
-        rows = _request("GET", _TABLE_SAVED, params=params, prefer="return=representation")
-        if not isinstance(rows, list) or not rows:
-            return None
-        row = rows[0]
-        if not isinstance(row, dict):
-            return None
-        payload = row.get("payload")
-        if not isinstance(payload, dict):
-            payload = {}
-        storage_app = str(row.get("app") or "")
-        return {
-            "app": logical_storage_app_key(storage_app),
-            "storage_app": storage_app,
-            "item_type": str(row.get("item_type") or ""),
-            "item_key": str(row.get("item_key") or ""),
-            "title": str(row.get("title") or ""),
-            "payload": payload,
-            "updated_at": str(row.get("updated_at") or "")[:19],
-        }
-
-    if app:
-        scoped = _scoped_storage_app(app)
-        hit = _fetch(app_filter=scoped)
-        if hit:
-            return hit
-        base = str(app or "").strip()
-        if base and scoped != base:
-            hit = _fetch(app_filter=base)
-            if hit:
-                return hit
-        return None
-
-    for storage_app in sorted(_workspace_storage_app_keys()):
-        hit = _fetch(app_filter=storage_app)
-        if hit:
-            return hit
-    return _fetch(app_filter=None)
-
-
 def save_user_settings(app: str, settings: dict[str, Any]) -> None:
     app_key = str(app or "_global").strip() or "_global"
     _request(
@@ -1043,10 +997,10 @@ def record_activity(
     resume_title: str = "",
     resume_subtitle: str = "",
     action_url: str = "",
-) -> None:
-    append_event(app, event, page=page, metrics=metrics)
+) -> str:
     # Applied-math insight events must not replace metrics.full_session (Test D portfolio).
     if str(event or "").strip() == "applied_math_insight":
+        event_id = append_event(app, event, page=page, metrics=metrics)
         if resume_key and resume_title:
             upsert_resume_item(
                 app,
@@ -1055,7 +1009,7 @@ def record_activity(
                 subtitle=resume_subtitle,
                 action_url=action_url,
             )
-        return
+        return event_id
     if summary or page or metrics:
         save_current_state(app, page=page, summary=summary, metrics=metrics)
     if resume_key and resume_title:
@@ -1066,3 +1020,4 @@ def record_activity(
             subtitle=resume_subtitle,
             action_url=action_url,
         )
+    return append_event(app, event, page=page, metrics=metrics)
